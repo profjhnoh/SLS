@@ -1,0 +1,14 @@
+# Build output
+build/
+
+# Eigen library
+eigen3/
+
+# IDE
+.vscode/
+
+# Executables
+*.exe
+Tbps_DLSLS
+
+*.m

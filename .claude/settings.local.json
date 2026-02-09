@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(c++:*)",
+      "Bash(cmake:*)",
+      "Bash(make:*)",
+      "Bash(find:*)",
+      "Bash(sed:*)",
+      "Bash(rm:*)",
+      "Bash(timeout 60 ./Tbps_DLSLS.exe:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
