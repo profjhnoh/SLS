@@ -12,3 +12,7 @@ eigen3/
 Tbps_DLSLS
 
 *.m
+cfg_FullCal/
+FullCal_UMa_Config1_6GHz/
+doc/R1-165975
+*.py

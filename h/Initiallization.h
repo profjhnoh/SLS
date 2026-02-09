@@ -142,6 +142,9 @@ Real MS_noisefig;
 Real ue_antenna_element_gain;
 Real bs_height;
 
+Real cfg_BS_Tx_Power;
+Real cfg_UT_Noise_Figure;
+
 Real macro_bs_height;
 Real micro_bs_height;
 

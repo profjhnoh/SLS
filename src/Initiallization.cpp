@@ -520,6 +520,18 @@ void Set_Parameter(int scenario)
 	MS_dgH = MS_dgH * Wavelength;
 	MS_dgV = MS_dgV * Wavelength;
 
+	// Override with cfg values if provided
+	if (cfg_BS_Tx_Power > -9998) {
+		Total_BS_Tx_power = cfg_BS_Tx_Power;
+		bs_maxpower = cfg_BS_Tx_Power;
+		cout << "** BS Tx Power overridden by cfg: " << cfg_BS_Tx_Power << " dBm **" << endl;
+	}
+	if (cfg_UT_Noise_Figure > -9998) {
+		MS_noisefig = cfg_UT_Noise_Figure;
+		noise = dBm2linear(thermal_noise + (10. * log10(bandwidth)) + MS_noisefig);
+		cout << "** UT Noise Figure overridden by cfg: " << cfg_UT_Noise_Figure << " dB **" << endl;
+	}
+
 	cout << " " << endl;
 	cout << "carrier_freq              : " << carrier_freq << endl;
 	cout << "inter_site_distance       : " << inter_site_distance << endl;

@@ -149,6 +149,9 @@ extern Real MS_noisefig;
 extern Real ue_antenna_element_gain;
 extern Real Total_BS_Tx_power;
 
+extern Real cfg_BS_Tx_Power;
+extern Real cfg_UT_Noise_Figure;
+
 extern int num_floor;
 extern int num_propagation_condition;
 

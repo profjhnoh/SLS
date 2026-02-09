@@ -126,6 +126,9 @@ void Set_simul_param(int argc, char *argv[])
 
 		g_mTRP_mode              = int(Get_parameter(infile, "g_mTRP_mode", 1));
 
+		cfg_BS_Tx_Power      = Real(Get_parameter(infile, "BS_Tx_Power", -9999));
+		cfg_UT_Noise_Figure  = Real(Get_parameter(infile, "UT_Noise_Figure", -9999));
+
 		num_mTRP = simple_num_BS*3;
 
 		// ====================================================================
