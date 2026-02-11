@@ -39,7 +39,6 @@ void Generate_SSP()
 			}
 		}
 	}
-
 	cout << "DONE" << endl;
 }
 

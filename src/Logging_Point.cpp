@@ -276,6 +276,29 @@ void Get_Geometry(Real geometry_ue, int ue_idx)
 }
 
 /*===================================================================
+FUNCTION: Get_Wideband_SIR() / Wideband_SIR_CDF()
+  3GPP TR 38.901 calibration: Wideband SIR = S/I (without noise)
+===================================================================*/
+void Get_Wideband_SIR(Real sir_ue, int ue_idx)
+{
+	if (drop_idx == 0 && ue_idx == 0)
+	{
+		wideband_sir = new Real[num_drop*num_MS];
+	}
+
+	wideband_sir[ue_idx + drop_idx * num_MS] = sir_ue;
+}
+
+void Wideband_SIR_CDF(void)
+{
+	STASTICS sir_stastics;
+	sir_stastics.setup(wideband_sir, num_drop*num_MS, (char*)"DL_Wideband_SIR");
+	sir_stastics.get_cdf();
+	sir_stastics.print_cdf();
+	cout << " check Wideband SIR CDF " << endl;
+}
+
+/*===================================================================
 FUNCTION: Geometry_CDF()
 
 
@@ -566,33 +589,18 @@ void Collect_LSP_from_ServingCell()
 		int serv_bs = links[ue_idx].self_bs_idx;
 		int prop = channel[serv_bs][ue_idx].Propagation;
 
-		Real ds, asd, asa, zsd, zsa;
-		if (prop == LOS_propagation) {
-			ds  = ms[ue_idx].LSPs[serv_bs](LOS_DS);
-			asd = ms[ue_idx].LSPs[serv_bs](LOS_ASD);
-			asa = ms[ue_idx].LSPs[serv_bs](LOS_ASA);
-			zsd = ms[ue_idx].LSPs[serv_bs](LOS_ZSD);
-			zsa = ms[ue_idx].LSPs[serv_bs](LOS_ZSA);
-		} else if (prop == NLOS_propagation) {
-			ds  = ms[ue_idx].LSPs[serv_bs](NLOS_DS);
-			asd = ms[ue_idx].LSPs[serv_bs](NLOS_ASD);
-			asa = ms[ue_idx].LSPs[serv_bs](NLOS_ASA);
-			zsd = ms[ue_idx].LSPs[serv_bs](NLOS_ZSD);
-			zsa = ms[ue_idx].LSPs[serv_bs](NLOS_ZSA);
-		} else { // OUT2IN
-			ds  = ms[ue_idx].LSPs[serv_bs](OUT2IN_DS);
-			asd = ms[ue_idx].LSPs[serv_bs](OUT2IN_ASD);
-			asa = ms[ue_idx].LSPs[serv_bs](OUT2IN_ASA);
-			zsd = ms[ue_idx].LSPs[serv_bs](OUT2IN_ZSD);
-			zsa = ms[ue_idx].LSPs[serv_bs](OUT2IN_ZSA);
-		}
-
-		// DS: seconds -> nanoseconds
+		// DS: raw LSP (seconds -> nanoseconds)
+		Real ds;
+		if (prop == LOS_propagation)       ds = ms[ue_idx].LSPs[serv_bs](LOS_DS);
+		else if (prop == NLOS_propagation)  ds = ms[ue_idx].LSPs[serv_bs](NLOS_DS);
+		else                                ds = ms[ue_idx].LSPs[serv_bs](OUT2IN_DS);
 		Get_LSP_DS(ds * 1e9, ue_idx);
-		Get_LSP_ASD(asd, ue_idx);
-		Get_LSP_ASA(asa, ue_idx);
-		Get_LSP_ZSD(zsd, ue_idx);
-		Get_LSP_ZSA(zsa, ue_idx);
+
+		// ASD/ASA/ZSD/ZSA: circular angular spread from SSP clusters (degrees)
+		Get_LSP_ASD(channel[serv_bs][ue_idx].circular_angle_spread_AOD, ue_idx);
+		Get_LSP_ASA(channel[serv_bs][ue_idx].circular_angle_spread_AOA, ue_idx);
+		Get_LSP_ZSD(channel[serv_bs][ue_idx].circular_angle_spread_ZOD, ue_idx);
+		Get_LSP_ZSA(channel[serv_bs][ue_idx].circular_angle_spread_ZOA, ue_idx);
 	}
 }
 

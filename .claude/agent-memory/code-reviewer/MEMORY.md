@@ -12,7 +12,9 @@
 - Mixed manual allocation (`new`/`delete`) with Eigen smart types
 - Lazy allocation pattern for CHIR arrays (sector-level, on-demand)
 - CHIR_vec arrays commented out to save memory (~6.3 MB per channel)
-- Ray-level precision arrays conditionally allocated (USE_RAY_LEVEL_DOPPLER flag)
+- **ray_AOA/ray_AOD**: Always allocated in Allocate_memory() as [cluster][ray][2] for precomputed per-ray angles
+- **ray_gain**: Conditionally allocated in Allocate_CHIR_memory() under USE_RAY_LEVEL_DOPPLER flag
+- Deallocation follows reverse order with NULL guards in Delete_memory()
 
 ### Global Variable Design
 - Extensive use of extern globals in common.h (~290 globals)
@@ -46,6 +48,7 @@
 1. **channel.cpp line 3012**: Uninitialized comments with Korean encoding corruption
 2. **Missing bounds checks**: No validation on array indices before access
 3. **Memory leak risk**: CHIR arrays allocated but flags not always checked before deletion
+4. **fmod() for angles** (channel.cpp:4336-4352): C++ fmod() has asymmetric behavior for negative inputs; must ensure `if (x < 0) x += modulus` after fmod() for correct mathematical modulo [0, modulus)
 
 ### Performance
 1. **Complex nested loops**: 7-level nesting in channel coefficient computation (line ~4630)
@@ -62,3 +65,12 @@
 - CMake build system with precision/threading options
 - Calibration mode for channel model validation
 - FFT optimization to save memory
+- Static helper functions for reusable algorithms (e.g., compute_circular_angle_spread)
+
+## 3GPP Compliance Notes
+- **Circular angular spread**: TR 25.996 Annex A requires delta optimization (minimize over angle shifts) to handle wrapping ambiguity
+- **Cluster vs. ray metrics**: LSP angular spreads (ASA/ASD/ZSA/ZSD) should be computed from SSP cluster angles, NOT from raw LSP distributions
+- **Subcluster timing**: Updated in 2026-02-11 review - circular angle spread now computed AFTER Set_SUBCLUSTER() at ray level (not cluster level)
+- **Per-ray angles**: RX = AOA[i] + cluster_ASA * offset_angle[i][j], TX = AOD[i] + cluster_ASD * offset_angle_rand_coupling[i][j]
+- **Subcluster structure**: 2 strongest clusters split into 3 subclusters each (10+6+4 rays), others remain 20 rays
+- **Power splitting**: Each ray in subcluster gets power[i] / NUM_RAY_per_ClusterNUM[i]

@@ -739,23 +739,15 @@ void Check_corr_var()
 
 }
 
-
-
-
 void Transform_TLSP_to_LSP()
 {
 	for (int bs_idx = 0; bs_idx < num_BS + num_mTRP; bs_idx++)
 	{
-		//cout << " Transform_TLSP_to_LSP, bs_idx = "<< bs_idx << endl;
 		for (int ue_idx = 0; ue_idx < num_MS; ue_idx++)
 		{
 			ms[ue_idx].LSPs[bs_idx](0) = channel[bs_idx][ue_idx].sigma_SF * ms[ue_idx].TLSPs[bs_idx](0); // Generate SF[dB]
-			//cout << "Check 2" << endl;
-
-
 			if (channel[bs_idx][ue_idx].Propagation == LOS_propagation)
 			{
-				//cout << "Check 3" << endl;
 				ms[ue_idx].LSPs[bs_idx](LOS_K) = channel[bs_idx][ue_idx].sigma_K_factor * ms[ue_idx].TLSPs[bs_idx](LOS_K) + channel[bs_idx][ue_idx].mu_K_factor;// [dB]
 				ms[ue_idx].LSPs[bs_idx](LOS_DS) = pow(10, channel[bs_idx][ue_idx].sigma_DS * ms[ue_idx].TLSPs[bs_idx](LOS_DS) + channel[bs_idx][ue_idx].mu_DS);
 				//ms[ue_idx].LSPs[bs_idx](LOS_DS) = pow(10, normal(channel[bs_idx][ue_idx].mu_DS, channel[bs_idx][ue_idx].sigma_DS));
@@ -763,11 +755,9 @@ void Transform_TLSP_to_LSP()
 				ms[ue_idx].LSPs[bs_idx](LOS_ASA) = MIN(pow(10., channel[bs_idx][ue_idx].sigma_ASA * ms[ue_idx].TLSPs[bs_idx](LOS_ASA) + channel[bs_idx][ue_idx].mu_ASA), 104.);
 				ms[ue_idx].LSPs[bs_idx](LOS_ZSD) = MIN(pow(10., channel[bs_idx][ue_idx].sigma_ZSD * ms[ue_idx].TLSPs[bs_idx](LOS_ZSD) + channel[bs_idx][ue_idx].mu_ZSD), 52.);
 				ms[ue_idx].LSPs[bs_idx](LOS_ZSA) = MIN(pow(10., channel[bs_idx][ue_idx].sigma_ZSA * ms[ue_idx].TLSPs[bs_idx](LOS_ZSA) + channel[bs_idx][ue_idx].mu_ZSA), 52.);
-				//cout << "Check 4" << endl;
 			}
 			else if (channel[bs_idx][ue_idx].Propagation == NLOS_propagation)
 			{
-				//cout << "Check 5" << endl;
 				ms[ue_idx].LSPs[bs_idx](NLOS_DS) = pow(10., channel[bs_idx][ue_idx].sigma_DS * ms[ue_idx].TLSPs[bs_idx](NLOS_DS) + channel[bs_idx][ue_idx].mu_DS);
 				//ms[ue_idx].LSPs[bs_idx](NLOS_DS)  = pow(10, normal(channel[bs_idx][ue_idx].mu_DS, channel[bs_idx][ue_idx].sigma_DS));
 				ms[ue_idx].LSPs[bs_idx](NLOS_ASD) = MIN(pow(10., channel[bs_idx][ue_idx].sigma_ASD * ms[ue_idx].TLSPs[bs_idx](NLOS_ASD) + channel[bs_idx][ue_idx].mu_ASD), 104.);
@@ -778,14 +768,12 @@ void Transform_TLSP_to_LSP()
 			}
 			else if (channel[bs_idx][ue_idx].Propagation == OUT2IN_propagation)
 			{
-				//cout << "Check 7" << endl;
 				ms[ue_idx].LSPs[bs_idx](OUT2IN_DS) = pow(10., channel[bs_idx][ue_idx].sigma_DS * ms[ue_idx].TLSPs[bs_idx](OUT2IN_DS) + channel[bs_idx][ue_idx].mu_DS);
 				//ms[ue_idx].LSPs[bs_idx](OUT2IN_DS) = pow(10, normal(channel[bs_idx][ue_idx].mu_DS, channel[bs_idx][ue_idx].sigma_DS));
 				ms[ue_idx].LSPs[bs_idx](OUT2IN_ASD) = MIN(pow(10., channel[bs_idx][ue_idx].sigma_ASD * ms[ue_idx].TLSPs[bs_idx](OUT2IN_ASD) + channel[bs_idx][ue_idx].mu_ASD), 104.);
 				ms[ue_idx].LSPs[bs_idx](OUT2IN_ASA) = MIN(pow(10., channel[bs_idx][ue_idx].sigma_ASA * ms[ue_idx].TLSPs[bs_idx](OUT2IN_ASA) + channel[bs_idx][ue_idx].mu_ASA), 104.);
 				ms[ue_idx].LSPs[bs_idx](OUT2IN_ZSD) = MIN(pow(10., channel[bs_idx][ue_idx].sigma_ZSD * ms[ue_idx].TLSPs[bs_idx](OUT2IN_ZSD) + channel[bs_idx][ue_idx].mu_ZSD), 52.);
 				ms[ue_idx].LSPs[bs_idx](OUT2IN_ZSA) = MIN(pow(10., channel[bs_idx][ue_idx].sigma_ZSA * ms[ue_idx].TLSPs[bs_idx](OUT2IN_ZSA) + channel[bs_idx][ue_idx].mu_ZSA), 52.);
-				//cout << "Check 8" << endl;
 			}
 			else
 			{

@@ -33,6 +33,7 @@ public:
 	void Set_W_matrix();
 	void Set_RMS_delay_spread();
 	void Set_circular_angle_spread();
+	void Precompute_ray_angles();
 	void Set_AOAAOD_LOS();
 	void Set_AOAAOD_NLOS();
 	void Set_ZOAZOD_LOS();
@@ -58,6 +59,8 @@ public:
 	Real            RMS_delay_spread                  = 0;
 	Real            circular_angle_spread_AOA         = 0;
 	Real            circular_angle_spread_AOD         = 0;
+	Real            circular_angle_spread_ZOA         = 0;
+	Real            circular_angle_spread_ZOD         = 0;
 	int               self_bs_idx                       = 0;
 	int               self_ms_idx                       = 0;
 	Real            LOS_AOA_GCS                       = 0;
@@ -218,6 +221,7 @@ public:
 	Real ***          ray_AOA                      = NULL;  // [cluster][ray][2] - [0]=azimuth, [1]=zenith
 	Real ***          ray_AOD                      = NULL;  // [cluster][ray][2] - [0]=azimuth, [1]=zenith
 	bool ray_data_allocated                             = false;
+	bool ray_angles_precomputed                         = false;
 
 	bool CHIR_allocated                                 = false;
 	bool sector_allocated[3]                            = {false, false, false};

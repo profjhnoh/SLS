@@ -821,15 +821,8 @@ void LINK::Get_signal_interference()
 				}
 			}			
 		}
-		
-		////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-
-		//////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 	}
-	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	//----------------------------------------------------------------------------------------------------------------------------//
 	else if (TYPE == 12 || TYPE == 13)
 	{
 		int ms_to_bs_wrap_idx = (self_ms_idx / (3*num_MS_persector)); // -> ms_idx�� bs_idx��	
@@ -1632,7 +1625,9 @@ void LINK::UE_Initial_Setting(void)
 	  }
 	  else if (ms[self_ms_idx].Indoor == false)                              ////// outdoor
 	  {
-		  incar_loss = 9. + 5. * randnum.n();
+		  // 3GPP TR 38.901 Table A-2: UMa scenario assumes outdoor UEs are pedestrians
+		  // Pedestrian UEs have no in-car penetration loss
+		  incar_loss = 0.;
 	  }
 	  else
 	  {
@@ -1692,22 +1687,15 @@ void LINK::UE_Initial_Setting(void)
 		  if (Channel_Model_Type == 1)   ///// Model B
 		  {
 			  if (randnum.u() > 0.5) //// 80% Low Loss  O2I
-			  //if (true) //// 100% Low Loss  O2I TEST
 			  {
 				  /////// Low-loss model
-
 				  Otoi_loss = 5 - 10 * log10(0.3 * pow(10, -1 * (glass_L / 10)) + 0.7 * pow(10, -1 * (concrete_L / 10)));
-				  indoor_L = 0.5 * MIN((25 * randnum.u()), (25 * randnum.u()));
-
+				  indoor_L  = 0.5 * MIN((25 * randnum.u()), (25 * randnum.u()));
 				  Otoi_loss = Otoi_loss + indoor_L + 4.4 * randnum.n();
-
-				  //Otoi_loss = 0.;
-
 			  }
 			  else           ////// 20& High Loss O2I
 			  {
-				  /////// High-loss model
-
+				  // High-loss model
 				  Otoi_loss = 5 - 10 * log10(0.7 * pow(10, -1 * (IRRglass_L / 10)) + 0.3 * pow(10, -1 * (concrete_L / 10)));
 				  indoor_L = 0.5 * MIN((25 * randnum.u()), (25 * randnum.u()));
 
@@ -1716,13 +1704,13 @@ void LINK::UE_Initial_Setting(void)
 		  }
 		  else if (Channel_Model_Type == 0 || Channel_Model_Type == 2)  //// Model A 
 		  {
-			  if (carrier_freq > 6000000000.)  //// above 6GHz
+			  if (carrier_freq >= 6000000000.)  //// above 6GHz
 			  {
-				  if (randnum.u() > 0.2) //// 80% Low Loss  O2I
-				  //if (true) //// 100% Low Loss  O2I    TEST
+				  if (randnum.u() > 0.5) 
+				  // 3GPP TR 38.901 50% Low Loss 
+				  // ITU-R M.2412 80% Low Loss  O2I
 				  {
 					  /////// Low-loss model
-
 					  Otoi_loss = 5 - 10 * log10(0.3 * pow(10, -1 * (glass_L / 10)) + 0.7 * pow(10, -1 * (concrete_L / 10)));
 					  indoor_L = 0.5 * MIN((25 * randnum.u()), (25 * randnum.u()));
 					  Otoi_loss = Otoi_loss + indoor_L + 4.4 * randnum.n();
@@ -1741,11 +1729,10 @@ void LINK::UE_Initial_Setting(void)
 					  high_loss_flag = 1;
 				  }
 			  }
-			  else                         //// below 6GHz
+			  else // below 6GHz
 			  {
 				  Otoi_loss = 20.;
 				  indoor_L = 0.5 * ms[self_ms_idx].ms_d_in;
-
 				  Otoi_loss = Otoi_loss + indoor_L;
 			  }
 		  }

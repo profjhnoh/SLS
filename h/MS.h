@@ -149,6 +149,7 @@ class MS
 
 Real ComputeBLER(LL_CURVE_LOOK);
 void Get_Geometry(Real geometry_ue, int ue_idx);
+void Get_Wideband_SIR(Real sir_ue, int ue_idx);
 void Coupling_Loss_Get(Real cp_ue, int ue_idx);
 void Get_RMS_delay_spread(Real RMS_delay_spread_ue, int ue_idx);
 void Get_circular_angle_spread_AOA(Real angle_spread_AOA_ue, int ue_idx);

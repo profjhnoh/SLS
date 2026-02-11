@@ -31,6 +31,8 @@ void CHANNEL::Reset2Default(void)
 	RMS_delay_spread = 0;
 	circular_angle_spread_AOA = 0;
 	circular_angle_spread_AOD = 0;
+	circular_angle_spread_ZOA = 0;
+	circular_angle_spread_ZOD = 0;
 	self_bs_idx = 0;
 	self_ms_idx = 0;
 	LOS_AOA_GCS = 0;
@@ -168,6 +170,22 @@ void CHANNEL::Reset2Default(void)
 		}
 	}
 
+	// ray_AOA/ray_AOD 초기화
+	if (ray_AOA != NULL)
+	{
+		for (int cluster_idx = 0; cluster_idx < MAX_NUM_CLUSTERS; cluster_idx++)
+		{
+			for (int ray_idx = 0; ray_idx < MAX_NUM_RAYS; ray_idx++)
+			{
+				ray_AOA[cluster_idx][ray_idx][0] = 0.0;
+				ray_AOA[cluster_idx][ray_idx][1] = 0.0;
+				ray_AOD[cluster_idx][ray_idx][0] = 0.0;
+				ray_AOD[cluster_idx][ray_idx][1] = 0.0;
+			}
+		}
+	}
+	ray_angles_precomputed = false;
+
 	// CHIR 초기화 (할당된 섹터만)
 	if (CHIR_allocated)
 	{
@@ -272,37 +290,13 @@ void CHANNEL::Set_SmallScaleParameter(int _bs_idx, int _ue_idx)
 
 	Generate_XPR(_ue_idx, _bs_idx, mu_XPR, sigma_XPR);
 
-	/*
-	if (CH_CAL == 0 || CH_CAL == 2)       // For Pre-Calculate
-	{
-	Set_AOAAOD_LOS();
-	Set_ZOAZOD_LOS();
-
-	Set_AOAAOD_NLOS();
-	Set_ZOAZOD_NLOS();
-
-	Set_AOAAOD();
-	Set_ZOAZOD();
-	}
-	else
-	{
-	Set_AOAAOD();
-	Set_ZOAZOD();
-	}
-	*/
-
 	Set_InitialPhase();
 	Set_SUBCLUSTER();
 
+	Precompute_ray_angles();          // per-ray angles (after subcluster split)
+	Set_circular_angle_spread();      // 3GPP TR 25.996 Annex A (per-ray level)
+
 	Sampling_DelaySpread();
-
-
-	// Set_W_matrix();
-
-	/*
-	Set_RMS_delay_spread(); // for calibration
-	Set_circular_angle_spread();
-	*/
 }
 
 void CHANNEL::Allocate_memory()
@@ -357,6 +351,24 @@ void CHANNEL::Allocate_memory()
 		random_phase_hh[i] = new Real[MAX_NUM_RAYS];
 		offset_angle[i] = new Real[MAX_NUM_RAYS];
 		offset_angle_rand_coupling[i] = new Real[MAX_NUM_RAYS];
+	}
+
+	// ray_AOA/ray_AOD: per-ray angles [cluster][ray][2]
+	ray_AOA = new Real **[MAX_NUM_CLUSTERS];
+	ray_AOD = new Real **[MAX_NUM_CLUSTERS];
+	for (int cluster = 0; cluster < MAX_NUM_CLUSTERS; cluster++)
+	{
+		ray_AOA[cluster] = new Real *[MAX_NUM_RAYS];
+		ray_AOD[cluster] = new Real *[MAX_NUM_RAYS];
+		for (int ray = 0; ray < MAX_NUM_RAYS; ray++)
+		{
+			ray_AOA[cluster][ray] = new Real[2];
+			ray_AOD[cluster][ray] = new Real[2];
+			ray_AOA[cluster][ray][0] = 0.0;
+			ray_AOA[cluster][ray][1] = 0.0;
+			ray_AOD[cluster][ray][0] = 0.0;
+			ray_AOD[cluster][ray][1] = 0.0;
+		}
 	}
 
 	// CHIR/CHIR_vec/CHIR_LOS는 Allocate_CHIR_memory()에서 할당됨 (지연 할당)
@@ -451,24 +463,6 @@ void CHANNEL::Allocate_CHIR_memory(int sector_idx)
 			}
 		}
 
-		// Allocate ray angle arrays: [cluster][ray][2] - [0]=azimuth, [1]=zenith
-		ray_AOA = new Real **[MAX_NUM_CLUSTERS];
-		ray_AOD = new Real **[MAX_NUM_CLUSTERS];
-		for (int cluster = 0; cluster < MAX_NUM_CLUSTERS; cluster++)
-		{
-			ray_AOA[cluster] = new Real *[MAX_NUM_RAYS];
-			ray_AOD[cluster] = new Real *[MAX_NUM_RAYS];
-			for (int ray = 0; ray < MAX_NUM_RAYS; ray++)
-			{
-				ray_AOA[cluster][ray] = new Real[2];  // [0]=azimuth, [1]=zenith
-				ray_AOD[cluster][ray] = new Real[2];
-				ray_AOA[cluster][ray][0] = 0.0;
-				ray_AOA[cluster][ray][1] = 0.0;
-				ray_AOD[cluster][ray][0] = 0.0;
-				ray_AOD[cluster][ray][1] = 0.0;
-			}
-		}
-
 		ray_data_allocated = true;
 	}
 }
@@ -502,6 +496,25 @@ void CHANNEL::Delete_memory()
 	delete[] random_phase_hh;
 
 	delete[] offset_angle;
+
+	// ray_AOA/ray_AOD deallocation
+	if (ray_AOA != NULL)
+	{
+		for (int cluster = 0; cluster < MAX_NUM_CLUSTERS; cluster++)
+		{
+			for (int ray = 0; ray < MAX_NUM_RAYS; ray++)
+			{
+				delete[] ray_AOA[cluster][ray];
+				delete[] ray_AOD[cluster][ray];
+			}
+			delete[] ray_AOA[cluster];
+			delete[] ray_AOD[cluster];
+		}
+		delete[] ray_AOA;
+		delete[] ray_AOD;
+		ray_AOA = NULL;
+		ray_AOD = NULL;
+	}
 }
 
 void CHANNEL::Delete_CHIR_memory()
@@ -710,7 +723,7 @@ void CHANNEL::Set_LOS_Prob()
 				}
 				else if (distance > 18.)
 				{
-					LOS_prob = ((18. / distance) + exp(-1 * distance / 63.) * (1 - (18. / distance))) * (1 + C * (5 / 4) * pow((distance / 100), 3) * exp(-1 * distance / 150.));
+					LOS_prob = ((18. / distance) + exp(-1 * distance / 63.) * (1 - (18. / distance))) * (1 + C * (5.0 / 4.0) * pow((distance / 100), 3) * exp(-1 * distance / 150.));
 				}
 
 				Real P = randnum.u();
@@ -760,7 +773,7 @@ void CHANNEL::Set_LOS_Prob()
 				}
 				else if (d_out > 18)
 				{
-					LOS_prob = ((18. / d_out) + exp(-1 * d_out / 63.) * (1 - (18. / d_out))) * (1 + C * (5 / 4) * pow(d_out / 100, 3) * exp(-1 * d_out / 150.));
+					LOS_prob = ((18. / d_out) + exp(-1 * d_out / 63.) * (1 - (18. / d_out))) * (1 + C * (5.0 / 4.0) * pow(d_out / 100, 3) * exp(-1 * d_out / 150.));
 				}
 
 				Real P = randnum.u();
@@ -888,12 +901,12 @@ Real debugging_temp2 = 0;
 
 void CHANNEL::Set_PATHLOSS()
 {
-	////////////////////////////// PathLoss ////////////////////////////////
+	
 	// PathLoss
-	//////////////////////////////////////////////////////// IMT-2020 /////////////////////////////////////////////////////////////////////////////////////////////////
-	////// IMT 2020 EVAL Page 39 ~
+	//------------------------------------------------- IMT-2020 --------------------------------------------------//
+	// IMT 2020 EVAL Page 39 ~
 
-	/////////////////////////////////////////// InH
+	// InH
 	if (TYPE == 11)
 	{
 		Real distance_3d;
@@ -986,7 +999,7 @@ void CHANNEL::Set_PATHLOSS()
 		}
 
 	}
-	////////////////////////////////////////////////////// Dense_Urban
+	// Dense_Urban
 	else if (TYPE == 12)
 	{
 		// Real n = 0;
@@ -1025,7 +1038,7 @@ void CHANNEL::Set_PATHLOSS()
 
 			if (distance > 18.)
 			{
-				g = (5 / 4) * pow((distance / 100), 3) * exp(-1 * distance / 150);
+				g = (5.0 / 4.0) * pow((distance / 100), 3) * exp(-1 * distance / 150);
 			}
 			else
 			{
@@ -1229,7 +1242,7 @@ void CHANNEL::Set_PATHLOSS()
 			}
 
 		}
-		////////////////////////////////////////////////////// UMa
+		//----------------------------------- UMa -------------------------------------------------------//
 		else
 		{
 			Real g;
@@ -1243,7 +1256,7 @@ void CHANNEL::Set_PATHLOSS()
 
 			if (distance > 18.)
 			{
-				g = (5 / 4) * pow((distance / 100), 3) * exp(-1 * distance / 150);
+				g = (5.0 / 4.0) * pow((distance / 100), 3) * exp(-1 * distance / 150);
 			}
 			else
 			{
@@ -1273,7 +1286,7 @@ void CHANNEL::Set_PATHLOSS()
 			Real distance_3d;
 			distance_3d = sqrt(distance * distance + (_bs_height - ms_height_in_channel) * (_bs_height - ms_height_in_channel)); // 3D distance
 
-			/////////////////////////////////////////////// Channel Model A
+			// Channel Model A
 			if (Channel_Model_Type == 0 || Channel_Model_Type == 2)
 			{
 				//////////////////////////////// LOS
@@ -1287,13 +1300,15 @@ void CHANNEL::Set_PATHLOSS()
 					else if (d_BP < distance)
 					{
 						sigma_SF = 4.;
-						pathloss = 40. * log10(distance_3d) + 28 + 20. * log10(carrier_freq / 1000000000.) - 9 * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
+						pathloss = 28 + 40. * log10(distance_3d) 
+						              + 20. * log10(carrier_freq / 1000000000.) 
+									  -  9. * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
 					}
 				}
-				/////////////////////////////// NLOS
+				// NLOS
 				else if (LOS == 0)
 				{
-					if (carrier_freq <= 6000000000.) ///// 0.5GHz <= fc <= 6GHz
+					if (carrier_freq <= 6000000000.) // 0.5GHz <= fc <= 6GHz
 					{
 						if (distance <= d_BP)
 						{
@@ -1334,10 +1349,10 @@ void CHANNEL::Set_PATHLOSS()
 					sigma_SF = 7;
 				}
 			}
-			////////////////////////////////////////////////////////////// Channel Model B
+			// Channel Model B
 			else if (Channel_Model_Type == 1)
 			{
-				/////////////////////////////////////////////////////// LOS
+				// LOS
 				if (LOS == 1)
 				{
 					if (distance <= d_BP)
@@ -2504,8 +2519,8 @@ void CHANNEL::Set_Channel_Parameters()
 						mu_ASA = 1.81;
 						sigma_ASA = 0.2;
 
-						mu_ZSA = 0.95;
-						sigma_ZSA = 0.16;
+						mu_ZSA = 0.96;
+						sigma_ZSA = 0.15;
 						mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.75);
 						sigma_ZSD = 0.4;
 						mu_offset_ZOD = 0;
@@ -2536,8 +2551,12 @@ void CHANNEL::Set_Channel_Parameters()
 						mu_ASA = 1.87;
 						sigma_ASA = 0.11;
 
-						mu_ZSA = 1.26;
-						sigma_ZSA = 0.16;
+						//mu_ZSA = 1.26;
+						//sigma_ZSA = 0.16;
+						mu_ZSA = -0.2856*log10(carrier_freq / 1000000000.) + 1.445;
+						sigma_ZSA = 0.17;
+
+
 						mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.9);
 						sigma_ZSD = 0.49;
 						mu_offset_ZOD = -1 * pow(10, -0.62 * log10(MAX(10, distance)) + 1.93 - 0.07 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5));
@@ -2570,6 +2589,8 @@ void CHANNEL::Set_Channel_Parameters()
 
 						mu_ZSA = 1.01;
 						sigma_ZSA = 0.43;
+						//mu_ZSA = -0.2856*log10(carrier_freq / 1000000000.) + 1.445;
+						//sigma_ZSA = 0.17;						
 
 						if (LOS == 1)
 						{
@@ -2585,18 +2606,6 @@ void CHANNEL::Set_Channel_Parameters()
 
 							///// -10���� -�� ������ ����. -10���� �Ǿ������� mu_offset_ZOD���� -1#IND�� ������ ��찡 �־...
 						}
-
-						/*
-						if (self_ms_idx == 4)
-						{
-							cout << "Propagation = " << Propagation << endl;
-							cout << "LOS = " << LOS << endl;
-							cout << "distance = " << distance << endl;
-							cout << "ms[self_ms_idx].MS_HEIGHT_FINAL = " << ms[self_ms_idx].MS_HEIGHT_FINAL << endl;
-							cout << "mu_offset = " << mu_offset_ZOD << endl;
-							getchar();
-						}
-						*/
 
 						cluster_DS = -1; /// N/A
 						cluster_ASD = 5;
@@ -3009,14 +3018,14 @@ void CHANNEL::Set_DELAY()
 		delay[i] = 0.;
 		delay_LOS[i] = 0.;
 
-	} /// �̸� ����ϴ� Hm�κп��� MAX_NUM_CLUSTER�� numpath�� ���� �ʾƼ� ������ ���� // idx�� num_path���� Ŭ �� delay���� �����Ⱚ�� ���� �̷��� ���� 0���� �ʱ�ȭ�ϵ����ߴ�
+	} 
+
 
 	for (int i = 0; i < num_path; i++)
 	{
 		delay[i] = -r_tau * _DS * log(randnum.u());
 	}
 
-	// cout << "delay = " << delay[0] << endl;
 
 	for (int i = 0; i < num_path; i++)
 	{
@@ -3050,7 +3059,6 @@ void CHANNEL::Set_DELAY()
 	// LOS CASE -> scaled delay for delay spread, not to be used in cluster power generation (M.2412 Small scale generation Step 5)
 	for (int i = 0; i < num_path; i++)
 	{
-
 		delay_LOS[i] = delay[i] / D;
 		delay[i] = delay[i];
 	}
@@ -3080,7 +3088,6 @@ void CHANNEL::Set_POWER()
 		power[i] = 0.;
 		power_LOS[i] = 0.;
 		power_NLOS[i] = 0.;
-
 	} //// initialize
 
 	for (int i = 0; i < num_path; i++)
@@ -3094,8 +3101,6 @@ void CHANNEL::Set_POWER()
 		sum_power_LOS  += power_LOS[i];
 		sum_power_NLOS += power_NLOS[i];
 	}
-
-	// cout << "power = " << power[0] << endl;
 
 	// Numerical stability check: detect near-zero denominator
 	const Real EPSILON = REAL(1e-12);
@@ -3128,21 +3133,6 @@ void CHANNEL::Set_POWER()
 			power[i] = power[i] / sum_power;
 		}
 	}
-
-	///// ================================================================== ////
-	////  LOS, NLOS case for precalculation                                  ////
-	////  ================================================================== ////
-	// for (int i = 0; i < num_path; i++)
-	//{
-	//	power_LOS[i] = power_LOS[i] / (sum_power_LOS * (k_R + 1));
-	// }
-	// power_LOS[0] = power_LOS[0] + k_R / (k_R + 1);
-
-	// for (int i = 0; i < num_path; i++)
-	//{
-	//	power_NLOS[i] = power_NLOS[i] / sum_power_NLOS;
-	// }
-	////  ================================================================== ////
 }
 
 void CHANNEL::Find_Strong2Clusters()
@@ -3343,7 +3333,6 @@ void CHANNEL::Set_AOAAOD(int _bs_idx, int _ue_idx)
 					}
 				}
 				else if (carrier_freq > 6000000000) /// 6GHz < fc <= 100GHz
-				// else if (carrier_freq > 6000000000 && carrier_freq <= 100000000000) /// 6GHz < fc <= 100GHz
 				{
 					if (Propagation == 1) ///// LOS  Gaussian    num_clusters = 12
 					{
@@ -4053,14 +4042,14 @@ void CHANNEL::Set_SUBCLUSTER()
 	// modified by jhnoh (multiplying 1e-9 for making nanosec)
 	if (cluster_DS < 0) ///// cluster_DS == N/A
 	{
-		delay[num_path] = delay[strongest_power_idx]      + 1.28 * 3.91 * 1e-9;
+		delay[num_path]     = delay[strongest_power_idx]  + 1.28 * 3.91 * 1e-9;
 		delay[num_path + 1] = delay[strongest_power_idx]  + 2.56 * 3.91 * 1e-9;
 		delay[num_path + 2] = delay[strongest_power_idx2] + 1.28 * 3.91 * 1e-9;
 		delay[num_path + 3] = delay[strongest_power_idx2] + 2.56 * 3.91 * 1e-9;
 	}
 	else
 	{
-		delay[num_path] = delay[strongest_power_idx]      + 1.28 * cluster_DS * 1e-9;
+		delay[num_path]     = delay[strongest_power_idx]  + 1.28 * cluster_DS * 1e-9;
 		delay[num_path + 1] = delay[strongest_power_idx]  + 2.56 * cluster_DS * 1e-9;
 		delay[num_path + 2] = delay[strongest_power_idx2] + 1.28 * cluster_DS * 1e-9;
 		delay[num_path + 3] = delay[strongest_power_idx2] + 2.56 * cluster_DS * 1e-9;
@@ -4220,6 +4209,37 @@ void CHANNEL::Set_SUBCLUSTER()
 	NUM_PATH_for_channelcoeff = num_path + 4;
 }
 
+void CHANNEL::Precompute_ray_angles()
+{
+	for (int i = 0; i < NUM_PATH_for_channelcoeff; i++)
+	{
+		int num_rays = (int)NUM_RAY_per_ClusterNUM[i];
+		for (int j = 0; j < num_rays; j++)
+		{
+			// RX (Arrival) angles
+			Real rx_azimuth = AOA[i] + cluster_ASA * offset_angle[i][j];
+			Real rx_zenith  = ZOA[i] + cluster_ZSA * offset_angle[i][j];
+
+			// TX (Departure) angles
+			Real tx_azimuth = AOD[i] + cluster_ASD * offset_angle_rand_coupling[i][j];
+			Real tx_zenith  = ZOD[i] + (3.0 / 8.0) * pow(10, mu_ZSD) * offset_angle_rand_coupling[i][j];
+
+			// Transform to proper ranges
+			rx_azimuth = Transform_angle_minus_180_to_plus_180(rx_azimuth);
+			rx_zenith  = Transform_angle_0_to_plus_180(rx_zenith);
+			tx_azimuth = Transform_angle_minus_180_to_plus_180(tx_azimuth);
+			tx_zenith  = Transform_angle_0_to_plus_180(tx_zenith);
+
+			// Store
+			ray_AOA[i][j][0] = rx_azimuth;  // azimuth
+			ray_AOA[i][j][1] = rx_zenith;   // zenith
+			ray_AOD[i][j][0] = tx_azimuth;  // azimuth
+			ray_AOD[i][j][1] = tx_zenith;   // zenith
+		}
+	}
+	ray_angles_precomputed = true;
+}
+
 void CHANNEL::Set_RMS_delay_spread()
 {
 	if (LOS == 0) // NLOS
@@ -4308,122 +4328,88 @@ void CHANNEL::Set_RMS_delay_spread()
 	}
 }
 
+// Static helper: 3GPP TR 25.996 Annex A circular angular spread with Delta optimization
+static Real compute_circular_angle_spread(Real* angles, Real* powers, int N)
+{
+	Real power_sum = 0.0;
+	for (int i = 0; i < N; i++) power_sum += powers[i];
+	if (power_sum <= 0.0) return 0.0;
+
+	Real min_spread = 1e30;
+	for (int delta = 0; delta < 360; delta++)
+	{
+		Real d = (Real)delta;
+		// Eq. A-6: weighted mean of shifted angles
+		Real mu = 0.0;
+		for (int i = 0; i < N; i++)
+		{
+			Real shifted = fmod(angles[i] + d + 180.0, 360.0);
+			if (shifted < 0.0) shifted += 360.0;
+			shifted -= 180.0;
+			mu += shifted * powers[i];
+		}
+		mu /= power_sum;
+
+		// Eq. A-4,5: spread
+		Real variance = 0.0;
+		for (int i = 0; i < N; i++)
+		{
+			Real shifted = fmod(angles[i] + d + 180.0, 360.0);
+			if (shifted < 0.0) shifted += 360.0;
+			shifted -= 180.0;
+			Real dev = fmod(shifted - mu + 180.0, 360.0);
+			if (dev < 0.0) dev += 360.0;
+			dev -= 180.0;
+			variance += dev * dev * powers[i];
+		}
+		Real spread = sqrt(variance / power_sum);
+		if (spread < min_spread) min_spread = spread;
+	}
+	return min_spread;
+}
+
 void CHANNEL::Set_circular_angle_spread()
 {
-	// Real mu_theta = 0;
+	// Count total rays across all clusters/subclusters
+	int total_rays = 0;
+	for (int i = 0; i < NUM_PATH_for_channelcoeff; i++)
+		total_rays += (int)NUM_RAY_per_ClusterNUM[i];
 
-	// 3GPP 25.996 Annex A
-	for (int i = 0; i < num_path; i++)
+	if (total_rays <= 0) return;
+
+	// Flatten per-ray angles and powers into temporary arrays
+	Real* flat_aoa = new Real[total_rays];
+	Real* flat_aod = new Real[total_rays];
+	Real* flat_zoa = new Real[total_rays];
+	Real* flat_zod = new Real[total_rays];
+	Real* flat_pow = new Real[total_rays];
+
+	int idx = 0;
+	for (int i = 0; i < NUM_PATH_for_channelcoeff; i++)
 	{
-		// delay_power[i] = num_ray * delay[i] * power[i];
-		// power_ray_sum[i] = num_ray * power[i];
-
-		AOA_power[i] = AOA[i] * power[i];
-		AOD_power[i] = AOD[i] * power[i];
-		power_ray_sum_circular[i] = power[i];
-	}
-
-	Real mu_theta_AOA;
-	Real mu_theta_AOD;
-	Real AOA_power_sum = 0;
-	Real AOD_power_sum = 0;
-	Real power_sum = 0;
-
-	// AOA AOD�� degree
-
-	for (int i = 0; i < num_path; i++)
-	{
-		AOA_power_sum += AOA_power[i];
-		AOD_power_sum += AOD_power[i];
-		power_sum += power_ray_sum_circular[i];
-	}
-
-	mu_theta_AOA = AOA_power_sum / power_sum; // �̰͵� degree�ε�
-	mu_theta_AOD = AOD_power_sum / power_sum;
-
-	/*
-	cout << "A = " << mu_theta_AOA << endl;
-	cout << "D = " << mu_theta_AOD << endl;
-	cout << pi << endl;
-	getchar();
-	*/
-
-	// Calibration ������ �߰��� ����
-	if (mu_theta_AOA < -180.) // pi��� �Ǿ��ִµ� degree�� ������� => -180 ~ 180���� �����ִ°���
-	{
-		mu_theta_AOA = 2. * 180. + mu_theta_AOA;
-	}
-	else if (mu_theta_AOA > 180.)
-	{
-		mu_theta_AOA = mu_theta_AOA - 2. * 180.;
-	}
-	else
-	{
-		mu_theta_AOA = mu_theta_AOA;
-	}
-
-	if (mu_theta_AOD < -180.)
-	{
-		mu_theta_AOD = 2. * 180. + mu_theta_AOD;
-	}
-	else if (mu_theta_AOD > 180.)
-	{
-		mu_theta_AOD = mu_theta_AOD - 2. * 180.;
-	}
-	else
-	{
-		mu_theta_AOD = mu_theta_AOD;
-	}
-
-	for (int i = 0; i < num_path; i++)
-	{
-		if ((AOA[i] - mu_theta_AOA) < -180.) // pi -> 180
+		int num_rays = (int)NUM_RAY_per_ClusterNUM[i];
+		Real ray_power = power[i] / num_rays;
+		for (int j = 0; j < num_rays; j++)
 		{
-			theta_n_m_mu_AOA[i] = 2. * 180. + (AOA[i] - mu_theta_AOA);
-		}
-		else if (((AOA[i] - mu_theta_AOA) >= -180.) && ((AOA[i] - mu_theta_AOA) <= 180.))
-		{
-			theta_n_m_mu_AOA[i] = (AOA[i] - mu_theta_AOA);
-		}
-		else if ((AOA[i] - mu_theta_AOA) > 180.)
-		{
-			theta_n_m_mu_AOA[i] = 2. * 180. - (AOA[i] - mu_theta_AOA);
+			flat_aoa[idx] = ray_AOA[i][j][0];  // azimuth
+			flat_zoa[idx] = ray_AOA[i][j][1];  // zenith
+			flat_aod[idx] = ray_AOD[i][j][0];  // azimuth
+			flat_zod[idx] = ray_AOD[i][j][1];  // zenith
+			flat_pow[idx] = ray_power;
+			idx++;
 		}
 	}
 
-	for (int i = 0; i < num_path; i++)
-	{
-		if ((AOD[i] - mu_theta_AOD) < -180.)
-		{
-			theta_n_m_mu_AOD[i] = 2. * 180. + (AOD[i] - mu_theta_AOD);
-		}
-		else if (((AOD[i] - mu_theta_AOD) >= -180.) && ((AOD[i] - mu_theta_AOD) <= 180.))
-		{
-			theta_n_m_mu_AOD[i] = (AOD[i] - mu_theta_AOD);
-		}
-		else // if ((AOD[i] - mu_theta_AOD) > 180.)
-		{
-			theta_n_m_mu_AOD[i] = 2. * 180. - (AOD[i] - mu_theta_AOD);
-		}
-	}
+	circular_angle_spread_AOA = compute_circular_angle_spread(flat_aoa, flat_pow, total_rays);
+	circular_angle_spread_AOD = compute_circular_angle_spread(flat_aod, flat_pow, total_rays);
+	circular_angle_spread_ZOA = compute_circular_angle_spread(flat_zoa, flat_pow, total_rays);
+	circular_angle_spread_ZOD = compute_circular_angle_spread(flat_zod, flat_pow, total_rays);
 
-	for (int i = 0; i < num_path; i++)
-	{
-		theta_power_AOA[i] = theta_n_m_mu_AOA[i] * theta_n_m_mu_AOA[i] * power[i];
-		theta_power_AOD[i] = theta_n_m_mu_AOD[i] * theta_n_m_mu_AOD[i] * power[i];
-	}
-
-	Real theta_power_sum_AOA = 0;
-	Real theta_power_sum_AOD = 0;
-
-	for (int i = 0; i < num_path; i++)
-	{
-		theta_power_sum_AOA += theta_power_AOA[i];
-		theta_power_sum_AOD += theta_power_AOD[i];
-	}
-
-	circular_angle_spread_AOA = sqrt(theta_power_sum_AOA / power_sum);
-	circular_angle_spread_AOD = sqrt(theta_power_sum_AOD / power_sum);
+	delete[] flat_aoa;
+	delete[] flat_aod;
+	delete[] flat_zoa;
+	delete[] flat_zod;
+	delete[] flat_pow;
 }
 
 void CHANNEL::Load_precalculate(Real t, int _ms_idx, int _initial_time_offset)
@@ -4968,7 +4954,7 @@ void CHANNEL::Update_per_time_precise(Real t, int adj_sector, int _ms_idx)
 
 	// Use MS moving direction for velocity vector (independent of LOS)
 	Real moving_elevation = ms[_ms_idx].moving_direction * (pi / 180.);        // elevation angle (theta)
-	Real moving_azimuth = ms[_ms_idx].moving_direction_azimuth * (pi / 180.);  // azimuth angle (phi)
+	Real moving_azimuth   = ms[_ms_idx].moving_direction_azimuth * (pi / 180.);  // azimuth angle (phi)
 
 	// Velocity vector in GCS using MS's actual moving direction
 	v_rx.x = ms[_ms_idx].speed * sin(moving_elevation) * cos(moving_azimuth);
@@ -4990,7 +4976,7 @@ void CHANNEL::Update_per_time_precise(Real t, int adj_sector, int _ms_idx)
 				{
 					// Get stored ray angles
 					Real ray_azimuth = ray_AOA[i][j][0] * (pi / 180.);
-					Real ray_zenith = ray_AOA[i][j][1] * (pi / 180.);
+					Real ray_zenith  = ray_AOA[i][j][1] * (pi / 180.);
 
 					// Compute ray direction vector
 					r_rx.x = sin(ray_zenith) * cos(ray_azimuth);

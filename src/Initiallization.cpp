@@ -200,7 +200,7 @@ void Set_Parameter(int scenario)
 			ms_height_out       = 1.5;
 			inter_site_distance = 500;
 
-			min_distance        = 10.; // not decided in M.2412
+			min_distance        = 35.; // not decided in M.2412
 			ANGLE_tilt          = 0.;  // change by calibration config
 
 			num_floor                 = 8;
@@ -233,20 +233,20 @@ void Set_Parameter(int scenario)
 			ue_antenna_element_gain = 5;
 			max_antgain = 8; //[dBi]  BS antenna element gain
 
-			//bandwidth = 40000000.; //[40MHz]  40 * 10 ^ 6
-			//noise = dBm2linear(thermal_noise) * 15000; //[linear]  // 15000 = UE bandwidth (15kHz)
-			//noise = dBm2linear(thermal_noise + MS_noisefig) * bandwidth; //[linear]  
+			// bandwidth = 40000000.; //[40MHz]  40 * 10 ^ 6
+			// noise = dBm2linear(thermal_noise) * 15000; //[linear]  // 15000 = UE bandwidth (15kHz)
+			// noise = dBm2linear(thermal_noise + MS_noisefig) * bandwidth; //[linear]  
 			noise = dBm2linear(thermal_noise + (10. * log10(bandwidth)) + MS_noisefig); //[linear]  
 
-			bs_height           = 25.; //[m]
-			macro_bs_height     = 25.;
+			bs_height           = 25.; //[ m]
+			macro_bs_height     = 25.; 
             micro_bs_height     = 10.;
 
-			ms_height_in        = 0;   /// in LOS prob part
+			ms_height_in        = 0;   // in LOS prob part
 			ms_height_out       = 1.5;
-			inter_site_distance = 500; //200; //32;//57.7;
-			min_distance        = 10.;  // not decided in M.2412
-			ANGLE_tilt          = 0.; // change by calibration config
+			inter_site_distance = 500; // 200; //32;//57.7;
+			min_distance        = 35.; // not decided in M.2412
+			ANGLE_tilt          = 0.;  // change by calibration config
 
 			num_floor = 8;
 			num_propagation_condition = 3;
@@ -284,7 +284,7 @@ void Set_Parameter(int scenario)
 			ms_height_in = 0;   /// in LOS prob part
 			ms_height_out = 1.5;
 			inter_site_distance = 500;
-			min_distance = 10.; // not decided in M.2412
+			min_distance = 35.; // not decided in M.2412
 			ANGLE_tilt = 0.; // change by calibration config
 
 			num_floor = 8;
@@ -1507,8 +1507,12 @@ void Get_CouplingLoss()
 		{
 			Real linear_signal       = dBm2linear(links[ue_idx].str_signal); //pow(10., (links[ue_idx].str_signal) / 10.);
 			Real linear_interference = dBm2linear(links[ue_idx].interference); //pow(10., links[ue_idx].interference / 10.);
+
+			Real sir = linear2dB(linear_signal / linear_interference);  // Wideband SIR (without noise)
+			Get_Wideband_SIR(sir, ue_idx);
+
 			linear_interference        = (linear_interference + noise);
-			Real geometry            = linear2dB(linear_signal / linear_interference);
+			Real geometry            = linear2dB(linear_signal / linear_interference);  // Geometry (SINR with noise)
 
 			Get_Geometry(geometry, ue_idx);
 		}
@@ -1564,6 +1568,8 @@ void Get_CouplingLoss()
 						}
 					}
 				}
+				Real sir = linear2dB(linear_signal / new_interference);  // Wideband SIR (without noise)
+				Get_Wideband_SIR(sir, ue_idx);
 				Real geometry = linear2dB(linear_signal*new_bspower / (new_interference*new_bspower + noise));
 				Get_Geometry(geometry, ue_idx);
 			}
@@ -1571,6 +1577,9 @@ void Get_CouplingLoss()
 			{
 				Real linear_signal = pow(10., (links[ue_idx].str_signal) / 10.);
 				Real linear_interference = pow(10., links[ue_idx].interference / 10.);
+
+				Real sir = linear2dB(linear_signal / linear_interference);  // Wideband SIR (without noise)
+				Get_Wideband_SIR(sir, ue_idx);
 
 				linear_interference = (linear_interference + noise);
 				Real geometry = linear2dB(linear_signal / linear_interference);
@@ -1692,6 +1701,8 @@ void Get_CouplingLoss()
 			links[ue_idx].interference = new_interference_2;
 			//linear2dBm(new_interference * new_bspower);
 
+			Real sir = linear2dB(linear_signal / new_interference);  // Wideband SIR (without noise)
+			Get_Wideband_SIR(sir, ue_idx);
 			Real geometry = linear2dB(linear_signal*new_bspower / (new_interference*new_bspower + noise));
 			Get_Geometry(geometry, ue_idx);
 		}

@@ -51,6 +51,7 @@ void LSP_ASA_CDF();
 void LSP_ZSD_CDF();
 void LSP_ZSA_CDF();
 void Geometry_CDF(void);
+void Wideband_SIR_CDF(void);
 void Delete_memory(void);
 //void Delete_CHIR_memory(void);
 void loading(void);
@@ -186,6 +187,7 @@ int main(int argc, char *argv[])
 		}
 	}
 	Geometry_CDF();
+	Wideband_SIR_CDF();
 	Coupling_Loss_CDF();
 	LSP_DS_CDF();
 	LSP_ASD_CDF();

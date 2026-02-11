@@ -40,6 +40,7 @@ Real     * avr_sinr;
 int        * num_of_added;
 
 Real     * geometry;
+Real     * wideband_sir;
 Real     * coupling_loss;
 Real     * RMS_delay_spread;
 Real     * circular_angle_spread_AOA;
