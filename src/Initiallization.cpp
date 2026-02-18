@@ -1433,7 +1433,13 @@ void Type1_Codebook_Gen()
 				{
 					int n = i_2;
 					ComplexReal phase = exp(j*pi*(Real)n / (Real)2);
-					codebook_W[l][m][n] << v_lm , phase * v_lm;
+					if (BS_P == 2) {
+						// Dual-pol: W = [v_lm; phase * v_lm]
+						codebook_W[l][m][n] << v_lm , phase * v_lm;
+					} else {
+						// Single-pol (BS_P=1): W = v_lm (no co-phasing)
+						codebook_W[l][m][n] = v_lm;
+					}
 					codebook_W[l][m][n] = (1 / sqrt(NUM_TX_Port)) * codebook_W[l][m][n];
 				}
 			}
@@ -1715,7 +1721,7 @@ void Get_CouplingLoss()
 
 void Print_Calib_Debug_Info( void )
 {
-	if (drop_idx == 0) 
+	if (drop_idx == 0)
 	{
 		char calib_debug_file_name[100];
 		sprintf(calib_debug_file_name,"./%s/Calib_Debug_Info_drop.csv",folder_name);
@@ -1735,29 +1741,80 @@ void Print_Calib_Debug_Info( void )
 		<< "geometry"<< ","
 		<< "indoor"<< ","
 		<< "los"<< ","
-		<< "high_loss_flag" << endl;	
+		<< "high_loss_flag" << ","
+		<< "ASD" << ","
+		<< "ASA" << ","
+		<< "ZSD" << ","
+		<< "ZSA" << ","
+		<< "SV1_max_dB" << ","
+		<< "SV1_min_dB" << ","
+		<< "SV1_avg_dB" << ","
+		<< "SV2_max_dB" << ","
+		<< "SV2_min_dB" << ","
+		<< "SV2_avg_dB" << endl;
 	}
 
-	for(int ue_idx = 0; ue_idx < num_MS; ue_idx++) 
+	for(int ue_idx = 0; ue_idx < num_MS; ue_idx++)
 	{
-		Calibration_Debug_info 
+		Calibration_Debug_info
 		<< drop_idx << ","
 		<< ue_idx << ","
-		<< links[ue_idx].self_bs_idx << "," 
-		<< ms[ue_idx].loc.x << "," 
-		<< ms[ue_idx].loc.y << "," 
+		<< links[ue_idx].self_bs_idx << ","
+		<< ms[ue_idx].loc.x << ","
+		<< ms[ue_idx].loc.y << ","
 		<< ms[ue_idx].MS_HEIGHT_FINAL << ","
 		<< links[ue_idx].link_distance<<","
 		<< links[ue_idx].link_pathloss << ","
-		<< links[ue_idx].link_RSRP << ","	
+		<< links[ue_idx].link_RSRP << ","
 		<< ms[ue_idx].coupling_loss << ","
 		<< ms[ue_idx].geometry << ","
 		<< links[ue_idx].link_indoor << ","
 		<< links[ue_idx].link_los << ","
-		<< links[ue_idx].high_loss_flag << endl;
+		<< links[ue_idx].high_loss_flag << ","
+		<< channel[links[ue_idx].self_bs_idx][ue_idx].ASD << ","
+		<< channel[links[ue_idx].self_bs_idx][ue_idx].ASA << ","
+		<< channel[links[ue_idx].self_bs_idx][ue_idx].ZSD << ","
+		<< channel[links[ue_idx].self_bs_idx][ue_idx].ZSA << ",";
+
+		// Per-UE singular value statistics (max, min, avg across RBs)
+		if (ms[ue_idx].H_m != NULL && num_rb > 0) {
+			Real sv1_max = -1e30, sv1_min = 1e30, sv1_sum = 0;
+			Real sv2_max = -1e30, sv2_min = 1e30, sv2_sum = 0;
+			int sv_count = 0;
+
+			for (int rb = 0; rb < num_rb; rb++) {
+				MatrixXcReal H = ms[ue_idx].H_m[0][rb];
+				Eigen::JacobiSVD<MatrixXcReal> svd(H, Eigen::ComputeThinU | Eigen::ComputeThinV);
+				auto sv = svd.singularValues();
+
+				if (sv.size() >= 1 && sv(0) > 1e-30) {
+					Real sv1_dB = 20.0 * log10(sv(0));
+					if (sv1_dB > sv1_max) sv1_max = sv1_dB;
+					if (sv1_dB < sv1_min) sv1_min = sv1_dB;
+					sv1_sum += sv1_dB;
+				}
+				if (sv.size() >= 2 && sv(1) > 1e-30) {
+					Real sv2_dB = 20.0 * log10(sv(1));
+					if (sv2_dB > sv2_max) sv2_max = sv2_dB;
+					if (sv2_dB < sv2_min) sv2_min = sv2_dB;
+					sv2_sum += sv2_dB;
+				}
+				sv_count++;
+			}
+
+			if (sv_count > 0) {
+				Calibration_Debug_info
+				<< sv1_max << "," << sv1_min << "," << sv1_sum / sv_count << ","
+				<< sv2_max << "," << sv2_min << "," << sv2_sum / sv_count << endl;
+			} else {
+				Calibration_Debug_info << ",,,,,," << endl;
+			}
+		} else {
+			Calibration_Debug_info << ",,,,,," << endl;
+		}
 	}
 
-	if (drop_idx == num_drop - 1) 
+	if (drop_idx == num_drop - 1)
 	{
 		Calibration_Debug_info.close();
 	}
@@ -1963,7 +2020,7 @@ void Set_antenna_location_vector()
 								bs[bs_idx].d_tx[sec_idx][m][n][p][mg][ng].y = n * BS_dH + ng * BS_dgH;
 								bs[bs_idx].d_tx[sec_idx][m][n][p][mg][ng].z = m * BS_dV + mg * BS_dgV;
 
-
+								
 								bs[bs_idx].d_tx[sec_idx][m][n][p][mg][ng] = Transpose_LCS_to_GCS_location(bs[bs_idx].ant[sec_idx][0], bs[bs_idx].ant[sec_idx][1], bs[bs_idx].ant[sec_idx][2], bs[bs_idx].d_tx[sec_idx][m][n][p][mg][ng]);
 								//cout << bs[bs_idx].d_tx[sec_idx][m][n][p][mg][ng].x << " " << bs[bs_idx].d_tx[sec_idx][m][n][p][mg][ng].y << " " << bs[bs_idx].d_tx[sec_idx][m][n][p][mg][ng].z << endl;
 							}

@@ -8,15 +8,16 @@
 ## 목차
 
 1. [코드-Spec 매핑](#1-코드-spec-매핑)
-2. [채널 생성 절차 (Section 7.5)](#2-채널-생성-절차-section-75)
-3. [Path Loss 모델 (Section 7.4.1)](#3-path-loss-모델-section-741)
+2. [채널 생성 절차 (Section 7.5)](#2-채널-생성-절차-section-75) — Step 1~12 상세
+3. [Path Loss 모델 (Section 7.4.1)](#3-path-loss-모델-section-741) — UMa, UMi, InH, RMa, InF, SMa
 4. [LOS 확률 모델 (Section 7.4.2)](#4-los-확률-모델-section-742)
 5. [O2I Penetration Loss (Section 7.4.3)](#5-o2i-penetration-loss-section-743)
 6. [안테나 모델링 (Section 7.3)](#6-안테나-모델링-section-73)
-7. [LSP 파라미터 테이블 (Table 7.5-6)](#7-lsp-파라미터-테이블-table-756)
+7. [LSP 파라미터 테이블 (Table 7.5-6)](#7-lsp-파라미터-테이블-table-756) — Part 1~4: UMi/UMa/RMa/InH/InF/SMa + Cross-Correlations + Correlation Distance
 8. [ZSD/ZOD 오프셋 (Table 7.5-7~12)](#8-zsdzod-오프셋-table-757~12)
-9. [Scaling Factor 테이블](#9-scaling-factor-테이블)
+9. [Scaling Factor 테이블](#9-scaling-factor-테이블) — Table 7.5-2,3,4,5
 10. [Calibration 파라미터 (Section 7.8)](#10-calibration-파라미터-section-78)
+11. [추가 모델링 컴포넌트 (Section 7.6)](#11-추가-모델링-컴포넌트-section-76) — 산소 흡수, 공간 일관성, Blockage
 
 ---
 
@@ -43,177 +44,420 @@
 
 ## 2. 채널 생성 절차 (Section 7.5)
 
+> 채널 계수 생성은 Figure 7.5-1의 절차를 따르며, 하향링크(downlink)를 가정한다. 상향링크의 경우 arrival/departure 파라미터를 교환한다.
+> GCS에서 zenith각 θ=0°는 천정, θ=90°는 수평선이다. 구면 단위벡터 θ̂, φ̂는 전파 방향 기준으로 정의된다.
+
+### Table 7.5-1: GCS 표기법 (Notations)
+
+| Parameter | Notation |
+|---|---|
+| LOS AOD | ϕ_LOS,AOD |
+| LOS AOA | ϕ_LOS,AOA |
+| LOS ZOD | θ_LOS,ZOD |
+| LOS ZOA | θ_LOS,ZOA |
+| Cluster n AOA | ϕ_n,AOA |
+| Cluster n AOD | ϕ_n,AOD |
+| Cluster n, ray m AOA | ϕ_n,m,AOA |
+| Cluster n, ray m AOD | ϕ_n,m,AOD |
+| Cluster n ZOA | θ_n,ZOA |
+| Cluster n ZOD | θ_n,ZOD |
+| Cluster n, ray m ZOA | θ_n,m,ZOA |
+| Cluster n, ray m ZOD | θ_n,m,ZOD |
+| Rx antenna element u, θ field pattern | F_rx,u,θ |
+| Rx antenna element u, φ field pattern | F_rx,u,φ |
+| Tx antenna element s, θ field pattern | F_tx,s,θ |
+| Tx antenna element s, φ field pattern | F_tx,s,φ |
+
+---
+
 ### Step 1: 환경/레이아웃/안테나 설정
 → `Initiallization.cpp`: `InitializeSystem()`, `Initialdrop()`
 
-- 시나리오 선택 (UMa, UMi, InH, RMa, InF)
-- BS/UT 3D 위치 결정, LOS 각도 계산
-- 안테나 field pattern `F_rx`, `F_tx` 설정 (GCS 기준)
-- BS orientation: Ω_BS,α (bearing), Ω_BS,β (downtilt), Ω_BS,γ (slant)
-- UT orientation: Ω_UT,α (bearing), Ω_UT,β (downtilt), Ω_UT,γ (slant)
+**(a)** 시나리오 선택: UMa, UMi-Street Canyon, RMa, InH-Office, InF 중 하나를 선택한다. GCS(Global Coordinate System)를 정의하고 zenith각 θ, azimuth각 φ, 구면 단위벡터 θ̂, φ̂를 정의한다.
+- **Note:** RMa는 7 GHz까지, 나머지는 100 GHz까지 적용 가능.
 
-### Step 2: 전파 조건 할당
+**(b)** BS 및 UT 개수를 설정한다.
+
+**(c)** BS와 UT의 3D 위치를 결정하고, GCS에서 각 BS-UT 쌍의 LOS 방향을 계산한다:
+- LOS AOD (ϕ_LOS,AOD), LOS ZOD (θ_LOS,ZOD)
+- LOS AOA (ϕ_LOS,AOA), LOS ZOA (θ_LOS,ZOA)
+
+**(d)** BS 및 UT 안테나 field pattern F_rx, F_tx를 GCS 기준으로 설정한다. Array geometry를 정의한다.
+
+**(e)** BS 및 UT orientation을 GCS에 대해 설정한다:
+- BS: Ω_BS,α (bearing), Ω_BS,β (downtilt), Ω_BS,γ (slant)
+- UT: Ω_UT,α (bearing), Ω_UT,β (downtilt), Ω_UT,γ (slant)
+
+**(f)** UT의 속도와 이동 방향을 GCS에서 설정한다.
+
+**(g)** 시스템 중심 주파수 fc와 대역폭 B를 설정한다.
+
+> **Note:** Wrapping 사용 시, BS/site의 각 wrapping copy는 별도의 BS/site로 취급하여 채널을 생성한다.
+
+---
+
+### Step 2: 전파 조건 할당 (Large Scale Parameters 시작)
 → `channel.cpp`: LOS/NLOS 판정
 
-- Table 7.4.2-1에 따라 LOS/NLOS 결정 (BS-UT 링크 간 uncorrelated)
-- Indoor/outdoor 상태 할당 (한 UT의 모든 링크 동일)
+Table 7.4.2-1에 따라 각 BS-UT 링크에 전파 조건(LOS/NLOS)을 할당한다.
+- **서로 다른 BS-UT 링크의 전파 조건은 uncorrelated이다.**
+- Indoor/outdoor 상태를 각 UT에 할당한다. **한 UT의 모든 링크는 동일한 indoor/outdoor 상태를 가진다.**
+
+---
 
 ### Step 3: Path Loss 계산
 → `Link.cpp`: `Get_CouplingLoss()`
 
-- Table 7.4.1-1 수식으로 각 BS-UT 링크의 path loss 계산
+Table 7.4.1-1의 수식으로 모델링 대상인 각 BS-UT 링크의 path loss를 계산한다.
 
-### Step 4: Large Scale Parameter 생성
+> **Note:** `PL = PL_b + PL_tw + PL_in + N(0, σ_P²)` (O2I의 경우), PL_b에서 d_3D는 d_3D-out으로 대체.
+
+---
+
+### Step 4: Large Scale Parameter (LSP) 생성
 → `generateLSP.cpp`: `Generate_LSP()`
 
-- DS, ASD, ASA, ZSD, ZSA, K, SF 생성
-- Cross-correlation: Table 7.5-6의 상관 행렬 → Cholesky 분해
-- LSP 벡터 순서: s_M = [s_SF, s_K, s_DS, s_ASD, s_ASA, s_ZSD, s_ZSA]^T
-- Co-sited sector → 동일 UT에 대해 동일 LSP
-- 제한: ASA, ASD ≤ 104°, ZSA, ZSD ≤ 52°
+Table 7.5-6의 파라미터를 사용하여 다음 7개 LSP를 생성한다:
+- **DS** (Delay Spread), **ASD** (AOD Spread), **ASA** (AOA Spread)
+- **ZSD** (ZOD Spread), **ZSA** (ZOA Spread)
+- **K** (Ricean K-factor, LOS에서만), **SF** (Shadow Fading)
 
-### Step 5: 클러스터 Delay 생성
+**생성 절차:**
+1. Table 7.5-6의 cross-correlation 행렬을 **Cholesky 분해**하여 square root matrix를 구한다.
+2. 7개 독립 가우시안 랜덤 벡터에 Cholesky matrix를 곱하여 상관된 LSP 벡터를 생성한다.
+3. LSP 벡터 순서: **s_M = [s_SF, s_K, s_DS, s_ASD, s_ASA, s_ZSD, s_ZSA]^T**
+4. 각 LSP에 대해 log-normal 변환: `X = 10^(μ_lgX + σ_lgX · s_X)` (단, K와 SF는 dB 도메인에서 직접)
+
+**규칙:**
+- 서로 다른 BS-UT 링크의 LSP는 uncorrelated
+- **Co-sited sector → 동일 UT에 대해 동일 LSP** (같은 사이트의 다른 섹터)
+- 서로 다른 층(floor)의 UT 간 LSP는 uncorrelated
+
+**제한:**
+```
+ASA = min(ASA, 104°)
+ASD = min(ASD, 104°)
+ZSA = min(ZSA, 52°)
+ZSD = min(ZSD, 52°)
+```
+
+**주파수 치환 규칙:**
+- UMa: fc < 6 GHz이면 fc = 6으로 치환하여 LSP 결정
+- UMi: fc < 2 GHz이면 fc = 2로 치환하여 LSP 결정
+- InH: fc < 6 GHz이면 fc = 6으로 치환하여 LSP 결정
+
+### Step 5: 클러스터 Delay 생성 (Small Scale Parameters 시작)
 → `generateSSP.cpp`
 
-지수 분포에서 delay 추출:
+Table 7.5-6의 delay distribution에 따라 delay를 추출한다. 지수 분포(exponential delay distribution)의 경우:
 ```
-τ_n = -r_τ · DS · ln(X_n),  X_n ~ Uniform(0,1)     ... (7.5-1)
-τ'_n = sort(τ_n - min(τ))                            ... (7.5-2)
+τ'_n = -r_τ · DS · ln(X_n),  X_n ~ Uniform(0,1), n = 1,...,N     ... (7.5-1)
+```
+여기서 r_τ는 delay distribution proportionality factor (Table 7.5-6), N은 클러스터 수이다.
+
+최소 delay를 빼고 오름차순 정렬하여 정규화:
+```
+τ_n = sort(τ'_n - min(τ'))                                        ... (7.5-2)
 ```
 
-LOS인 경우 추가 스케일링:
+**LOS인 경우:** LOS peak 추가에 의한 delay spread 변화를 보상하기 위한 추가 스케일링이 필요하다.
+K-factor 의존 스케일링 상수:
 ```
-c_τ = sqrt(K_R / (K_R + 1))                          ... (7.5-3)  (하지만 Eq. 7.5-1의 1/λ_c에 주의)
-τ''_n = c_τ · τ'_n  (클러스터 power 생성에는 사용 안 함!)   ... (7.5-4)
+c_τ = 0.7705 - 0.0433·K + 0.0002·K² + 0.000017·K³               ... (7.5-3)
 ```
+여기서 K [dB]는 Step 4에서 생성한 Ricean K-factor이다.
+
+스케일된 delay:
+```
+τ_n^LOS = τ_n / c_τ                                                ... (7.5-4)
+```
+> **중요:** 스케일된 delay τ_n^LOS는 **클러스터 power 생성(Step 6)에는 사용하지 않는다!**
+> Step 6에서는 스케일 전의 τ_n (Eq. 7.5-2)를 사용한다.
+
+---
 
 ### Step 6: 클러스터 Power 생성
 
+단일 기울기 지수형 PDP(Power Delay Profile)를 가정하여 클러스터 파워를 계산한다.
+지수 분포 delay distribution의 경우:
 ```
-P_n = exp(-(τ'_n / (r_τ · c_DS)) - ζ_n)              ... (7.5-5)  (ζ_n: per-cluster shadowing [dB])
-P_n = P_n / Σ P_i                                    ... (7.5-6)  (정규화)
+P'_n = exp(-τ_n · (r_τ - 1)/(r_τ · DS)) · 10^(-ζ_n/10)          ... (7.5-5)
+```
+여기서 ζ_n은 per-cluster shadowing [dB] (Table 7.5-6의 ζ 값, 표준 분포 N(0, ζ²)).
+
+정규화하여 전체 클러스터 파워 합 = 1:
+```
+P_n = P'_n / Σ_i P'_i                                             ... (7.5-6)
 ```
 
-LOS인 경우:
+**LOS인 경우:** 첫 번째 클러스터에 specular component 추가:
 ```
-P_LOS = K_R / (K_R + 1)                              ... (7.5-7)
-P_n = (1 - P_LOS) · P_n + P_LOS · δ(n-1)            ... (7.5-8)
+P_1,LOS = K_R / (K_R + 1)                                         ... (7.5-7)
+P_n = (1/(K_R + 1)) · P_n + δ(n-1) · K_R/(K_R + 1)               ... (7.5-8)
+```
+여기서 δ(·)는 Dirac delta 함수, K_R은 Step 4의 K-factor (linear scale).
+**이 power 값은 Eq. (7.5-9)와 (7.5-14)에서만 사용하고, Eq. (7.5-22)에서는 사용하지 않는다.**
+
+각 클러스터 내 ray의 power: **P_n / M** (M = rays per cluster, Table 7.5-6).
+
+**클러스터 제거:** Eq. (7.5-6) 기준 최대 클러스터 파워 대비 **-25 dB** 미만인 클러스터를 제거한다. 제거 후 scaling factor는 변경하지 않는다.
+
+---
+
+### Step 7: 도래각/출발각 생성 (Azimuth + Elevation)
+
+#### 7-1. AOA 생성 (Wrapped Gaussian)
+
+모든 클러스터의 azimuth PAS(Power Angular Spectrum)을 wrapped Gaussian으로 모델링한다.
+Inverse Gaussian 함수로 AOA를 결정:
+```
+φ'_n,AOA = (2/C_φ) · (ASA/1.4) · sqrt(-ln(P_n/max(P_n)))        ... (7.5-9)
 ```
 
-- 각 ray의 power = P_n / M (M = rays per cluster)
-- 최대 대비 -25 dB 미만 클러스터 제거
+C_φ 정의:
+```
+C_φ = C_φ^NLOS · (1.1035 - 0.028·K - 0.002·K² + 0.0001·K³)      ... (7.5-10)  (LOS)
+C_φ = C_φ^NLOS                                                     (NLOS)
+```
+여기서 C_φ^NLOS는 클러스터 수에 따른 scaling factor (**Table 7.5-2** 참조), K는 [dB] 단위.
 
-### Step 7: 도래각/출발각 생성
+**Table 7.5-2: AOA/AOD Scaling Factor (C_φ^NLOS)**
 
-**AOA** (wrapped Gaussian):
-```
-φ_n,AOA = (2/C_φ) · sqrt(-ln(P_n)/π) · ASA           ... (7.5-9)
-```
+| N_clusters | 4 | 5 | 6 | 7 | 8 | 10 | 11 | 12 | 14 | 15 | 16 | 19 | 20 | 25 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| C_φ | 0.779 | 0.860 | 0.921 | 0.973 | 1.018 | 1.090 | 1.123 | 1.146 | 1.190 | 1.211 | 1.226 | 1.273 | 1.289 | 1.358 |
 
-C_φ^NLOS 값: Table 7.5-2 참조. LOS인 경우 K-factor 보정:
+부호 할당 및 랜덤 오프셋 추가:
 ```
-C_φ = C_φ^NLOS · (1.1035 - 0.028K - 0.002K²)         ... (7.5-10)
+φ_n,AOA = X_n · φ'_n,AOA + Y_n + ϕ_LOS,AOA                       ... (7.5-11)
 ```
+여기서 X_n ∈ {+1, -1} uniform, Y_n ~ N(0, (ASA/7)²).
 
-부호 및 랜덤 오프셋 추가:
+**LOS인 경우:** 첫 번째 클러스터를 LOS 방향으로 강제:
 ```
-φ_n,AOA = φ_LOS,AOA + X_n · φ_n,AOA + Y_n            ... (7.5-11)
-```
-
-Ray 오프셋:
-```
-φ_n,m,AOA = φ_n,AOA + c_ASA · α_m                     ... (7.5-13)  (α_m: Table 7.5-3)
-```
-
-**ZOA** (Laplacian):
-```
-θ_n,ZOA = (2/C_θ) · (sign(U)-0.5) · sqrt(-ln(2P_n))   ... (7.5-14) (U ~ Uniform)
+φ_n,AOA = φ_n,AOA - (X_1 · φ'_1,AOA + Y_1 - ϕ_LOS,AOA)          ... (7.5-12)
 ```
 
-C_θ^NLOS 값: Table 7.5-4 참조. LOS인 경우:
+Per-ray 오프셋 추가 (**Table 7.5-3** 참조):
 ```
-C_θ = C_θ^NLOS · (1.3086 - 0.0339K - 0.0077K²)        ... (7.5-15)
+φ_n,m,AOA = φ_n,AOA + c_ASA · α_m                                 ... (7.5-13)
+```
+여기서 c_ASA는 cluster ASA (Table 7.5-6), α_m은 Table 7.5-3의 ray offset angle.
+
+**Table 7.5-3: Ray Offset Angles (α_m, rms 1로 정규화)**
+
+| Ray m | α_m |
+|---|---|
+| 1,2 | ±0.0447 |
+| 3,4 | ±0.1413 |
+| 5,6 | ±0.2492 |
+| 7,8 | ±0.3715 |
+| 9,10 | ±0.5129 |
+| 11,12 | ±0.6797 |
+| 13,14 | ±0.8844 |
+| 15,16 | ±1.1481 |
+| 17,18 | ±1.5195 |
+| 19,20 | ±2.1551 |
+
+#### 7-2. AOD 생성
+
+AOA와 동일한 절차를 따르되, ASA → ASD, c_ASA → c_ASD, ϕ_LOS,AOA → ϕ_LOS,AOD로 교체한다.
+
+#### 7-3. ZOA 생성 (Laplacian)
+
+모든 클러스터의 zenith PAS를 **Laplacian** 분포로 모델링한다.
+Inverse Laplacian 함수로 ZOA를 결정:
+```
+θ'_n,ZOA = -(ZSA/C_θ) · ln(P_n/max(P_n))                         ... (7.5-14)
 ```
 
-ZOA 랜덤화:
+C_θ 정의:
 ```
-θ_n,ZOA = θ_LOS,ZOA + (1-2·O2I) · X_n · θ_n,ZOA       ... (7.5-16)  (O2I=1이면 부호 반전)
-θ_n,m,ZOA = θ_n,ZOA + c_ZSA · α_m                      ... (7.5-18)
+C_θ = C_θ^NLOS · (1.3086 + 0.0339·K - 0.0077·K² + 0.0002·K³)    ... (7.5-15)  (LOS)
+C_θ = C_θ^NLOS                                                     (NLOS)
 ```
-θ_n,m,ZOA > 180°이면 360° - θ_n,m,ZOA로 래핑
+여기서 C_θ^NLOS는 **Table 7.5-4** 참조.
 
-**ZOD**:
+**Table 7.5-4: ZOA/ZOD Scaling Factor (C_θ^NLOS)**
+
+| N_clusters | 6 | 7 | 8 | 10 | 11 | 12 | 14 | 15 | 16 | 19 | 20 | 25 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| C_θ | 0.788 | 0.847 | 0.889 | 0.957 | 1.031 | 1.104 | 1.1072 | 1.1088 | 1.1276 | 1.184 | 1.178 | 1.282 |
+
+부호 할당 및 랜덤 오프셋 추가:
 ```
-θ_n,ZOD = θ_LOS,ZOD + X_n · θ_n,ZOD                    ... (7.5-19)
-θ_n,m,ZOD = θ_n,ZOD + μ_offset,ZOD + c_ZSD · α_m       ... (7.5-20)
+θ_n,ZOA = X_n · θ'_n,ZOA + Y_n + θ_LOS,ZOA                       ... (7.5-16)  (non-O2I)
+θ_n,ZOA = X_n · θ'_n,ZOA + Y_n + 90°                              ... (7.5-16)  (O2I, 부호 반전)
 ```
+여기서 X_n ∈ {+1, -1} uniform, Y_n ~ N(0, (ZSA/7)²).
+- **O2I 링크:** `(1-2·O2I)` 인자 적용 → O2I=1이면 부호가 반전됨.
+
+**LOS인 경우:** Eq. (7.5-16)을 Eq. (7.5-17)로 대체하여 첫 클러스터를 LOS 방향으로 강제.
+
+Per-ray 오프셋:
+```
+θ_n,m,ZOA = θ_n,ZOA + c_ZSA · α_m                                 ... (7.5-18)
+```
+c_ZSA는 cluster ZSA (Table 7.5-6).
+> **래핑:** θ_n,m,ZOA ∈ [0°, 360°]로 가정. **θ_n,m,ZOA > 180°이면 360° - θ_n,m,ZOA로 설정.**
+
+#### 7-4. ZOD 생성
+
+ZOA와 동일한 절차를 따르되, Eq. (7.5-16) 대신:
+```
+θ_n,ZOD = X_n · θ'_n,ZOD + θ_LOS,ZOD                              ... (7.5-19)
+```
+(Y_n 랜덤 오프셋 없음, O2I 부호 반전 없음)
+
+Per-ray 오프셋에 **μ_offset,ZOD** 추가 (Tables 7.5-7~12):
+```
+θ_n,m,ZOD = θ_n,ZOD + μ_offset,ZOD + (3/8)·(10^μ_lgZSD) · α_m    ... (7.5-20)
+```
+> **Note:** ZOD의 per-ray offset에는 c_ZSD가 아니라 `(3/8)·10^(μ_lgZSD)`를 사용한다.
+> μ_lgZSD는 Table 7.5-7~12의 ZSD log-normal 분포의 평균값이다.
+
+**LOS인 경우:** ZOA와 동일하게 Eq. (7.5-17) 절차를 따른다.
+
+---
 
 ### Step 8: 클러스터 내 Ray Coupling
 → `generateSSP.cpp`
 
-- AOD ↔ AOA 랜덤 커플링 (클러스터 n 내, 또는 sub-cluster 내)
-- ZOD ↔ ZOA 동일 방식
-- AOD ↔ ZOD 동일 방식
+클러스터 n 내에서 (또는 2개 강한 클러스터의 sub-cluster 내에서, Step 11 참조) 다음을 랜덤하게 커플링한다:
+1. **AOD ↔ AOA**: φ_n,m,AOD를 φ_n,m,AOA에 랜덤 매핑
+2. **ZOD ↔ ZOA**: θ_n,m,ZOD를 θ_n,m,ZOA에 동일한 방식으로 랜덤 매핑
+3. **AOD ↔ ZOD**: φ_n,m,AOD를 θ_n,m,ZOD에 동일한 방식으로 랜덤 매핑
+
+---
 
 ### Step 9: Cross Polarization Power Ratio (XPR)
+
+각 클러스터 n의 각 ray m에 대해 XPR을 log-Normal 분포에서 독립적으로 생성한다:
 ```
-κ_n,m = 10^(X_XPR / 20)                              ... (7.5-21)
+κ_n,m = 10^(X_n,m / 10)                                           ... (7.5-21)
 ```
-X_XPR ~ N(μ_XPR, σ²_XPR), Table 7.5-6에서 값 참조. 각 ray·cluster 독립 생성.
+여기서 X_n,m ~ N(μ_XPR, σ²_XPR), μ_XPR과 σ_XPR은 Table 7.5-6에서 참조한다.
 
-**Note:** Step 1~9의 결과는 co-sited sector → 동일 UT에 대해 동일해야 함.
+> **Note:** X_n,m은 각 ray와 각 cluster에 대해 **독립적으로** 추출한다.
 
-### Step 10: 초기 Random Phase
+> **★ Step 1~9의 결과는 co-sited sector → 동일 UT에 대해 동일해야 한다.**
 
-각 ray m, 클러스터 n에 대해 4개 편파 조합 (θθ, θφ, φθ, φφ) 각각 uniform(-π, π)에서 추출.
+### Step 10: 초기 Random Phase 생성 (Coefficient Generation 시작)
+
+각 ray m, 클러스터 n에 대해 4개 편파 조합의 초기 위상을 추출한다:
+```
+Φ^{θθ}_{n,m}, Φ^{θφ}_{n,m}, Φ^{φθ}_{n,m}, Φ^{φφ}_{n,m} ~ Uniform(-π, π)
+```
+각 위상은 독립적으로 생성된다.
+
+---
 
 ### Step 11: 채널 계수 생성
-→ `channel.cpp`: 핵심 수식
+→ `channel.cpp`, `channel_update.cpp`: 핵심 수식
 
-N-2개 약한 클러스터 (n=3,...,N):
+#### 11-1. 약한 클러스터 (N-2개, n = 3, 4, ..., N)
+
+각 수신 안테나 u, 송신 안테나 s 쌍에 대한 NLOS 채널 계수:
 ```
-H_n^{us} = Σ_{m=1}^{M} [
-  sqrt(P_n/M) ·
-  [F_rx,u,θ(θ_n,m,ZOA, φ_n,m,AOA)]   [exp(jΦ_θθ)·sqrt(κ)   exp(jΦ_θφ)]   [F_tx,s,θ(θ_n,m,ZOD, φ_n,m,AOD)]
-  [F_rx,u,φ(θ_n,m,ZOA, φ_n,m,AOA)] · [exp(jΦ_φθ)            exp(jΦ_φφ)·sqrt(κ)] · [F_tx,s,φ(θ_n,m,ZOD, φ_n,m,AOD)]
-  · exp(j2π(r̂_rx · d̂_rx,u)/λ)   ← 수신 array response
-  · exp(j2π(r̂_tx · d̂_tx,s)/λ)   ← 송신 array response
-  · exp(j2πν_n,m·t)               ← Doppler
-]                                                     ... (7.5-22)
+H_n^{NLOS,us}(t) = sqrt(P_n/M) · Σ_{m=1}^{M} [
+
+  [F_rx,u,θ(θ_n,m,ZOA, φ_n,m,AOA)]^T   [exp(jΦ^θθ_n,m)        sqrt(1/κ_n,m)·exp(jΦ^θφ_n,m)]
+  [F_rx,u,φ(θ_n,m,ZOA, φ_n,m,AOA)]   · [sqrt(1/κ_n,m)·exp(jΦ^φθ_n,m)    exp(jΦ^φφ_n,m)]
+
+  · [F_tx,s,θ(θ_n,m,ZOD, φ_n,m,AOD)]
+    [F_tx,s,φ(θ_n,m,ZOD, φ_n,m,AOD)]
+
+  · exp(j 2π/λ_0 · (r̂_rx,n,m · d̄_rx,u))     ← 수신 array response
+  · exp(j 2π/λ_0 · (r̂_tx,n,m · d̄_tx,s))     ← 송신 array response
+  · exp(j 2π · ν_n,m · t)                      ← Doppler
+]                                                                  ... (7.5-22)
 ```
 
-2개 강한 클러스터 (n=1,2)는 3개 sub-cluster로 분할:
+여기서:
+- **F_rx,u,θ, F_rx,u,φ**: 수신 안테나 엘리먼트 u의 GCS field pattern (Clause 7.1 변환 포함)
+- **F_tx,s,θ, F_tx,s,φ**: 송신 안테나 엘리먼트 s의 GCS field pattern
+- **κ_n,m**: cross polarisation power ratio (linear scale, Step 9)
+- **λ_0**: 캐리어 주파수 파장
+- **편파 무시 시:** 2×2 편파 행렬을 스칼라 `exp(jΦ^θθ_n,m)`로 대체하고 수직 편파 field pattern만 적용
+
+**구면 단위벡터:**
+```
+r̂_rx,n,m = [sin(θ_n,m,ZOA)·cos(φ_n,m,AOA), sin(θ_n,m,ZOA)·sin(φ_n,m,AOA), cos(θ_n,m,ZOA)]^T   ... (7.5-23)
+r̂_tx,n,m = [sin(θ_n,m,ZOD)·cos(φ_n,m,AOD), sin(θ_n,m,ZOD)·sin(φ_n,m,AOD), cos(θ_n,m,ZOD)]^T   ... (7.5-24)
+```
+
+**Doppler 주파수:**
+```
+ν_n,m = (1/λ_0) · [r̂_rx,n,m]^T · v̄                               ... (7.5-25)
+      = (v/λ_0) · [sinθ_v·cosφ_v·sinθ_n,m,ZOA·cosφ_n,m,AOA
+                  + sinθ_v·sinφ_v·sinθ_n,m,ZOA·sinφ_n,m,AOA
+                  + cosθ_v·cosθ_n,m,ZOA]
+```
+여기서 v̄ = (v, θ_v, φ_v)는 UT 속도 벡터.
+
+#### 11-2. 강한 클러스터 (2개, n = 1, 2) → Sub-cluster 분할
+
+2개 가장 강한 클러스터(n=1,2)의 20개 ray를 3개 sub-cluster로 분할한다.
+
+**Sub-cluster delay:**
 ```
 τ_{n,1} = τ_n
 τ_{n,2} = τ_n + 1.28 · c_DS
-τ_{n,3} = τ_n + 2.56 · c_DS                          ... (7.5-26)
+τ_{n,3} = τ_n + 2.56 · c_DS                                       ... (7.5-26)
+```
+여기서 c_DS는 Table 7.5-6의 cluster delay spread.
+> **c_DS가 N/A인 경우:** 3.91 ns를 사용한다 (legacy 동작: sub-cluster delay 5 ns, 10 ns).
+
+**Table 7.5-5: Sub-cluster 매핑**
+
+| Sub-cluster k | Ray 번호 | Power 비율 | Delay offset |
+|---|---|---|---|
+| 1 | 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 | 10/20 | 0 |
+| 2 | 11, 12, 13, 14, 15, 16 | 6/20 | 1.28 · c_DS |
+| 3 | 17, 18, 19, 20 | 4/20 | 2.56 · c_DS |
+
+**채널 임펄스 응답:**
+```
+H_n^{us}(τ, t) = Σ_{i=1}^{3} H_{n,i}^{NLOS,us}(t) · δ(τ - τ_{n,i})   ... (7.5-27)
+```
+여기서 H_{n,i}^{NLOS,us}는 Eq. (7.5-22)와 동일하되, sub-cluster i에 속한 ray만 합산:
+```
+H_{n,i}^{NLOS,us}(t) = Eq.(7.5-22) with m ∈ sub-cluster i        ... (7.5-28)
 ```
 
-Sub-cluster ray 매핑 (Table 7.5-5):
-- k=1: rays 1~10 (power 10/20)
-- k=2: rays 11~16 (power 6/20)
-- k=3: rays 17~20 (power 4/20)
+#### 11-3. LOS 채널 계수
 
-**LOS 채널 계수:**
+LOS 조건에서 직접 경로의 채널 계수:
 ```
-H_LOS = [F_rx,u,θ]   [1  0]   [F_tx,s,θ]
-        [F_rx,u,φ] · [0 -1] · [F_tx,s,φ]
-        · exp(-j2π d_3D/λ) · array_response · Doppler   ... (7.5-29)
-```
-
-최종 채널:
-```
-h = sqrt(1/(1+K_R)) · h_NLOS + sqrt(K_R/(1+K_R)) · H_LOS   ... (7.5-30)
+H_1^{LOS,us}(t) =
+  [F_rx,u,θ(θ_LOS,ZOA, φ_LOS,AOA)]^T   [1   0]   [F_tx,s,θ(θ_LOS,ZOD, φ_LOS,AOD)]
+  [F_rx,u,φ(θ_LOS,ZOA, φ_LOS,AOA)]   · [0  -1] · [F_tx,s,φ(θ_LOS,ZOD, φ_LOS,AOD)]
+  · exp(-j 2π/λ_0 · d_3D)
+  · exp(j 2π/λ_0 · (r̂_LOS,rx · d̄_rx,u))
+  · exp(j 2π/λ_0 · (r̂_LOS,tx · d̄_tx,s))
+  · exp(j 2π · ν_LOS · t)                                         ... (7.5-29)
 ```
 
-**Doppler:**
+> **Note:** LOS 경로의 편파 행렬은 `[1, 0; 0, -1]`이다 (cross-pol 성분 없음).
+
+#### 11-4. 최종 채널 임펄스 응답 (LOS)
+
+NLOS 채널에 LOS 성분을 추가하고, K-factor에 따라 스케일링:
 ```
-ν_n,m = (v/λ) · [sinθ_v·cosφ_v·sinθ_ZOA·cosφ_AOA + sinθ_v·sinφ_v·sinθ_ZOA·sinφ_AOA + cosθ_v·cosθ_ZOA]   ... (7.5-25)
+H^{us}(τ, t) = sqrt(1/(K_R+1)) · H^{NLOS,us}(τ, t) + sqrt(K_R/(K_R+1)) · H_1^{LOS,us}(t) · δ(τ - τ_1)   ... (7.5-30)
 ```
+여기서 K_R은 Step 4에서 생성한 Ricean K-factor (linear scale).
+
+---
 
 ### Step 12: Path Loss 및 Shadowing 적용
 
-채널 계수에 path loss와 shadow fading 곱하기.
+최종 채널 계수에 path loss와 shadow fading을 곱한다:
+```
+H_final = H · 10^(-(PL + SF)/20)
+```
+여기서 PL은 Step 3의 path loss [dB], SF는 Step 4의 shadow fading [dB].
+> **Note:** SF의 부호 정의: 양(+)의 SF는 path loss 모델 예측보다 UT에서 더 많은 수신 전력을 의미한다.
 
 ---
 
@@ -315,6 +559,25 @@ InF-SH: PL = 32.4  + 23.0·log10(d_3D) + 20·log10(fc),  σ_SF = 5.9 dB
 InF-DH: PL = 33.63 + 21.9·log10(d_3D) + 20·log10(fc),  σ_SF = 4.0 dB
 ```
 
+### SMa (0.5~37 GHz, new in Rel-19)
+
+**LOS:**
+```
+PL1 = 26.0 + 22·log10(d_3D) + 20·log10(fc)                       (10m ≤ d_2D ≤ d'_BP)
+PL2 = PL1(d'_BP) + 40·log10(d_3D/d'_BP)                          (d'_BP ≤ d_2D ≤ 5000m)
+σ_SF = 4 dB
+d'_BP = 4·h'_BS·h'_UT·fc·10⁹/c
+```
+
+**NLOS:**
+```
+PL = max(PL_SMa-LOS, PL'_SMa-NLOS)
+PL'_SMa-NLOS = 13.54 + 39.08·log10(d_3D) + 20·log10(fc) - 0.6·(h_UT-1.5)
+σ_SF = 6 dB
+```
+
+> **Note:** fc 정규화 = 1 GHz, 거리 정규화 = 1 m. 0.5 < fc < 37 GHz.
+
 ---
 
 ## 4. LOS 확률 모델 (Section 7.4.2)
@@ -350,6 +613,22 @@ P_LOS = { 1                                      d_2D ≤ 10m
          { exp(-(d_2D-10)/1000)                   10m < d_2D
 ```
 
+### InF (Indoor Factory)
+```
+InF-SL:  P_LOS = exp(-d_2D / k_SL)
+InF-DL:  P_LOS = exp(-d_2D / k_DL)
+InF-SH:  P_LOS = 1 - (1 - exp(-d_2D / k_SH1)) · (1 + d_2D/k_SH2 · exp(-d_2D / k_SH2))   (simplified)
+InF-DH:  P_LOS = 1 - (1 - exp(-d_2D / k_DH1)) · (1 + d_2D/k_DH2 · exp(-d_2D / k_DH2))   (simplified)
+InF-HH:  P_LOS = 1   (항상 LOS)
+```
+> Note: k 값들은 clutter 밀도(r), clutter 높이(h_c), BS/UT 높이에 의존한다. 상세 수식은 Table 7.4.2-1 참조.
+
+### SMa (Suburban Macro)
+```
+P_LOS = exp(-d_2D / 63)                                           (d_out)
+```
+> Note: outdoor 부분 거리에 적용. 상세 수식은 Table 7.4.2-1의 SMa 항 참조.
+
 ---
 
 ## 5. O2I Penetration Loss (Section 7.4.3)
@@ -365,7 +644,7 @@ PL = PL_b + PL_tw + PL_in + N(0, σ_P²)
 ### 재료별 관통 손실
 ```
 L_glass    = 2 + 0.2·f    [dB]   (표준 유리, 3cm)
-L_IRRglass = 25.4 + 0.11·f [dB]   (IRR 유리)
+L_IRRglass = 23 + 0.3·f    [dB]   (IRR 유리)
 L_concrete = 5 + 4·f       [dB]   (콘크리트, 23cm)
 L_plywood  = 1.03 + 0.17·f [dB]   (합판, 1.75cm)
 L_wood     = 4.85 + 0.12·f [dB]   (목재, 3.3cm)
@@ -379,6 +658,15 @@ L_wood     = 4.85 + 0.12·f [dB]   (목재, 3.3cm)
 | **Low-loss** | 5 - 10·log10(0.3·10^(-L_glass/10) + 0.7·10^(-L_concrete/10)) | 0.5·d_2D-in | 4.4 |
 | **High-loss** | 5 - 10·log10(0.7·10^(-L_IRRglass/10) + 0.3·10^(-L_concrete/10)) | 0.5·d_2D-in | 6.5 |
 | **Low-loss A** | 5 - 10·log10(0.3·10^(-L_glass/10) + 0.7·10^(-L_plywood/10)) | 0.5·d_2D-in | 4.4 |
+
+d_2D_in 생성:
+- UMa, UMi-Street Canyon: d_2D_in = min(25·U₁, 25·U₂), U₁,U₂ ~ Uniform(0,1) 독립
+- RMa: d_2D_in = min(10·U₁, 10·U₂), U₁,U₂ ~ Uniform(0,1) 독립
+
+d_2D,in 분포:
+- UMa, UMi-Street Canyon: d_2D,in = **min(U1, U2)**, U1·U2 ~ iid Uniform(0, 25m)
+- RMa: d_2D,in = min(U1, U2), U1·U2 ~ iid Uniform(0, 10m)
+- UT별로 독립 생성
 
 적용:
 - UMa, UMi: Low-loss + High-loss (비율은 시나리오 의존)
@@ -413,19 +701,19 @@ d_tx[m][n][p][mg][ng].z = m · d_V + mg · d_{g,V}    (수직)
 
 ### 단일 엘리먼트 방사 패턴 (Table 7.3-1)
 
-**수직 컷:** (θ_3dB = 65°)
+**수직 컷:** (θ_3dB = 65°, GCS 기준 θ는 zenith 각)
 ```
-A_dB(θ, φ=0°) = -min{ 12·(θ/65°)², SLA_V },   SLA_V = 20 dB
+A_E,V(θ) = -min{ 12·((θ-90°)/θ_3dB)², SLA_V },   SLA_V = 30 dB
 ```
 
 **수평 컷:** (φ_3dB = 65°)
 ```
-A_dB(θ=90°, φ) = -min{ 12·(φ/65°)², SLA_H },   SLA_H = 20 dB
+A_E,H(φ) = -min{ 12·(φ/φ_3dB)², A_max },          A_max = 30 dB
 ```
 
 **3D 패턴:**
 ```
-A_dB(θ, φ) = -min{ -(A_dB(θ,0°) + A_dB(90°,φ)), SLA_H }
+A_E(θ, φ) = -min{ -(A_E,V(θ) + A_E,H(φ)), A_max }
 G_E,max = 8 dBi
 ```
 
@@ -455,10 +743,11 @@ F_φ'(θ',φ') = sqrt(A'(θ',φ')) · sin(ζ)     ... (7.3-5)
 
 Directional 패턴 (Table 7.3-2):
 ```
-θ_3dB = 125°,  SLA_V = 22.5 dB
-φ_3dB = 125°,  A_max = 22.5 dB
-G_E,max = 5.3 dBi
+θ_3dB = 90°,   SLA_V = 25 dB
+φ_3dB = 90°,   A_max = 25 dB
+G_E,max = 5 dBi
 ```
+**Note:** Full calibration (Table 7.8-2)에서는 UT 안테나 패턴 = **Isotropic** (G_E,max = 0 dBi)
 
 ---
 
@@ -498,82 +787,198 @@ fc: GHz, d_2D: km
 
 #### K-factor, XPR, Clusters
 
-| 파라미터 | UMi LOS | UMi NLOS | UMa LOS | UMa NLOS |
-|---|---|---|---|---|
-| μ_K [dB] | 9 | N/A | 9 | N/A |
-| σ_K [dB] | 5 | N/A | 3.5 | N/A |
-| μ_XPR [dB] | 9 | 8 | 8 | 7 |
-| σ_XPR [dB] | 3 | 3 | 4 | 3 |
-| N_clusters | 12 | 19 | 12 | 20 |
-| M_rays | 20 | 20 | 20 | 20 |
-| r_τ | 3 | 2.1 | 2.5 | 2.3 |
-| c_DS [ns] | 5 | 11 | max(0.25, 6.5622-3.4084·log10(fc)) | max(0.25, 6.5622-3.4084·log10(fc)) |
-| c_ASD [°] | 3 | 10 | 3.58 | 1.8 |
-| c_ASA [°] | 17 | 22 | 11 | 15 |
-| c_ZSA [°] | 7 | 7 | 7 | 7 |
-| ζ [dB] | 3 | 3 | 3 | 3 |
+| 파라미터 | UMi LOS | UMi NLOS | UMi O2I | UMa LOS | UMa NLOS | UMa O2I |
+|---|---|---|---|---|---|---|
+| μ_K [dB] | 9 | N/A | N/A | 9 | N/A | N/A |
+| σ_K [dB] | 5 | N/A | N/A | 3.5 | N/A | N/A |
+| μ_XPR [dB] | 9 | 8 | 9 | 8 | 7 | 9 |
+| σ_XPR [dB] | 3 | 3 | 5 | 4 | 3 | 5 |
+| N_clusters | 12 | 19 | 12 | 12 | 20 | 12 |
+| M_rays | 20 | 20 | 20 | 20 | 20 | 20 |
+| r_τ | 3 | 2.1 | 2.2 | 2.5 | 2.3 | 2.2 |
+| c_DS [ns] | 5 | 11 | 11 | max(0.25, 6.5622-3.4084·log10(fc)) | max(0.25, 6.5622-3.4084·log10(fc)) | 11 |
+| c_ASD [°] | 3 | 10 | 5 | 3.58 | 1.8 | 1.8 |
+| c_ASA [°] | 17 | 22 | 8 | 11 | 15 | 8 |
+| c_ZSA [°] | 7 | 7 | 3 | 7 | 7 | 3 |
+| ζ [dB] | 3 | 3 | 4 | 3 | 3 | 4 |
 
-#### Cross-Correlations (UMi LOS / UMi NLOS / UMa LOS / UMa NLOS)
+#### Cross-Correlations
 
-| 쌍 | UMi LOS | UMi NLOS | UMa LOS | UMa NLOS |
-|---|---|---|---|---|
-| ASD-DS | 0.5 | 0 | 0.4 | 0.4 |
-| ASA-DS | 0.8 | 0.4 | 0.8 | 0.6 |
-| ASA-SF | -0.4 | -0.4 | -0.5 | 0 |
-| ASD-SF | -0.5 | 0 | -0.5 | -0.6 |
-| DS-SF | -0.4 | -0.7 | -0.4 | -0.4 |
-| ASD-ASA | 0.4 | 0 | 0 | 0.4 |
-| ASD-K | -0.2 | N/A | 0 | N/A |
-| ASA-K | -0.3 | N/A | -0.2 | N/A |
-| DS-K | -0.7 | N/A | -0.4 | N/A |
-| SF-K | 0.5 | N/A | 0 | N/A |
-| ZSD-SF | 0 | 0 | 0 | 0 |
-| ZSA-SF | 0 | 0 | -0.8 | -0.4 |
-| ZSD-DS | 0 | -0.5 | -0.2 | -0.5 |
-| ZSA-DS | 0.2 | 0 | 0 | 0 |
-| ZSD-ASD | 0.5 | 0.5 | 0.5 | 0.5 |
-| ZSA-ASD | 0.3 | 0.5 | 0 | -0.1 |
-| ZSD-ASA | 0 | 0 | -0.3 | 0 |
-| ZSA-ASA | 0 | 0.2 | 0.4 | 0 |
-| ZSD-ZSA | 0 | 0 | 0 | 0 |
+| 쌍 | UMi LOS | UMi NLOS | UMi O2I | UMa LOS | UMa NLOS | UMa O2I |
+|---|---|---|---|---|---|---|
+| ASD-DS | 0.5 | 0 | 0.4 | 0.4 | 0.4 | 0.4 |
+| ASA-DS | 0.8 | 0.4 | 0.4 | 0.8 | 0.6 | 0.4 |
+| ASA-SF | -0.4 | -0.4 | 0 | -0.5 | 0 | 0 |
+| ASD-SF | -0.5 | 0 | 0.2 | -0.5 | -0.6 | 0.2 |
+| DS-SF | -0.4 | -0.7 | -0.5 | -0.4 | -0.4 | -0.5 |
+| ASD-ASA | 0.4 | 0 | 0 | 0 | 0.4 | 0 |
+| ASD-K | -0.2 | N/A | N/A | 0 | N/A | N/A |
+| ASA-K | -0.3 | N/A | N/A | -0.2 | N/A | N/A |
+| DS-K | -0.7 | N/A | N/A | -0.4 | N/A | N/A |
+| SF-K | 0.5 | N/A | N/A | 0 | N/A | N/A |
+| ZSD-SF | 0 | 0 | 0 | 0 | 0 | 0 |
+| ZSA-SF | 0 | 0 | 0 | -0.8 | -0.4 | 0 |
+| ZSD-K | 0 | N/A | N/A | 0 | N/A | N/A |
+| ZSA-K | 0 | N/A | N/A | 0 | N/A | N/A |
+| ZSD-DS | 0 | -0.5 | -0.6 | -0.2 | -0.5 | -0.6 |
+| ZSA-DS | 0.2 | 0 | -0.2 | 0 | 0 | -0.2 |
+| ZSD-ASD | 0.5 | 0.5 | -0.2 | 0.5 | 0.5 | -0.2 |
+| ZSA-ASD | 0.3 | 0.5 | 0 | 0 | -0.1 | 0 |
+| ZSD-ASA | 0 | 0 | 0 | -0.3 | 0 | 0 |
+| ZSA-ASA | 0 | 0.2 | 0.5 | 0.4 | 0 | 0.5 |
+| ZSD-ZSA | 0 | 0 | 0.5 | 0 | 0 | 0.5 |
 
-### Part 2: RMa & Indoor-Office
+#### Correlation Distance [m]
 
-#### Delay Spread (DS)
+| LSP | UMi LOS | UMi NLOS | UMi O2I | UMa LOS | UMa NLOS | UMa O2I |
+|---|---|---|---|---|---|---|
+| DS | 7 | 10 | 10 | 30 | 40 | 10 |
+| ASD | 8 | 10 | 11 | 18 | 50 | 11 |
+| ASA | 8 | 9 | 17 | 15 | 50 | 17 |
+| SF | 10 | 13 | 7 | 37 | 50 | 7 |
+| K | 15 | N/A | N/A | 12 | N/A | N/A |
+| ZSA | 12 | 10 | 25 | 15 | 50 | 25 |
+| ZSD | 12 | 10 | 25 | 15 | 50 | 25 |
 
-| 파라미터 | RMa LOS | RMa NLOS | InH LOS | InH NLOS |
-|---|---|---|---|---|
-| μ_lgDS | -7.49 | -7.43 | -0.01·log10(1+fc)-7.692 | -0.28·log10(1+fc)-7.173 |
-| σ_lgDS | 0.55 | 0.48 | 0.18 | 0.10·log10(1+fc)+0.055 |
+### Part 2: RMa (up to 7 GHz) & Indoor-Office
 
-#### AOD/AOA/ZOA Spread
+#### Delay/Angle Spread
 
-| 파라미터 | RMa LOS | RMa NLOS | InH LOS | InH NLOS |
-|---|---|---|---|---|
-| μ_lgASD | 0.90 | 0.95 | 1.60 | 1.62 |
-| σ_lgASD | 0.38 | 0.45 | 0.18 | 0.25 |
-| μ_lgASA | 1.52 | 1.52 | -0.19·log10(1+fc)+1.781 | -0.11·log10(1+fc)+1.863 |
-| σ_lgASA | 0.24 | 0.13 | 0.12·log10(1+fc)+0.119 | 0.12·log10(1+fc)+0.059 |
-| μ_lgZSA | 0.47 | 0.58 | -0.26·log10(1+fc)+1.44 | -0.15·log10(1+fc)+1.387 |
-| σ_lgZSA | 0.40 | 0.37 | -0.04·log10(1+fc)+0.264 | -0.09·log10(1+fc)+0.746 |
+| 파라미터 | RMa LOS | RMa NLOS | RMa O2I | InH LOS | InH NLOS |
+|---|---|---|---|---|---|
+| μ_lgDS | -7.49 | -7.43 | -7.47 | -0.01·log10(1+fc)-7.692 | -0.28·log10(1+fc)-7.173 |
+| σ_lgDS | 0.55 | 0.48 | 0.24 | 0.18 | 0.10·log10(1+fc)+0.055 |
+| μ_lgASD | 0.90 | 0.95 | 0.67 | 1.60 | 1.62 |
+| σ_lgASD | 0.38 | 0.45 | 0.18 | 0.18 | 0.25 |
+| μ_lgASA | 1.52 | 1.52 | 1.66 | -0.19·log10(1+fc)+1.781 | -0.11·log10(1+fc)+1.863 |
+| σ_lgASA | 0.24 | 0.13 | 0.21 | 0.12·log10(1+fc)+0.119 | 0.12·log10(1+fc)+0.059 |
+| μ_lgZSA | 0.47 | 0.58 | 0.93 | -0.26·log10(1+fc)+1.44 | -0.15·log10(1+fc)+1.387 |
+| σ_lgZSA | 0.40 | 0.37 | 0.22 | -0.04·log10(1+fc)+0.264 | -0.09·log10(1+fc)+0.746 |
 
-#### K-factor, XPR, Clusters
+#### K-factor, SF, XPR, Clusters
 
-| 파라미터 | RMa LOS | RMa NLOS | InH LOS | InH NLOS |
-|---|---|---|---|---|
-| μ_K [dB] | 7 | N/A | 7 | N/A |
-| σ_K [dB] | 4 | N/A | 4 | N/A |
-| μ_XPR [dB] | 12 | 7 | 11 | 10 |
-| σ_XPR [dB] | 4 | 3 | 4 | 4 |
-| N_clusters | 11 | 10 | 15 | 19 |
-| r_τ | 3.8 | 1.7 | 3.6 | 3 |
-| c_DS [ns] | N/A | N/A | N/A | N/A |
-| c_ASD [°] | 2 | 2 | 5 | 5 |
-| c_ASA [°] | 3 | 3 | 8 | 11 |
-| c_ZSA [°] | 3 | 3 | 9 | 9 |
-| ζ [dB] | 3 | 3 | 6 | 3 |
+| 파라미터 | RMa LOS | RMa NLOS | RMa O2I | InH LOS | InH NLOS |
+|---|---|---|---|---|---|
+| σ_SF [dB] | Table 7.4.1-1 | Table 7.4.1-1 | 8 | Table 7.4.1-1 | Table 7.4.1-1 |
+| μ_K [dB] | 7 | N/A | N/A | 7 | N/A |
+| σ_K [dB] | 4 | N/A | N/A | 4 | N/A |
+| μ_XPR [dB] | 12 | 7 | 7 | 11 | 10 |
+| σ_XPR [dB] | 4 | 3 | 3 | 4 | 4 |
+| N_clusters | 11 | 10 | 10 | 15 | 19 |
+| M_rays | 20 | 20 | 20 | 20 | 20 |
+| r_τ | 3.8 | 1.7 | 1.7 | 3.6 | 3 |
+| c_DS [ns] | N/A | N/A | N/A | N/A | N/A |
+| c_ASD [°] | 2 | 2 | 2 | 5 | 5 |
+| c_ASA [°] | 3 | 3 | 3 | 8 | 11 |
+| c_ZSA [°] | 3 | 3 | 3 | 9 | 9 |
+| ζ [dB] | 3 | 3 | 3 | 6 | 3 |
 
-**NOTE:** fc < 6 GHz일 때 UMa는 fc=6으로, fc < 2 GHz일 때 UMi는 fc=2로 치환
+#### Cross-Correlations (RMa / InH)
+
+| 쌍 | RMa LOS | RMa NLOS | RMa O2I | InH LOS | InH NLOS |
+|---|---|---|---|---|---|
+| ASD-DS | 0 | -0.4 | 0 | 0.6 | 0.4 |
+| ASA-DS | 0 | 0 | 0 | 0.8 | 0 |
+| ASA-SF | 0 | 0 | 0 | -0.5 | -0.4 |
+| ASD-SF | 0 | 0.6 | 0 | -0.4 | 0 |
+| DS-SF | -0.5 | -0.5 | 0 | -0.8 | -0.5 |
+| ASD-ASA | 0 | 0 | -0.7 | 0.4 | 0 |
+| ASD-K | 0 | N/A | N/A | 0 | N/A |
+| ASA-K | 0 | N/A | N/A | 0 | N/A |
+| DS-K | 0 | N/A | N/A | -0.5 | N/A |
+| SF-K | 0 | N/A | N/A | 0.5 | N/A |
+| ZSD-SF | 0.01 | -0.04 | 0 | 0.2 | 0 |
+| ZSA-SF | -0.17 | -0.25 | 0 | 0.3 | 0 |
+| ZSD-K | 0 | N/A | N/A | 0 | N/A |
+| ZSA-K | -0.02 | N/A | N/A | 0.1 | N/A |
+| ZSD-DS | -0.05 | -0.10 | 0 | 0.1 | -0.27 |
+| ZSA-DS | 0.27 | -0.40 | 0 | 0.2 | -0.06 |
+| ZSD-ASD | 0.73 | 0.42 | 0.66 | 0.5 | 0.35 |
+| ZSA-ASD | -0.14 | -0.27 | 0.47 | 0 | 0.23 |
+| ZSD-ASA | -0.20 | -0.18 | -0.55 | 0 | -0.08 |
+| ZSA-ASA | 0.24 | 0.26 | -0.22 | 0.5 | 0.43 |
+| ZSD-ZSA | -0.07 | -0.27 | 0 | 0 | 0.42 |
+
+#### Correlation Distance [m] (RMa / InH)
+
+| LSP | RMa LOS | RMa NLOS | RMa O2I | InH LOS | InH NLOS |
+|---|---|---|---|---|---|
+| DS | 50 | 36 | 36 | 8 | 5 |
+| ASD | 25 | 30 | 30 | 7 | 3 |
+| ASA | 35 | 40 | 40 | 5 | 3 |
+| SF | 37 | 120 | 120 | 10 | 6 |
+| K | 40 | N/A | N/A | 4 | N/A |
+| ZSA | 15 | 50 | 50 | 4 | 4 |
+| ZSD | 15 | 50 | 50 | 4 | 4 |
+
+> **NOTE:** InH에서 fc < 6 GHz이면 fc = 6으로 치환하여 LSP 결정
+
+### Part 3: InF (Indoor Factory)
+
+> V/S: 홀 체적(m³)/전체 표면적(m², 벽+바닥+천장)
+
+| 파라미터 | InF LOS | InF NLOS |
+|---|---|---|
+| μ_lgDS | log10(26·(V/S)+14)-9.35 | log10(30·(V/S)+32)-9.44 |
+| σ_lgDS | 0.15 | 0.19 |
+| μ_lgASD | 1.56 | 1.57 |
+| σ_lgASD | 0.25 | 0.2 |
+| μ_lgASA | -0.18·log10(1+fc)+1.78 | 1.72 |
+| σ_lgASA | 0.12·log10(1+fc)+0.2 | 0.3 |
+| μ_lgZSA | -0.2·log10(1+fc)+1.5 | -0.13·log10(1+fc)+1.45 |
+| σ_lgZSA | 0.35 | 0.45 |
+| σ_SF [dB] | Table 7.4.1-1 | Table 7.4.1-1 |
+| μ_K [dB] | 7 | N/A |
+| σ_K [dB] | 8 | N/A |
+| μ_XPR [dB] | 12 | 11 |
+| σ_XPR [dB] | 6 | 6 |
+| N_clusters | 25 | 25 |
+| M_rays | 20 | 20 |
+| r_τ | 2.7 | 3 |
+| c_DS [ns] | N/A | N/A |
+| c_ASD [°] | 5 | 5 |
+| c_ASA [°] | 8 | 8 |
+| c_ZSA [°] | 9 | 9 |
+| ζ [dB] | 4 | 3 |
+
+**InF Cross-Correlations:** 모든 쌍이 **0** (상관 없음). 단, ASD-K=-0.5, DS-K=-0.7 (LOS).
+
+**InF Correlation Distance:** 모두 **10 m**.
+
+### Part 4: SMa (Suburban Macro, up to 24 GHz)
+
+> **New in Rel-19.** SMa 시나리오의 LSP 파라미터.
+
+| 파라미터 | SMa LOS | SMa NLOS | SMa O2I |
+|---|---|---|---|
+| μ_lgDS | -7.39 | -7.09 | -6.62 |
+| σ_lgDS | 0.36 | 0.38 | 0.32 |
+| μ_lgASD | 1.01 | 1.19 | 0.58 |
+| σ_lgASD | 0.36 | 0.41 | 0.7 |
+| μ_lgASA | 1.69 | 1.61 | 1.76 |
+| σ_lgASA | 0.28 | 0.24 | 0.16 |
+| μ_lgZSA | 0.57 | 0.67 | 1.01 |
+| σ_lgZSA | 0.49 | 0.40 | 0.43 |
+| σ_SF [dB] | Table 7.4.1-1 | Table 7.4.1-1 | 7 |
+| μ_K [dB] | 5.5 | N/A | N/A |
+| σ_K [dB] | 6 | N/A | N/A |
+| μ_XPR [dB] | 9 | 7.5 | 9 |
+| σ_XPR [dB] | 3.5 | 4 | 5 |
+| N_clusters | 11 | 14 | 12 |
+| M_rays | 20 | 20 | 20 |
+| r_τ | 2.5 | 2.4 | 2.2 |
+| c_DS [ns] | N/A | N/A | N/A |
+| c_ASD [°] | 5 | 5 | 5 |
+| c_ASA [°] | 11 | 11 | 8 |
+| c_ZSA [°] | 5 | 5 | 3 |
+| ζ [dB] | 3 | 3 | 4 |
+
+**SMa Correlation Distance [m]:** DS=6, ASD=15, ASA=15, SF=40, K=10, ZSA=15, ZSD=15
+
+> **주파수 치환 규칙:**
+> - UMa: fc < 6 GHz → fc = 6으로 치환
+> - UMi: fc < 2 GHz → fc = 2로 치환
+> - InH: fc < 6 GHz → fc = 6으로 치환
 
 ---
 
@@ -627,36 +1032,19 @@ e(fc) = 7.66·log10(fc) - 5.96
 | σ_lgZSD | 0.35 | 0.55 |
 | μ_offset,ZOD | 0 | 0 |
 
----
+### SMa (Table 7.5-12)
 
-## 9. Scaling Factor 테이블
+| | LOS | NLOS | O2I |
+|---|---|---|---|
+| μ_lgZSD | 0.14 | 0.14 | 0.14 |
+| σ_lgZSD | 0.44 | 0.44 | 0.44 |
+| μ_offset,ZOD | 0 | 0 | 0 |
 
-### Table 7.5-2: AOA/AOD Scaling Factor (C_φ^NLOS)
-
-| N_clusters | 4 | 5 | 6 | 7 | 8 | 10 | 11 | 12 | 14 | 15 | 16 | 19 | 20 | 25 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| C_φ | 0.779 | 0.860 | 0.921 | 0.973 | 1.018 | 1.090 | 1.123 | 1.146 | 1.190 | 1.211 | 1.226 | 1.273 | 1.289 | 1.358 |
-
-### Table 7.5-4: ZOA/ZOD Scaling Factor (C_θ^NLOS)
-
-| N_clusters | 6 | 7 | 8 | 10 | 11 | 12 | 14 | 15 | 16 | 19 | 20 | 25 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| C_θ | 0.788 | 0.847 | 0.889 | 0.957 | 1.031 | 1.104 | 1.1072 | 1.1088 | 1.1276 | 1.184 | 1.178 | 1.282 |
-
-### Table 7.5-3: Ray Offset Angles (α_m, rms 1로 정규화)
-
-| Ray m | α_m |
-|---|---|
-| 1,2 | ±0.0447 |
-| 3,4 | ±0.1413 |
-| 5,6 | ±0.2492 |
-| 7,8 | ±0.3715 |
-| 9,10 | ±0.5129 |
-| 11,12 | ±0.6797 |
-| 13,14 | ±0.8844 |
-| 15,16 | ±1.1481 |
-| 17,18 | ±1.5195 |
-| 19,20 | ±2.1551 |
+> **ZSD/ZOD Tables 공통 Notes:**
+> - fc: 중심 주파수 [GHz], d_2D: BS-UT 거리 [m], h_BS/h_UT: 안테나 높이 [m]
+> - 표기법: μ_lgX = mean{log10(X)}, σ_lgX = std{log10(X)}
+> - **fc < 6 GHz일 때 Table 7.5-7과 7.5-10의 frequency-dependent 파라미터는 fc = 6으로 치환**
+> - **O2I 링크의 ZSD 파라미터:** outdoor 링크 부분의 LOS 조건에 따라 Table 7.5-7/8의 outdoor 파라미터를 사용
 
 ### Table 7.5-5: Sub-cluster 매핑 (2개 강한 클러스터)
 
@@ -712,3 +1100,59 @@ e(fc) = 7.66·log10(fc) - 5.96
 | UT antenna pattern | Isotropic |
 | Polarization | P=2 → BS: X-pol (±45°), UT: X-pol (0/+90°) |
 | Metrics | 1) Coupling loss, 2) Wideband SIR, 3) DS/AS CDFs, 4) PRB SVD CDFs |
+
+---
+
+## 11. 추가 모델링 컴포넌트 (Section 7.6)
+
+> 이 섹션은 고급 시뮬레이션(대규모 어레이, 넓은 대역폭, 53-67 GHz 산소 흡수, 공간 일관성, 이동성, blockage 등)을 위한 추가 모델링이다.
+
+### 7.6.1 산소 흡수 (Oxygen Absorption)
+
+Step 11에서 생성된 클러스터 응답에 추가 손실을 적용한다:
+```
+OL_n(fc) = α(fc)/1000 · (d_3D + c · τ_n - c · τ_Δ)    [dB]      ... (7.6-1)
+```
+- α(fc): 주파수 의존 산소 손실 [dB/km] (Table 7.6.1-1)
+- d_3D: BS-UT 거리 [m], c: 광속 [m/s]
+- τ_n: n번째 클러스터 delay [s]
+- τ_Δ = 0 (LOS), min(τ_n) (NLOS)
+
+**Table 7.6.1-1: 주파수별 산소 흡수 손실 α(f) [dB/km]**
+
+| f [GHz] | 0-52 | 53 | 54 | 55 | 56 | 57 | 58 | 59 | 60 | 61 | 62 | 63 | 64 | 65 | 66-100 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| α [dB/km] | 0 | 1 | 2.2 | 4 | 6.6 | 9.7 | 12.6 | 14.6 | 15 | 14.6 | 14.1 | 10.7 | 6.7 | 3.5 | 1 |
+
+> 테이블에 없는 주파수는 양쪽 인접 값에서 **선형 보간**한다.
+
+### 7.6.2 대역폭/어레이 확장 (Large Bandwidth and Large Array)
+
+대역폭 B > c/D Hz (D: 최대 안테나 aperture)인 경우, 각 ray에 대해 개별 TOA를 모델링한다.
+
+### 7.6.3 공간 일관성 (Spatial Consistency)
+
+LSP 및 SSP에 공간 일관성을 적용하여 인접 UT 간 채널 특성의 연속적 변화를 모델링한다.
+- LSP 상관 거리: Table 7.5-6의 correlation distance 사용
+- 클러스터 delay/power/angle의 공간 상관: Table 7.6.3.1-2의 상관 거리 적용
+
+**Table 7.6.3.1-2: Cluster 파라미터 공간 상관 거리 [m]**
+
+| 파라미터 | RMa LOS | RMa NLOS | RMa O2I | UMi LOS | UMi NLOS | UMi O2I | UMa LOS | UMa NLOS | UMa O2I | InH LOS | InH NLOS | InF |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Delay | 50 | 36 | 36 | 12 | 15 | 15 | 7 | 11 | 11 | 10 | 10 | 10 |
+| AOD/AOA | 50 | 36 | 36 | 12 | 15 | 15 | 7 | 11 | 11 | 10 | 10 | 10 |
+| ZOD/ZOA | 50 | 36 | 36 | 12 | 15 | 15 | 7 | 11 | 11 | 10 | 10 | 10 |
+| Shadow | 50 | 36 | 36 | 12 | 15 | 15 | 7 | 11 | 11 | 10 | 10 | 10 |
+
+### 7.6.4 Blockage
+
+Step 11의 채널 계수에 blockage 모델을 적용한다. Blocker는 사각형 스크린(화면)으로 모델링하며, 각 클러스터/ray에 대해 attenuation을 계산한다.
+
+### 7.6.5 Shadow Fading 자기상관
+
+거리 x에 대한 SF 자기상관:
+```
+R(x) = exp(-x/d_cor)                                              ... (7.4-5)
+```
+여기서 d_cor은 상관 거리 (Table 7.5-6의 SF correlation distance).

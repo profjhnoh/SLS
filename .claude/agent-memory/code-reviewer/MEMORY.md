@@ -67,6 +67,20 @@
 - FFT optimization to save memory
 - Static helper functions for reusable algorithms (e.g., compute_circular_angle_spread)
 
+## Refactoring Review (2026-02-12)
+- See [refactoring-patterns.md](refactoring-patterns.md) for detailed v2 refactoring analysis
+- **Key finding**: link_antgain field not set in v2 (backward compatibility break)
+- **Bug fix**: Original line 333 typo (sector_a = sector_z) correctly fixed in v2
+- **Compilation issue**: Undefined `signal` variable at line 4012 in g_comp_mode block
+
+## Location Generation (2026-02-13)
+- See [location-generation-algorithms.md](location-generation-algorithms.md) for complete BS/MS placement algorithms
+- **BS layout**: InH fixed grid (2×6 or 3×8), hex grid for UMa/UMi/RMa (7-site/19-site)
+- **MS placement**: InH uniform in rectangles, hex random in 60° sectors with rotation
+- **Indoor probability**: Dense Urban 80% (below 20GHz), Rural 40-50%, InH 0%
+- **UE heights**: Multi-floor for UMa indoor (4-8 floors), fixed 1.5m for outdoor
+- **O2I loss**: Model A/B with 80/20 low/high loss split, frequency-dependent materials
+
 ## 3GPP Compliance Notes
 - **Circular angular spread**: TR 25.996 Annex A requires delta optimization (minimize over angle shifts) to handle wrapping ambiguity
 - **Cluster vs. ray metrics**: LSP angular spreads (ASA/ASD/ZSA/ZSD) should be computed from SSP cluster angles, NOT from raw LSP distributions

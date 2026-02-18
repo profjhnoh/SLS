@@ -215,7 +215,6 @@ void LINK::Reset2Default( void )
 			rand_sec_a           [sec_idx] = 0;
 			rand_sec_z           [sec_idx] = 0;				
 		}
-
 }
 
 
@@ -223,7 +222,7 @@ void LINK::Configuration(int _self_ms_idx)
 {
 	self_ms_idx = _self_ms_idx;
 	UE_Initial_Setting();
-	Get_signal_interference();
+	Get_signal_interference_v2();
 	Get_adj_SECTORS();
 
 	SINR = 10. * log10(dBm2linear(signal) / (dBm2linear(interference) + noise));
@@ -271,8 +270,7 @@ void LINK::Get_signal_interference()
 			AOD_spread = channel_of_interest->circular_angle_spread_AOD;
 			distance   = channel_of_interest->distance;
 
-			//pathloss = pathloss + ms[self_ms_idx].LSPs[bs_idx](0);   ////// Add Shadow Fading
-			pathloss = pathloss + channel_of_interest->sigma_SF * randnum.n();   ////// Add Shadow Fading
+			pathloss = pathloss + ms[self_ms_idx].LSPs[bs_idx](0);   ////// Add Shadow Fading (use stored LSP SF)
 			channel_of_interest->pathloss_final = pathloss;
 
 			///*
@@ -463,7 +461,7 @@ void LINK::Get_signal_interference()
 			AOA_spread                          = channel_of_interest->circular_angle_spread_AOA;
 			AOD_spread                          = channel_of_interest->circular_angle_spread_AOD;
 			distance                            = channel_of_interest->distance;
-			pathloss                            = pathloss + channel_of_interest->sigma_SF * randnum.n();   ////// Add Shadow Fading
+			pathloss                            = pathloss + ms[self_ms_idx].LSPs[bs_idx](0);   ////// Add Shadow Fading (use stored LSP SF)
 			channel_of_interest->pathloss_final = pathloss;
 
 			for (int sector_idx = 0; sector_idx < 3; sector_idx++)
@@ -834,8 +832,8 @@ void LINK::Get_signal_interference()
 			RMS_delay                           = channel_of_interest->RMS_delay_spread;
 			AOA_spread                          = channel_of_interest->circular_angle_spread_AOA;
 			AOD_spread                          = channel_of_interest->circular_angle_spread_AOD;
-			distance                            = channel_of_interest->distance;			
-			pathloss                            = pathloss + incar_loss + Otoi_loss + channel_of_interest->sigma_SF * randnum.n();
+			distance                            = channel_of_interest->distance;
+			pathloss                            = pathloss + incar_loss + Otoi_loss + ms[self_ms_idx].LSPs[bs_idx](0);   ////// use stored LSP SF
 			channel_of_interest->pathloss_final = pathloss;
 
 			for (int sector_idx = 0; sector_idx < 3; sector_idx++)
@@ -971,8 +969,8 @@ void LINK::Get_signal_interference()
 				RMS_delay                           = channel_of_interest->RMS_delay_spread;
 				AOA_spread                          = channel_of_interest->circular_angle_spread_AOA;
 				AOD_spread                          = channel_of_interest->circular_angle_spread_AOD;
-				distance                            = channel_of_interest->distance;			
-				pathloss                            = pathloss + incar_loss + Otoi_loss + channel_of_interest->sigma_SF * randnum.n();
+				distance                            = channel_of_interest->distance;
+				pathloss                            = pathloss + incar_loss + Otoi_loss + ms[self_ms_idx].LSPs[mTRP_idx+num_BS](0);   ////// use stored LSP SF
 				channel_of_interest->pathloss_final = pathloss;
 
 				for (int sectorized_panel_idx = 0; sectorized_panel_idx < 3; sectorized_panel_idx++)
@@ -1464,8 +1462,7 @@ void LINK::Get_signal_interference()
 			distance   = channel_of_interest->distance;
 			//cout << distance << endl;
 
-			//pathloss = pathloss + ms[self_ms_idx].LSPs[bs_idx](0) + incar_loss + Otoi_loss;   ////// Add Shadow Fading
-			pathloss = pathloss + incar_loss + Otoi_loss + channel_of_interest->sigma_SF * randnum.n();
+			pathloss = pathloss + incar_loss + Otoi_loss + ms[self_ms_idx].LSPs[bs_idx](0);   ////// use stored LSP SF
 
 			channel_of_interest->pathloss_final = pathloss;
 
@@ -1668,7 +1665,6 @@ void LINK::UE_Initial_Setting(void)
 
 
   ///////////////////////////// Building penetration loss /////////////////////////////////
-
   Real glass_L    = 2 + 0.2 * carrier_freq / (1000000000.);      ///// Standard multi-pane glass , carrier_freq = GHz
   Real IRRglass_L = 23 + 0.3 * carrier_freq / (1000000000.);     ///// Infrared Reflective(IRR) glass , carrier_freq = GHz
   Real concrete_L = 5 + 4 * carrier_freq / (1000000000.);        ///// Concrete glass , carrier_freq = GHz
@@ -1678,22 +1674,22 @@ void LINK::UE_Initial_Setting(void)
 
   if (TYPE == 12) // Dense Urban UMa
   {
-	  if (ms[self_ms_idx].Indoor == false)   ///// Outdoor
+	  if (ms[self_ms_idx].Indoor == false) // Outdoor
 	  {
 		  Otoi_loss = 0;
 	  }
-	  else                               /////// Indoor
+	  else // Indoor
 	  {
-		  if (Channel_Model_Type == 1)   ///// Model B
+		  if (Channel_Model_Type == 1) // Model B
 		  {
-			  if (randnum.u() > 0.5) //// 80% Low Loss  O2I
+			  if (randnum.u() > 0.2) // 80% Low Loss  O2I
 			  {
-				  /////// Low-loss model
+				  // Low-loss model
 				  Otoi_loss = 5 - 10 * log10(0.3 * pow(10, -1 * (glass_L / 10)) + 0.7 * pow(10, -1 * (concrete_L / 10)));
 				  indoor_L  = 0.5 * MIN((25 * randnum.u()), (25 * randnum.u()));
 				  Otoi_loss = Otoi_loss + indoor_L + 4.4 * randnum.n();
 			  }
-			  else           ////// 20& High Loss O2I
+			  else // 20& High Loss O2I
 			  {
 				  // High-loss model
 				  Otoi_loss = 5 - 10 * log10(0.7 * pow(10, -1 * (IRRglass_L / 10)) + 0.3 * pow(10, -1 * (concrete_L / 10)));
@@ -1706,26 +1702,22 @@ void LINK::UE_Initial_Setting(void)
 		  {
 			  if (carrier_freq >= 6000000000.)  //// above 6GHz
 			  {
-				  if (randnum.u() > 0.5) 
+				  if (randnum.u() > 0.2) 
 				  // 3GPP TR 38.901 50% Low Loss 
 				  // ITU-R M.2412 80% Low Loss  O2I
 				  {
-					  /////// Low-loss model
+					  // Low-loss model
 					  Otoi_loss = 5 - 10 * log10(0.3 * pow(10, -1 * (glass_L / 10)) + 0.7 * pow(10, -1 * (concrete_L / 10)));
 					  indoor_L = 0.5 * MIN((25 * randnum.u()), (25 * randnum.u()));
 					  Otoi_loss = Otoi_loss + indoor_L + 4.4 * randnum.n();
-					  //Otoi_loss = 0.;
-
 					  high_loss_flag = 0;
 				  }
 				  else
 				  {
-					  /////// High-loss model
-
+					  // High-loss model
 					  Otoi_loss = 5 - 10 * log10(0.7 * pow(10, -1 * (IRRglass_L / 10)) + 0.3 * pow(10, -1 * (concrete_L / 10)));
 					  indoor_L = 0.5 * MIN((25 * randnum.u()), (25 * randnum.u()));
 					  Otoi_loss = Otoi_loss + indoor_L + 6.5 * randnum.n();
-
 					  high_loss_flag = 1;
 				  }
 			  }
@@ -1883,14 +1875,8 @@ void LINK::Get_TX_SmallScale_antgain(CHANNEL * channel_of_interest, int _bs_idx,
 			for (int j = 0; j < channel_of_interest->NUM_RAY_per_ClusterNUM[i]; j++)
 			{
 
-				Real h_angle_pi    = channel_of_interest->AOD[i] + channel_of_interest->cluster_ASD * channel_of_interest->offset_angle_rand_coupling[i][j];
-				Real v_angle_theta = channel_of_interest->ZOD[i] + (3. / 8.) * pow(10, channel_of_interest->mu_ZSD) * channel_of_interest->offset_angle_rand_coupling[i][j];
-
-				Transform_angle_minus_180_to_plus_180(h_angle_pi);
-				Transform_angle_0_to_plus_180(v_angle_theta);
-
-				h_angle_pi = h_angle_pi * (pi / 180.);
-				v_angle_theta = v_angle_theta * (pi / 180.);
+				Real h_angle_pi    = channel_of_interest->ray_AOD[i][j][0] * (pi / 180.);
+				Real v_angle_theta = channel_of_interest->ray_AOD[i][j][1] * (pi / 180.);
 
 				Real F_theta_GCS_P1 = 0;
 				Real F_pi_GCS_P1 = 0;
@@ -1929,14 +1915,8 @@ void LINK::Get_TX_SmallScale_antgain(CHANNEL * channel_of_interest, int _bs_idx,
 		{
 			for (int j = 0; j < channel_of_interest->NUM_RAY_per_ClusterNUM[i]; j++)
 			{
-				Real h_angle_pi    = channel_of_interest->AOD[i] + channel_of_interest->cluster_ASD * channel_of_interest->offset_angle_rand_coupling[i][j];
-				Real v_angle_theta = channel_of_interest->ZOD[i] + (3. / 8.) * pow(10, channel_of_interest->mu_ZSD) * channel_of_interest->offset_angle_rand_coupling[i][j];
-
-				Transform_angle_minus_180_to_plus_180(h_angle_pi);
-				Transform_angle_0_to_plus_180(v_angle_theta);
-
-				h_angle_pi = h_angle_pi * (pi / 180.);
-				v_angle_theta = v_angle_theta * (pi / 180.);
+				Real h_angle_pi    = channel_of_interest->ray_AOD[i][j][0] * (pi / 180.);
+				Real v_angle_theta = channel_of_interest->ray_AOD[i][j][1] * (pi / 180.);
 
 				Real F_theta_GCS_P1 = 0;
 				Real F_pi_GCS_P1 = 0;
@@ -1992,15 +1972,8 @@ void LINK::Get_RX_SmallScale_antgain(int M, int N, int P, CHANNEL * channel_of_i
 		{
 			for (int j = 0; j < channel_of_interest->NUM_RAY_per_ClusterNUM[i]; j++)
 			{
-				Real h_angle_pi = channel_of_interest->AOA[i] + channel_of_interest->cluster_ASA * channel_of_interest->offset_angle[i][j];
-				Real v_angle_theta = channel_of_interest->ZOA[i] + channel_of_interest->cluster_ZSA * channel_of_interest->offset_angle[i][j];
-
-				Transform_angle_minus_180_to_plus_180(h_angle_pi);
-				Transform_angle_0_to_plus_180(v_angle_theta);
-
-
-				h_angle_pi = h_angle_pi * (pi / 180.);
-				v_angle_theta = v_angle_theta * (pi / 180.);
+				Real h_angle_pi = channel_of_interest->ray_AOA[i][j][0] * (pi / 180.);
+				Real v_angle_theta = channel_of_interest->ray_AOA[i][j][1] * (pi / 180.);
 
 				Real F_theta_GCS_P1 = 0;
 				Real F_pi_GCS_P1 = 0;
@@ -2073,14 +2046,8 @@ void LINK::Get_RX_SmallScale_antgain(int M, int N, int P, CHANNEL * channel_of_i
 		{
 			for (int j = 0; j < channel_of_interest->NUM_RAY_per_ClusterNUM[i]; j++)
 			{
-				Real h_angle_pi = channel_of_interest->AOA[i] + channel_of_interest->cluster_ASA * channel_of_interest->offset_angle[i][j];
-				Real v_angle_theta = channel_of_interest->ZOA[i] + channel_of_interest->cluster_ZSA * channel_of_interest->offset_angle[i][j];
-
-				Transform_angle_minus_180_to_plus_180(h_angle_pi);
-				Transform_angle_0_to_plus_180(v_angle_theta);
-
-				h_angle_pi = h_angle_pi * (pi / 180.);
-				v_angle_theta = v_angle_theta * (pi / 180.);
+				Real h_angle_pi = channel_of_interest->ray_AOA[i][j][0] * (pi / 180.);
+				Real v_angle_theta = channel_of_interest->ray_AOA[i][j][1] * (pi / 180.);
 
 				Real F_theta_GCS_P1 = 0;
 				Real F_pi_GCS_P1 = 0;
@@ -2141,7 +2108,7 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 {
 	// ue_interference = 0 -> find max ue beam & RSRP
 	// ue_interference = 1 -> for interference calculation, ue beam already selected
-	complex<Real> Big_PI_LOS             (0. , (360. * randnum.u() - 180.0)* (pi / 180.0));
+	complex<Real> Big_PI_LOS             (0. , channel_of_interest->random_phase_vv_LOS * (pi / 180.0));   // use stored initial phase
 
 	// 220815 jhnoh
     //CHANNEL * channel_of_interest = &channel[_bs_idx][_ms_idx];
@@ -2203,10 +2170,10 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 							kappa = channel_of_interest->kappa[i][j];
 							_1_over_sqrt_K = 1.0 / sqrt(kappa);
 
-							complex<Real> Big_pi_NLOS_thetatheta(0, (360. * randnum.u() - 180.0)*(pi / 180.0));
-							complex<Real> Big_pi_NLOS_thetapi(0, (360. * randnum.u() - 180.0)*(pi / 180.0));
-							complex<Real> Big_pi_NLOS_pitheta(0, (360. * randnum.u() - 180.0)*(pi / 180.0));
-							complex<Real> Big_pi_NLOS_pipi(0, (360. * randnum.u() - 180.0)*(pi / 180.0));
+							complex<Real> Big_pi_NLOS_thetatheta(0, channel_of_interest->random_phase_vv[i][j] * (pi / 180.0));   // use stored initial phase
+							complex<Real> Big_pi_NLOS_thetapi(0, channel_of_interest->random_phase_vh[i][j] * (pi / 180.0));
+							complex<Real> Big_pi_NLOS_pitheta(0, channel_of_interest->random_phase_hv[i][j] * (pi / 180.0));
+							complex<Real> Big_pi_NLOS_pipi(0, channel_of_interest->random_phase_hh[i][j] * (pi / 180.0));
 
 							alpha_nmup_temp = sqrt(channel_of_interest->power[i] / (channel_of_interest->NUM_RAY_per_ClusterNUM[i] * (K_linear + 1))) * (
 								(SmallScale_RX_AntennaGainXLOS_theta(i, j) * FAST_EXP(Big_pi_NLOS_thetatheta) + SmallScale_RX_AntennaGainXLOS_pi(i, j)* _1_over_sqrt_K *FAST_EXP(Big_pi_NLOS_pitheta)) * SmallScale_TX_AntennaGainXLOS_theta(i, j) +
@@ -2282,10 +2249,10 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 								kappa = channel_of_interest->kappa[i][j];
 								_1_over_sqrt_K = 1.0 / sqrt(kappa);
 
-								complex<Real> Big_pi_NLOS_thetatheta(0, (360. * randnum.u() - 180.0)*(pi / 180.0));
-								complex<Real> Big_pi_NLOS_thetapi(0, (360. * randnum.u() - 180.0)*(pi / 180.0));
-								complex<Real> Big_pi_NLOS_pitheta(0, (360. * randnum.u() - 180.0)*(pi / 180.0));
-								complex<Real> Big_pi_NLOS_pipi(0, (360. * randnum.u() - 180.0)*(pi / 180.0));
+								complex<Real> Big_pi_NLOS_thetatheta(0, channel_of_interest->random_phase_vv[i][j] * (pi / 180.0));   // use stored initial phase
+								complex<Real> Big_pi_NLOS_thetapi(0, channel_of_interest->random_phase_vh[i][j] * (pi / 180.0));
+								complex<Real> Big_pi_NLOS_pitheta(0, channel_of_interest->random_phase_hv[i][j] * (pi / 180.0));
+								complex<Real> Big_pi_NLOS_pipi(0, channel_of_interest->random_phase_hh[i][j] * (pi / 180.0));
 
 								// panel 1
 								alpha_nmup_temp = sqrt(channel_of_interest->power[i] / (channel_of_interest->NUM_RAY_per_ClusterNUM[i] * (K_linear + 1))) * (
@@ -2373,10 +2340,10 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 										kappa = channel_of_interest->kappa[i][j];
 										_1_over_sqrt_K = 1.0 / (Real)sqrt(kappa);
 
-										complex<Real> Big_pi_NLOS_thetatheta(0, (360. * randnum.u() - 180.0)*(pi / 180.0));
-										complex<Real> Big_pi_NLOS_thetapi(0, (360. * randnum.u() - 180.0)*(pi / 180.0));
-										complex<Real> Big_pi_NLOS_pitheta(0, (360. * randnum.u() - 180.0)*(pi / 180.0));
-										complex<Real> Big_pi_NLOS_pipi(0, (360. * randnum.u() - 180.0)*(pi / 180.0));
+										complex<Real> Big_pi_NLOS_thetatheta(0, channel_of_interest->random_phase_vv[i][j] * (pi / 180.0));   // use stored initial phase
+										complex<Real> Big_pi_NLOS_thetapi(0, channel_of_interest->random_phase_vh[i][j] * (pi / 180.0));
+										complex<Real> Big_pi_NLOS_pitheta(0, channel_of_interest->random_phase_hv[i][j] * (pi / 180.0));
+										complex<Real> Big_pi_NLOS_pipi(0, channel_of_interest->random_phase_hh[i][j] * (pi / 180.0));
 
 										// panel 1
 										alpha_nmup_temp = (Real)sqrt(channel_of_interest->power[i] / (channel_of_interest->NUM_RAY_per_ClusterNUM[i] * (K_linear + 1))) * (
@@ -2464,7 +2431,11 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 
 Real Get_LCS_theta(Real alpha, Real beta, Real gamma, Real GCS_theta, Real GCS_pi)
 {
-	return acosl( cos(beta)*cos(gamma)*cos(GCS_theta) + (sin(beta)*cos(gamma)*cos(GCS_pi-alpha) - sin(gamma)*sin(GCS_pi-alpha))*sin(GCS_theta));
+	Real x = cos(beta)*cos(gamma)*cos(GCS_theta) + (sin(beta)*cos(gamma)*cos(GCS_pi-alpha) - sin(gamma)*sin(GCS_pi-alpha))*sin(GCS_theta);
+	// 부동소수점 오차로 |x| > 1 → acos(NaN) 방지
+	if (x > 1.0) x = 1.0;
+	if (x < -1.0) x = -1.0;
+	return acosl(x);
 }
 
 Real Get_LCS_pi(Real alpha, Real beta, Real gamma, Real GCS_theta, Real GCS_pi)
@@ -2571,8 +2542,10 @@ Real Get_BS_antenna_pattern(Real theta_GCS, Real pi_GCS, int bs_idx, int sector_
 		Real beta  = bs[bs_idx].ant[sector_index][1];
 		Real gamma = bs[bs_idx].ant[sector_index][2];
 
-		Real zeta_1 = -pi / 4;
-		Real zeta_2 = pi / 4;
+		// Polarization slant angle: cross-pol(P=2) ±45°, co-pol(P=1) 0°
+		Real zeta_1, zeta_2;
+		if (BS_P == 2) { zeta_1 = pi / 4; zeta_2 = -pi / 4; }
+		else           { zeta_1 = 0;       zeta_2 = 90;        }
 
 		Real F_theta_LCS_P1;
 		Real F_pi_LCS_P1;
@@ -2626,8 +2599,10 @@ Real Get_BS_antenna_pattern(Real theta_GCS, Real pi_GCS, int bs_idx, int sector_
 		Real beta = bs[bs_idx].ant[_sector_idx][1];
 		Real gamma = bs[bs_idx].ant[_sector_idx][2];
 
-		Real zeta_1 = -pi / 4;
-		Real zeta_2 = pi / 4;
+		// Polarization slant angle: cross-pol(P=2) ±45°, co-pol(P=1) 0°
+		Real zeta_1, zeta_2;
+		if (BS_P == 2) { zeta_1 = pi / 4; zeta_2 = -pi / 4; }
+		else           { zeta_1 = 0;       zeta_2 = 0;        }
 
 		Real F_theta_LCS_P1;
 		Real F_pi_LCS_P1;
@@ -2682,8 +2657,10 @@ Real Get_BS_antenna_pattern(Real theta_GCS, Real pi_GCS, int bs_idx, int sector_
 		Real beta = bs[bs_idx].ant[_sector_idx][1];
 		Real gamma = bs[bs_idx].ant[_sector_idx][2];
 
-		Real zeta_1 = -pi / 4;
-		Real zeta_2 = pi / 4;
+		// Polarization slant angle: cross-pol(P=2) ±45°, co-pol(P=1) 0°
+		Real zeta_1, zeta_2;
+		if (BS_P == 2) { zeta_1 = pi / 4; zeta_2 = -pi / 4; }
+		else           { zeta_1 = 0;       zeta_2 = 0;        }
 
 		Real F_theta_LCS_P1;
 		Real F_pi_LCS_P1;
@@ -2897,8 +2874,10 @@ Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int 
 		Real gamma = ms[ms_idx].gamma;
 		Real alpha_plus_pi = ms[ms_idx].alpha + pi;
 
-		Real zeta_1 = 0;
-		Real zeta_2 = pi / 2;
+		// Polarization slant angle: cross-pol(P=2) ±45°, co-pol(P=1) 0°
+		Real zeta_1, zeta_2;
+		if (MS_P == 2) { zeta_1 = pi / 4; zeta_2 = -pi / 4; }
+		else           { zeta_1 = 0;       zeta_2 = 90;        }
 
 		Real F_theta_LCS_P1;
 		Real F_pi_LCS_P1;
@@ -2938,7 +2917,7 @@ Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int 
 		Real combined_antenna_gain        = ue_antenna_element_gain - MIN(-(h_antgain + v_antgain), 25.);
 		Real combined_antenna_gain_Panel2 = ue_antenna_element_gain - MIN(-(h_antgain_Panel2 + v_antgain_Panel2), 25.);
 
-		if (carrier_freq < 6000000000)  //below 6Ghz
+		if (carrier_freq <= 6000000000)  //below 6Ghz
 		{
 			combined_antenna_gain = 0.;
 			combined_antenna_gain_Panel2 = 0.;
@@ -2957,7 +2936,6 @@ Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int 
 		F_theta_LCS_P2_Panel2 = A2 * cos(zeta_2);
 		F_pi_LCS_P2_Panel2    = A2 * sin(zeta_2);
 		////
-
 
 		LCS_Antenna_field_to_GCS_antenna_pattern(alpha, beta, gamma, theta_GCS, pi_GCS, F_theta_LCS_P1, F_pi_LCS_P1, GCS_field_theta_P1, GCS_field_pi_P1);
 		LCS_Antenna_field_to_GCS_antenna_pattern(alpha, beta, gamma, theta_GCS, pi_GCS, F_theta_LCS_P2, F_pi_LCS_P2, GCS_field_theta_P2, GCS_field_pi_P2);
@@ -3005,8 +2983,10 @@ Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int 
 		Real gamma = ms[ms_idx].gamma;
 		Real alpha_plus_pi = ms[ms_idx].alpha + pi;
 
-		Real zeta_1 = 0;
-		Real zeta_2 = pi / 2;
+		// Polarization slant angle: cross-pol(P=2) ±45°, co-pol(P=1) 0°
+		Real zeta_1, zeta_2;
+		if (MS_P == 2) { zeta_1 = pi / 4; zeta_2 = -pi / 4; }
+		else           { zeta_1 = 0;       zeta_2 = 0;        }
 
 		Real F_theta_LCS_P1;
 		Real F_pi_LCS_P1;
@@ -3225,11 +3205,31 @@ void LCS_Antenna_field_to_GCS_antenna_pattern(Real alpha, Real beta, Real gamma,
 		theta += 0.0001;
 	}
 
-	cos_psi = (cos(beta)*cos(gamma)*sin(theta) - (sin(beta)*cos(gamma)*cos(phi - alpha) - sin(gamma)*sin(phi - alpha))*cos(theta)) / sqrt(1.0 - pow(cos(beta)*cos(gamma)*cos(theta) + (sin(beta)*cos(gamma)*cos(phi - alpha) - sin(gamma)*sin(phi - alpha))*sin(theta), 2));
-	sin_psi = (sin(beta)*cos(gamma)*sin(phi - alpha) + sin(gamma)*cos(phi - alpha)) / sqrt(1.0 - pow(cos(beta)*cos(gamma)*cos(theta) + (sin(beta)*cos(gamma)*cos(phi - alpha) - sin(gamma)*sin(phi - alpha))*sin(theta), 2));;
+	Real x = cos(beta)*cos(gamma)*cos(theta) + (sin(beta)*cos(gamma)*cos(phi - alpha) - sin(gamma)*sin(phi - alpha))*sin(theta);
+	Real denom_sq = 1.0 - x * x;
+	if (denom_sq < 1e-15) denom_sq = 1e-15;  // sqrt(음수) → NaN 방지
+	Real denom = sqrt(denom_sq);
+
+	cos_psi = (cos(beta)*cos(gamma)*sin(theta) - (sin(beta)*cos(gamma)*cos(phi - alpha) - sin(gamma)*sin(phi - alpha))*cos(theta)) / denom;
+	sin_psi = (sin(beta)*cos(gamma)*sin(phi - alpha) + sin(gamma)*cos(phi - alpha)) / denom;
 
 	GCS_field_theta = cos_psi * LCS_field_theta - sin_psi * LCS_field_pi;
 	GCS_field_pi = sin_psi * LCS_field_theta + cos_psi * LCS_field_pi;
+
+	if (std::isnan(GCS_field_theta) || std::isnan(GCS_field_pi) ||
+	    std::isinf(GCS_field_theta) || std::isinf(GCS_field_pi)) {
+		static int nan_count_lcs = 0;
+		if (nan_count_lcs < 10) {
+			nan_count_lcs++;
+			cout << "\n*** NaN/Inf in LCS_to_GCS ***" << endl;
+			cout << "  theta=" << theta << " phi=" << phi
+			     << " alpha=" << alpha << " beta=" << beta << " gamma=" << gamma << endl;
+			cout << "  x=" << x << " x^2=" << x*x << " denom_sq=" << denom_sq << " denom=" << denom << endl;
+			cout << "  cos_psi=" << cos_psi << " sin_psi=" << sin_psi << endl;
+			cout << "  LCS_field: theta=" << LCS_field_theta << " pi=" << LCS_field_pi << endl;
+			cout << "  GCS_field: theta=" << GCS_field_theta << " pi=" << GCS_field_pi << endl;
+		}
+	}
 }
 
 
@@ -3689,3 +3689,488 @@ void Print_FAST_EXP_Profile() {
     std::cout << "================================================\n" << std::endl;
 }
 #endif
+
+
+// =============================================================================
+// ===========================  v2 Refactored Code  ============================
+// =============================================================================
+//
+// The functions below provide the same functionality as Get_signal_interference()
+// but with improved readability by decomposing the 1350-line monolithic function
+// into 11 smaller functions with clear responsibilities.
+//
+// To use: call Get_signal_interference_v2() instead of Get_signal_interference()
+//         in LINK::Configuration().
+//
+// Note: randnum.u() call order differs from the original, so individual UE
+//       values will differ, but statistical distributions should be equivalent.
+// =============================================================================
+
+// Step 1: Build scenario configuration from global variables
+ScenarioConfig LINK::build_scenario_config_v2() const
+{
+	ScenarioConfig cfg;
+
+	if (TYPE == 11 && num_Indoor_TRxP == 1)       // InH 1TRxP (12 TRxP)
+	{
+		cfg.num_candidate_bs                = num_BS + num_mTRP;
+		cfg.sectors_per_bs                  = 1;
+		cfg.use_wraparound                  = false;
+		cfg.apply_penetration_loss          = false;
+		cfg.use_single_cell_mode            = false;
+		cfg.use_rsrp_table_for_interference = false;
+		cfg.store_los_indoor_info           = false;
+		cfg.configuration_type              = Configuration_Type;
+		cfg.ms_to_bs_wrap_idx               = 0;
+	}
+	else if (TYPE == 11 && num_Indoor_TRxP == 3)   // InH 3TRxP (36 TRxP)
+	{
+		cfg.num_candidate_bs                = num_BS + num_mTRP;
+		cfg.sectors_per_bs                  = 3;
+		cfg.use_wraparound                  = false;
+		cfg.apply_penetration_loss          = false;
+		cfg.use_single_cell_mode            = false;
+		cfg.use_rsrp_table_for_interference = false;
+		cfg.store_los_indoor_info           = false;
+		cfg.configuration_type              = Configuration_Type;
+		cfg.ms_to_bs_wrap_idx               = 0;
+	}
+	else // Dense Urban (TYPE==12) or Rural (TYPE==13)
+	{
+		cfg.num_candidate_bs                = simple_num_BS;
+		cfg.sectors_per_bs                  = 3;
+		cfg.use_wraparound                  = true;
+		cfg.apply_penetration_loss          = true;
+		cfg.use_single_cell_mode            = (single_cell_mode == 1);
+		cfg.use_rsrp_table_for_interference = true;
+		cfg.store_los_indoor_info           = true;
+		cfg.configuration_type              = Configuration_Type;
+		cfg.ms_to_bs_wrap_idx               = self_ms_idx / (3 * num_MS_persector);
+	}
+
+	return cfg;
+}
+
+
+// Step 2: Compute final pathloss for a given BS
+Real LINK::compute_pathloss_final_v2(const ScenarioConfig& cfg, int bs_idx)
+{
+	CHANNEL* ch = &channel[bs_idx][self_ms_idx];
+	Real pl = ch->pathloss;
+
+	if (cfg.apply_penetration_loss)
+		pl += incar_loss + Otoi_loss;
+
+	pl += ms[self_ms_idx].LSPs[bs_idx](0);   // Add Shadow Fading
+	ch->pathloss_final = pl;
+
+	return pl;
+}
+
+
+// Step 3: Compute TX antenna gains (wrapper around Get_antgain)
+Real LINK::compute_tx_antenna_gains_v2(CHANNEL* ch, int bs_idx, int sector_idx, int tilt_a, int tilt_z)
+{
+	return Get_antgain(ch, bs_idx, sector_idx, tilt_a, tilt_z);
+	// Side effect: sets TransmitterAntennaGainXLOS_theta/pi
+}
+
+
+// Step 4: Compute TX small-scale gains (unified, no TYPE branch needed)
+void LINK::compute_tx_smallscale_gains_v2(CHANNEL* ch, int bs_idx, int sector_idx, int tilt_a, int tilt_z)
+{
+	// The original Get_TX_SmallScale_antgain has TYPE==11 and TYPE==12/13 branches
+	// but they are identical in logic. We simply delegate to the existing function.
+	Get_TX_SmallScale_antgain(ch, bs_idx, sector_idx, tilt_a, tilt_z);
+}
+
+
+// Step 5: Compute RSRP (delegates to existing Get_RSRP)
+Real LINK::compute_rsrp_v2(CHANNEL* ch, int sec_number, int sec_z_idx, int sec_a_idx, int mode)
+{
+	// mode: 0 = find best UE beam & compute RSRP, 1 = fixed UE beam (for interference)
+	return Get_RSRP(ch, sec_number, sec_z_idx, sec_a_idx, mode);
+	// Side effect: sets selected_a, selected_z, selected_p (when mode==0)
+	// Side effect: fills ch->signal_RSRP_gain table (when mode==0)
+}
+
+
+// Step 6: Find best TX beam for a given (BS, sector) pair
+BeamSearchResult LINK::find_best_tx_beam_v2(CHANNEL* ch, int bs_idx, int sector_idx)
+{
+	BeamSearchResult best;
+	bool first = true;
+
+	for (int a = 0; a < tilt_azimuth_angle_LCS_size; a++)
+	{
+		for (int z = 0; z < tilt_zenith_angle_LCS_size; z++)
+		{
+			compute_tx_antenna_gains_v2(ch, bs_idx, sector_idx, a, z);
+			compute_tx_smallscale_gains_v2(ch, bs_idx, sector_idx, a, z);
+			Real rsrp = compute_rsrp_v2(ch, sector_idx, z, a, 0);
+
+			if (first || rsrp > best.max_rsrp_dB)
+			{
+				best.max_rsrp_dB    = rsrp;
+				best.ue_azimuth_idx = selected_a;
+				best.ue_zenith_idx  = selected_z;
+				best.ue_panel_idx   = selected_p;
+				best.sec_azimuth_idx = a;
+				best.sec_zenith_idx  = z;
+				first = false;
+			}
+		}
+	}
+
+	return best;
+}
+
+
+// Step 7: Evaluate one candidate cell (one BS + one sector)
+CandidateCell LINK::evaluate_candidate_cell_v2(const ScenarioConfig& cfg, int bs_idx, int sector_idx)
+{
+	CandidateCell cell;
+	CHANNEL* ch = &channel[bs_idx][self_ms_idx];
+
+	cell.bs_idx     = bs_idx;
+	cell.sector_idx = sector_idx;
+	cell.flat_idx   = (cfg.sectors_per_bs == 1) ? bs_idx : bs_idx * 3 + sector_idx;
+
+	// Pathloss is computed per-BS (shared across sectors), so only compute once per BS
+	// The caller ensures pathloss_final is already computed before calling this for sector > 0
+	cell.pathloss_final    = ch->pathloss_final;
+	cell.distance          = ch->distance;
+	cell.rms_delay_spread  = ch->RMS_delay_spread;
+	cell.aoa_spread        = ch->circular_angle_spread_AOA;
+	cell.aod_spread        = ch->circular_angle_spread_AOD;
+	cell.is_los            = ch->LOS;
+	cell.is_indoor         = ch->Indoor;
+
+	// Beam search
+	cell.beam       = find_best_tx_beam_v2(ch, bs_idx, sector_idx);
+	cell.max_rsrp_dB = cell.beam.max_rsrp_dB;
+
+	// Signal power
+	cell.signal_dBm = bs_maxpower + cell.max_rsrp_dB - cell.pathloss_final;
+
+	return cell;
+}
+
+
+// Step 8: Compute all candidate cells
+std::vector<CandidateCell> LINK::compute_all_candidate_cells_v2(const ScenarioConfig& cfg)
+{
+	std::vector<CandidateCell> candidates;
+	candidates.reserve(cfg.num_candidate_bs * cfg.sectors_per_bs);
+
+	for (int wrap_idx = 0; wrap_idx < cfg.num_candidate_bs; wrap_idx++)
+	{
+		int bs_idx = cfg.use_wraparound
+		           ? simple_wrap_mat[cfg.ms_to_bs_wrap_idx][wrap_idx]
+		           : wrap_idx;
+
+		// Compute pathloss once per BS (shared across sectors of same BS)
+		compute_pathloss_final_v2(cfg, bs_idx);
+
+		for (int sec = 0; sec < cfg.sectors_per_bs; sec++)
+		{
+			CandidateCell cell = evaluate_candidate_cell_v2(cfg, bs_idx, sec);
+			int flat = cell.flat_idx;
+
+			// Store in legacy arrays for backward compatibility
+			static_gain[flat].first  = cell.signal_dBm;
+			static_gain[flat].second = flat;
+
+			analog_beam_selection[flat].a        = cell.beam.ue_azimuth_idx;
+			analog_beam_selection[flat].z        = cell.beam.ue_zenith_idx;
+			analog_beam_selection[flat].p        = cell.beam.ue_panel_idx;
+			analog_beam_selection[flat].sector_a = cell.beam.sec_azimuth_idx;
+			analog_beam_selection[flat].sector_z = cell.beam.sec_zenith_idx;
+
+			candidates.push_back(cell);
+		}
+	}
+
+	return candidates;
+}
+
+
+// Step 9: Select serving cell from candidates
+void LINK::select_serving_cell_v2(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates)
+{
+	int best_idx = -1;
+	Real best_signal = -1e30;
+
+	for (int i = 0; i < (int)candidates.size(); i++)
+	{
+		const CandidateCell& c = candidates[i];
+
+		// single_cell_mode: only bs_idx 0 can serve
+		if (cfg.use_single_cell_mode && c.bs_idx != 0)
+			continue;
+
+		if (best_idx < 0 || c.signal_dBm > best_signal)
+		{
+			best_signal = c.signal_dBm;
+			best_idx = i;
+		}
+	}
+
+	const CandidateCell& srv = candidates[best_idx];
+
+	self_bs_idx     = srv.bs_idx;
+	self_sector_idx = srv.sector_idx;
+	link_pathloss   = srv.pathloss_final;
+	link_RSRP       = srv.max_rsrp_dB;
+	link_antgain    = srv.max_rsrp_dB;
+	link_RMS_delay_spread = srv.rms_delay_spread;
+	link_AOA_spread = srv.aoa_spread;
+	link_AOD_spread = srv.aod_spread;
+	link_distance   = srv.distance;
+
+	azimuth_angle_idx_selected_for_interference = srv.beam.ue_azimuth_idx;
+	zenith_angle_idx_selected_for_interference  = srv.beam.ue_zenith_idx;
+	panel_idx_selected_for_interference         = srv.beam.ue_panel_idx;
+
+	sector_azimuth_angle_idx = srv.beam.sec_azimuth_idx;
+	sector_zenith_angle_idx  = srv.beam.sec_zenith_idx;
+
+	if (cfg.sectors_per_bs == 1)
+		_sector_in_control = self_bs_idx;
+	else
+		_sector_in_control = self_bs_idx * 3 + self_sector_idx;
+
+	if (cfg.store_los_indoor_info)
+	{
+		link_los    = srv.is_los;
+		link_indoor = srv.is_indoor;
+	}
+}
+
+
+// Step 10: Compute interference from non-serving cells
+void LINK::compute_interference_v2(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates)
+{
+	interference = 0.0;
+
+	// --- InH scenarios ---
+	if (!cfg.use_rsrp_table_for_interference)
+	{
+		if (cfg.configuration_type == 0) // Config A: cumulative from signal phase
+		{
+			// In Config A, interference = sum of all candidate signals except the serving cell
+			for (int i = 0; i < (int)candidates.size(); i++)
+			{
+				const CandidateCell& c = candidates[i];
+				bool is_serving = (c.bs_idx == self_bs_idx) &&
+				                  (cfg.sectors_per_bs == 1 || c.sector_idx == self_sector_idx);
+				if (!is_serving)
+				{
+					interference += dBm2linear(c.signal_dBm);
+				}
+			}
+		}
+		else  // Config B: random beam re-computation
+		{
+			int total_bs = cfg.num_candidate_bs;
+			for (int wrap_idx = 0; wrap_idx < total_bs; wrap_idx++)
+			{
+				int bs_idx = cfg.use_wraparound
+				           ? simple_wrap_mat[cfg.ms_to_bs_wrap_idx][wrap_idx]
+				           : wrap_idx;
+
+				CHANNEL* ch = &channel[bs_idx][self_ms_idx];
+				Real pl = ch->pathloss_final;
+
+				for (int sec = 0; sec < cfg.sectors_per_bs; sec++)
+				{
+					int flat = (cfg.sectors_per_bs == 1) ? bs_idx : bs_idx * 3 + sec;
+
+					// Random beam selection
+					int aa = (int)(tilt_azimuth_angle_LCS_size * randnum.u());
+					int zz = (int)(tilt_zenith_angle_LCS_size * randnum.u());
+
+					if (cfg.sectors_per_bs > 1)
+					{
+						rand_sec_a[flat] = aa;
+						rand_sec_z[flat] = zz;
+					}
+
+					compute_tx_antenna_gains_v2(ch, bs_idx, sec, aa, zz);
+					compute_tx_smallscale_gains_v2(ch, bs_idx, sec, aa, zz);
+					Real random_rsrp = compute_rsrp_v2(ch, sec, zz, aa, 1);
+
+					Real sig = bs_maxpower + random_rsrp - pl;
+
+					bool is_serving = (bs_idx == self_bs_idx) &&
+					                  (cfg.sectors_per_bs == 1 || sec == self_sector_idx);
+					if (!is_serving)
+					{
+						interference += dBm2linear(sig);
+					}
+
+					intf_w_rnd_RSRP[flat] = sig;
+				}
+			}
+		}
+
+		// g_comp_mode handling for InH 3TRxP
+		if (cfg.sectors_per_bs == 3 && g_comp_mode && comp_sector_idx >= 0)
+		{
+			// Find the comp sector's signal from candidates
+			Real comp_sig = -1e30;
+			for (const auto& c : candidates)
+			{
+				if (c.flat_idx == comp_sector_idx)
+				{
+					comp_sig = c.signal_dBm;
+					break;
+				}
+			}
+			static_gain[comp_sector_idx].first  = comp_sig;
+			static_gain[comp_sector_idx].second = comp_sector_idx;
+
+			analog_beam_selection[comp_sector_idx].a        = comp_azimuth_angle_idx_selected;
+			analog_beam_selection[comp_sector_idx].z        = comp_zenith_angle_idx_selected;
+			analog_beam_selection[comp_sector_idx].p        = comp_panel_idx_selected;
+			analog_beam_selection[comp_sector_idx].sector_a = comp_sector_a;
+			analog_beam_selection[comp_sector_idx].sector_z = comp_sector_z;
+		}
+
+		// comp_interf_strength for InH 3TRxP
+		if (cfg.sectors_per_bs == 3)
+		{
+			comp_interf_strength[0] = bs_maxpower + 10 * log10(
+				channel[self_bs_idx][self_ms_idx].signal_RSRP_gain[self_sector_idx]
+				[sector_zenith_angle_idx][sector_azimuth_angle_idx]
+				[comp_azimuth_angle_idx_selected][comp_zenith_angle_idx_selected][comp_panel_idx_selected])
+				- channel[self_bs_idx][self_ms_idx].pathloss_final;
+		}
+	}
+	// --- Dense Urban / Rural: RSRP table lookup ---
+	else
+	{
+		// Initialize arrays
+		for (int bs_idx = 0; bs_idx < num_BS; bs_idx++)
+		{
+			intf_w_rnd_RSRP[bs_idx * 3    ] = linear2dBm(0);
+			intf_w_rnd_RSRP[bs_idx * 3 + 1] = linear2dBm(0);
+			intf_w_rnd_RSRP[bs_idx * 3 + 2] = linear2dBm(0);
+
+			rand_sec_a[3 * bs_idx    ] = -1;
+			rand_sec_a[3 * bs_idx + 1] = -1;
+			rand_sec_a[3 * bs_idx + 2] = -1;
+
+			rand_sec_z[3 * bs_idx    ] = -1;
+			rand_sec_z[3 * bs_idx + 1] = -1;
+			rand_sec_z[3 * bs_idx + 2] = -1;
+		}
+
+		// Macro BS interference
+		for (int bs_idx = 0; bs_idx < num_BS; bs_idx++)
+		{
+			Real pl = channel[bs_idx][self_ms_idx].pathloss_final;
+
+			for (int sec = 0; sec < 3; sec++)
+			{
+				if (bs_idx == self_bs_idx && sec == self_sector_idx)
+					continue;
+
+				int aa = (int)(tilt_azimuth_angle_LCS_size * randnum.u());
+				int zz = (int)(tilt_zenith_angle_LCS_size * randnum.u());
+
+				rand_sec_a[3 * bs_idx + sec] = aa;
+				rand_sec_z[3 * bs_idx + sec] = zz;
+
+				Real random_rsrp = linear2dB(
+					channel[bs_idx][self_ms_idx].signal_RSRP_gain[sec][zz][aa]
+					[zenith_angle_idx_selected_for_interference]
+					[azimuth_angle_idx_selected_for_interference]
+					[panel_idx_selected_for_interference]);
+
+				Real sig = bs_maxpower + random_rsrp - pl;
+
+				interference += dBm2linear(sig);
+				intf_w_rnd_RSRP[bs_idx * 3 + sec] = sig;
+			}
+		}
+
+		// mTRP interference
+		if (g_mTRP_mode == 1 || g_mTRP_mode == 2)
+		{
+			for (int mTRP_idx = num_BS; mTRP_idx < num_BS + num_mTRP; mTRP_idx++)
+			{
+				Real pl = channel[mTRP_idx][self_ms_idx].pathloss_final;
+
+				intf_w_rnd_RSRP[mTRP_idx * 3    ] = linear2dBm(0);
+				intf_w_rnd_RSRP[mTRP_idx * 3 + 1] = linear2dBm(0);
+				intf_w_rnd_RSRP[mTRP_idx * 3 + 2] = linear2dBm(0);
+
+				rand_sec_a[3 * mTRP_idx    ] = -1;
+				rand_sec_a[3 * mTRP_idx + 1] = -1;
+				rand_sec_a[3 * mTRP_idx + 2] = -1;
+
+				rand_sec_z[3 * mTRP_idx    ] = -1;
+				rand_sec_z[3 * mTRP_idx + 1] = -1;
+				rand_sec_z[3 * mTRP_idx + 2] = -1;
+
+				if (mTRP_idx == self_bs_idx)
+					continue;
+
+				int sec = (int)(3 * randnum.u());
+				int aa  = (int)(tilt_azimuth_angle_LCS_size * randnum.u());
+				int zz  = (int)(tilt_zenith_angle_LCS_size * randnum.u());
+
+				rand_sec_a[3 * mTRP_idx + sec] = aa;
+				rand_sec_z[3 * mTRP_idx + sec] = zz;
+
+				Real random_rsrp = linear2dB(
+					channel[mTRP_idx][self_ms_idx].signal_RSRP_gain[sec][zz][aa]
+					[zenith_angle_idx_selected_for_interference]
+					[azimuth_angle_idx_selected_for_interference]
+					[panel_idx_selected_for_interference]);
+
+				Real sig = micro_bs_power + random_rsrp - pl;
+				interference += dBm2linear(sig);
+				intf_w_rnd_RSRP[mTRP_idx * 3 + sec] = sig;
+			}
+		}
+	}
+}
+
+
+// Step 11: Main entry point
+void LINK::Get_signal_interference_v2()
+{
+	// Phase 0: Build scenario configuration
+	ScenarioConfig cfg = build_scenario_config_v2();
+
+	// Phase 1: Evaluate all candidate cells (beam search + signal power)
+	std::vector<CandidateCell> candidates = compute_all_candidate_cells_v2(cfg);
+
+	// Phase 2: Select serving cell (strongest signal)
+	select_serving_cell_v2(cfg, candidates);
+
+	// Find the strongest signal value from serving cell
+	Real strongest_signal = -1e30;
+	for (const auto& c : candidates)
+	{
+		bool is_serving = (c.bs_idx == self_bs_idx) &&
+		                  (cfg.sectors_per_bs == 1 || c.sector_idx == self_sector_idx);
+		if (is_serving)
+		{
+			strongest_signal = c.signal_dBm;
+			break;
+		}
+	}
+
+	// Phase 3: Compute interference
+	compute_interference_v2(cfg, candidates);
+
+	// Phase 4: Compute geometry (SIR/SINR)
+	str_signal   = strongest_signal;
+	signal       = strongest_signal;
+	interference = linear2dBm(interference);
+	Real noise_linear = dBm2linear(thermal_noise + 10.0 * log10(bandwidth) + MS_noisefig);
+	geometry = dBm2linear(signal) / (dBm2linear(interference) + noise_linear);
+}

@@ -52,12 +52,12 @@ void Compute_Channel_Coef()
 
 		if (TYPE == 11 && num_Indoor_TRxP == 1)   //// Get all BS-MS channel coefficient
 		{
-			
+
 			for (int ms_idx = 0; ms_idx < num_MS; ms_idx++)
 			{
 				int adj_sector_num_to_BS = (int)(links[ms_idx]._sector_in_control);
 
-				channel[adj_sector_num_to_BS][ms_idx].Update(0, ms_idx, adj_sector_num_to_BS);
+				channel[adj_sector_num_to_BS][ms_idx].Update_v2(0, ms_idx, adj_sector_num_to_BS);
 			}
 		}
 		else  // Get MS - adjacent_BS channel coefficient
@@ -86,7 +86,7 @@ void Compute_Channel_Coef()
 							adj_sector_num_to_BS = (int)(links[ms_idx].adj_sector[coeff_idx] / 3);
 							adj_sector = links[ms_idx].adj_sector[coeff_idx];
 						}
-						channel[adj_sector_num_to_BS][ms_idx].Update(0, ms_idx, adj_sector);
+						channel[adj_sector_num_to_BS][ms_idx].Update_v2(0, ms_idx, adj_sector);
 					}
 				#if ENABLE_MULTITHREADING
 				}
@@ -112,11 +112,7 @@ void Update_Channel_Coef()
 			{
 				int adj_sector_num_to_BS = (int)(links[ms_idx]._sector_in_control);
 
-				// Use ray-level precision if enabled
-				if (USE_RAY_LEVEL_DOPPLER)
-					channel[adj_sector_num_to_BS][ms_idx].Update_per_time_precise(t, adj_sector_num_to_BS, ms_idx);
-				else
-					channel[adj_sector_num_to_BS][ms_idx].Update_per_time(t, adj_sector_num_to_BS, ms_idx);
+				channel[adj_sector_num_to_BS][ms_idx].Update_per_time_v2(t, adj_sector_num_to_BS, ms_idx);
 			}
 
 		}
@@ -134,11 +130,7 @@ void Update_Channel_Coef()
 						int adj_sector_num_to_BS = (int)(links[ms_idx].adj_sector[coeff_idx] / 3);
 						int adj_sector = links[ms_idx].adj_sector[coeff_idx];
 
-						// Use ray-level precision if enabled
-						if (USE_RAY_LEVEL_DOPPLER)
-							channel[adj_sector_num_to_BS][ms_idx].Update_per_time_precise(t, adj_sector, ms_idx);
-						else
-							channel[adj_sector_num_to_BS][ms_idx].Update_per_time(t, adj_sector, ms_idx);
+						channel[adj_sector_num_to_BS][ms_idx].Update_per_time_v2(t, adj_sector, ms_idx);
 					}
 				#if ENABLE_MULTITHREADING
 				}

@@ -14,5 +14,10 @@ Tbps_DLSLS
 *.m
 cfg_FullCal/
 FullCal_UMa_Config1_6GHz/
+FullCal_UMa_Config2_6GHz/
 doc/R1-165975
 *.py
+
+v2/
+ns3_reference/
+reference_code/

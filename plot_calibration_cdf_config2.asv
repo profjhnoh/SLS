@@ -1,0 +1,409 @@
+%% plot_calibration_cdf_config2.m
+% -------------------------------------------------------------------------
+% Full Calibration CDF 비교 그래프 생성 — Config 2 (CBNU vs 3GPP 참여 기업)
+%
+% 사용법:
+%   >> plot_calibration_cdf_config2
+%
+% 입력:
+%   - doc/R1-165975/Phase2Config2Calibration_v28_CMCC.xlsx  (3GPP calibration 엑셀)
+%   - FullCal_UMa_Config2_6GHz/*.dat                        (시뮬레이터 출력 CDF)
+%
+% 출력:
+%   - FullCal_UMa_Config2_6GHz/CDF_{metric}_UMa_Config2_6GHz.pdf  (벡터)
+%   - FullCal_UMa_Config2_6GHz/CDF_All_Metrics_UMa_Config2_6GHz.pdf (벡터)
+%   - 화면에 그래프 직접 표시
+%
+% 메트릭:
+%   1. Coupling Loss (dB)
+%   2. Wideband SIR (dB, without noise)
+%   3. 1st Singular Value → 10*log10(SV_1)
+%   4. 2nd Singular Value → 10*log10(SV_2)
+%   5. Singular Value Ratio → 10*log10(SV_2 / SV_1) [dB]
+% -------------------------------------------------------------------------
+
+clear; close all; clc;
+
+%% ========================================================================
+%  설정 (Configuration)
+%  ========================================================================
+
+% 프로젝트 루트 (이 스크립트 위치 기준)
+scriptDir = fileparts(mfilename('fullpath'));
+if isempty(scriptDir)
+    scriptDir = pwd;
+end
+
+% 3GPP calibration 엑셀 파일
+excelPath = fullfile(scriptDir, 'doc', 'R1-165975', ...
+    'Phase2Config2Calibration_v28_CMCC.xlsx');
+
+% 시뮬레이터 결과 디렉토리
+resultDir = fullfile(scriptDir, 'FullCal_UMa_Config2_6GHz');
+
+% ★ 시뮬레이터 출력 파일의 날짜-시간 태그 (여기만 수정하면 모든 파일명에 반영)
+datetimeTag = '2026-02-18_10-31';
+
+% 엑셀 시트명
+sheetName = 'UMa-6GHz';
+
+% 엑셀 레이아웃 (1-based row, MATLAB 기준)
+companyRow   = 25;   % 기업명 행
+dataStartRow = 29;   % CDF 시작 (percentile=0)
+dataEndRow   = 129;  % CDF 끝   (percentile=100)
+nPercentiles = 101;
+
+% 메트릭 섹션 정의
+% {시작열(1-based), 메트릭명, x축레이블, dat파일명 템플릿, log_scale, convert_dB}
+%
+%  convert_dB: true → 시뮬레이터 출력이 linear이므로 10*log10() 변환 필요
+%              false → 이미 dB 또는 원래 단위 그대로 사용
+%
+% dat파일명에서 {DT}는 datetimeTag로 자동 치환됨
+metricSections = {
+    1,   'Coupling Loss',          'Coupling Loss (dB)', ...
+         'DL_CP_loss_DenseUrban_config_A_Model_B_{DT}_cdf.dat', false, false;
+    33,  'Wideband SIR',           'Wideband SIR (dB)', ...
+         'DL_Wideband_SIR_{DT}_cdf.dat', false, false;
+    64,  '1st Singular Value',     '10log_{10}(1st SV)', ...
+         'Elem_SV_1_{DT}_cdf.dat', false, true;
+    95,  '2nd Singular Value',     '10log_{10}(2nd SV)', ...
+         'Elem_SV_2_{DT}_cdf.dat', false, true;
+    126, 'SV Ratio (SV_2/SV_1)',   '10log_{10}(SV_2 / SV_1) (dB)', ...
+         'Elem_SV_Ratio_2_1_dB_{DT}_cdf.dat', false, false;
+};
+nMetrics = size(metricSections, 1);
+
+% 하이라이트 기업 및 색상 [R G B]
+highlightNames  = {'Huawei', 'Samsung', 'Ericsson', 'Nokia', 'CMCC', 'ETRI'};
+highlightColors = [
+    0.129 0.588 0.953;  % Huawei  - 파랑
+    1.000 0.596 0.000;  % Samsung - 주황
+    0.298 0.686 0.314;  % Ericsson- 초록
+    0.612 0.153 0.690;  % Nokia   - 보라
+    0.475 0.333 0.282;  % CMCC    - 갈색
+    0.914 0.118 0.388;  % ETRI    - 분홍
+];
+
+% CBNU 스타일
+cbnuColor = [1 0 0];
+cbnuLineWidth = 2.8;
+
+% 배경 기업 스타일
+bgColor = [0.73 0.73 0.73];
+bgLineWidth = 0.7;
+bgAlpha = 0.5;
+
+%% ========================================================================
+%  엑셀 데이터 읽기
+%  ========================================================================
+
+fprintf('Reading Excel: %s\n', excelPath);
+fprintf('  Sheet: %s\n', sheetName);
+
+% 기업명 읽기 (text)
+[~, txtData] = xlsread(excelPath, sheetName);
+
+% 숫자 데이터 읽기
+numData = xlsread(excelPath, sheetName);
+
+% xlsread는 숫자가 아닌 셀을 제외하므로, 전체 raw 데이터도 읽기
+[~, ~, rawData] = xlsread(excelPath, sheetName);
+fprintf('  Size: %d x %d\n', size(rawData, 1), size(rawData, 2));
+
+percentiles = (0:(nPercentiles-1))' / (nPercentiles - 1);
+
+%% ========================================================================
+%  합본 그래프 (Combined Plot)
+%  ========================================================================
+
+fprintf('\n--- Combined plot ---\n');
+figAll = figure('Position', [50 50 1600 900]);
+
+for mi = 1:nMetrics
+    startCol   = metricSections{mi, 1};
+    metricName = metricSections{mi, 2};
+    xLabel     = metricSections{mi, 3};
+    datTmpl    = metricSections{mi, 4};
+    useLog     = metricSections{mi, 5};
+    convertDB  = metricSections{mi, 6};
+    datFile    = strrep(datTmpl, '{DT}', datetimeTag);
+
+    subplot(2, 3, mi); hold on; grid on;
+
+    % --- 엑셀에서 기업 데이터 추출 ---
+    [compNames, compData] = extractCompanyData(rawData, ...
+        companyRow, dataStartRow, nPercentiles, startCol, 24);
+    fprintf('  %s: %d companies\n', metricName, length(compNames));
+
+    % 배경: 전체 기업 (회색)
+    for ci = 1:length(compNames)
+        vals = compData{ci};
+        mask = ~isnan(vals);
+        h = plot(vals(mask), percentiles(mask), 'Color', bgColor, ...
+                 'LineWidth', bgLineWidth);
+        h.Color(4) = bgAlpha;
+    end
+
+    % 하이라이트 기업 (컬러)
+    legendHandles = [];
+    legendLabels  = {};
+    for hi = 1:length(highlightNames)
+        idx = find(strcmp(compNames, highlightNames{hi}), 1);
+        if ~isempty(idx)
+            vals = compData{idx};
+            mask = ~isnan(vals);
+            hh = plot(vals(mask), percentiles(mask), ...
+                      'Color', highlightColors(hi,:), 'LineWidth', 1.3);
+            legendHandles(end+1) = hh;     %#ok<SAGROW>
+            legendLabels{end+1}  = highlightNames{hi}; %#ok<SAGROW>
+        end
+    end
+
+    % CBNU 데이터 읽기 및 플롯
+    datPath = fullfile(resultDir, datFile);
+    if exist(datPath, 'file')
+        cbnuCdf = readCdfDat(datPath);
+        yVals = cbnuCdf(:,2);
+        %SV_1, SV_2: linear → 10*log10 변환
+        if convertDB
+            yVals = 10 * log10(max(10*yVals, 1e-300));
+        end
+        hCbnu = plot(yVals, cbnuCdf(:,1)/100, ...
+                     'Color', cbnuColor, 'LineWidth', cbnuLineWidth);
+        legendHandles(end+1) = hCbnu;
+        legendLabels{end+1}  = 'CBNU (Ours)';
+    else
+        fprintf('    [WARNING] File not found: %s\n', datPath);
+    end
+
+    % 축 설정
+    if useLog
+        set(gca, 'XScale', 'log');
+        xlabel([xLabel ' [log]'], 'FontSize', 9);
+    else
+        xlabel(xLabel, 'FontSize', 9);
+    end
+    ylabel('CDF', 'FontSize', 9);
+    title(metricName, 'FontSize', 11, 'FontWeight', 'bold');
+    ylim([0 1.02]);
+    if ~isempty(legendHandles)
+        legend(legendHandles, legendLabels, ...
+               'Location', 'southeast', 'FontSize', 6);
+    end
+    hold off;
+end
+
+sgtitle({'UMa Config2 6GHz — Full Calibration CDF Comparison'; ...
+         '3GPP TR 38.901 Phase 2 (CBNU vs 19 Companies)'}, ...
+        'FontSize', 14, 'FontWeight', 'bold');
+
+combinedPath = fullfile(resultDir, 'CDF_All_Metrics_UMa_Config2_6GHz.pdf');
+exportgraphics(figAll, combinedPath, 'ContentType', 'vector');
+fprintf('  Saved: %s\n', combinedPath);
+
+%% ========================================================================
+%  개별 메트릭 그래프 (Individual Plots)
+%  ========================================================================
+
+fprintf('\n--- Individual plots ---\n');
+
+for mi = 1:nMetrics
+    startCol   = metricSections{mi, 1};
+    metricName = metricSections{mi, 2};
+    xLabel     = metricSections{mi, 3};
+    datTmpl    = metricSections{mi, 4};
+    useLog     = metricSections{mi, 5};
+    convertDB  = metricSections{mi, 6};
+    datFile    = strrep(datTmpl, '{DT}', datetimeTag);
+
+    figS = figure('Position', [100 100 1000 700]);
+    hold on; grid on;
+
+    % 엑셀에서 기업 데이터 추출
+    [compNames, compData] = extractCompanyData(rawData, ...
+        companyRow, dataStartRow, nPercentiles, startCol, 24);
+
+    % 배경 기업
+    for ci = 1:length(compNames)
+        vals = compData{ci};
+        mask = ~isnan(vals);
+        h = plot(vals(mask), percentiles(mask), 'Color', bgColor, ...
+                 'LineWidth', bgLineWidth);
+        h.Color(4) = bgAlpha;
+    end
+
+    % 하이라이트 기업
+    legendHandles = [];
+    legendLabels  = {};
+    for hi = 1:length(highlightNames)
+        idx = find(strcmp(compNames, highlightNames{hi}), 1);
+        if ~isempty(idx)
+            vals = compData{idx};
+            mask = ~isnan(vals);
+            hh = plot(vals(mask), percentiles(mask), ...
+                      'Color', highlightColors(hi,:), 'LineWidth', 1.3);
+            legendHandles(end+1) = hh;     %#ok<SAGROW>
+            legendLabels{end+1}  = highlightNames{hi}; %#ok<SAGROW>
+        end
+    end
+
+    % CBNU
+    datPath = fullfile(resultDir, datFile);
+    if exist(datPath, 'file')
+        cbnuCdf = readCdfDat(datPath);
+        yVals = cbnuCdf(:,2);
+        if convertDB
+            yVals = 10 * log10(max(yVals, 1e-30));
+        end
+        hCbnu = plot(yVals, cbnuCdf(:,1)/100, ...
+                     'Color', cbnuColor, 'LineWidth', cbnuLineWidth);
+        legendHandles(end+1) = hCbnu;
+        legendLabels{end+1}  = 'CBNU (Ours)';
+    else
+        fprintf('    [WARNING] File not found: %s\n', datPath);
+    end
+
+    if useLog
+        set(gca, 'XScale', 'log');
+        xlabel([xLabel ' [log]'], 'FontSize', 12);
+    else
+        xlabel(xLabel, 'FontSize', 12);
+    end
+    ylabel('CDF', 'FontSize', 12);
+    title({['UMa Config2 6GHz — ' metricName ' CDF']; ...
+           '3GPP TR 38.901 Phase 2 Full Calibration'}, ...
+          'FontSize', 13, 'FontWeight', 'bold');
+    ylim([0 1.02]);
+    if ~isempty(legendHandles)
+        legend(legendHandles, legendLabels, ...
+               'Location', 'southeast', 'FontSize', 9);
+    end
+    hold off;
+
+    fname = sprintf('CDF_%s_UMa_Config2_6GHz.pdf', ...
+                    strrep(metricName, ' ', '_'));
+    outPath = fullfile(resultDir, fname);
+    exportgraphics(figS, outPath, 'ContentType', 'vector');
+    fprintf('  Saved: %s\n', outPath);
+end
+
+%% ========================================================================
+%  통계 출력 (Statistics)
+%  ========================================================================
+
+fprintf('\n=== Config2 Calibration Statistics (CBNU) ===\n');
+
+for mi = 1:nMetrics
+    metricName = metricSections{mi, 2};
+    datTmpl    = metricSections{mi, 4};
+    convertDB  = metricSections{mi, 6};
+    datFile    = strrep(datTmpl, '{DT}', datetimeTag);
+
+    datPath = fullfile(resultDir, datFile);
+    if exist(datPath, 'file')
+        cbnuCdf = readCdfDat(datPath);
+        yVals = cbnuCdf(:,2);
+        if convertDB
+            yVals = 10 * log10(max(yVals, 1e-30));
+        end
+        pcts = cbnuCdf(:,1);
+
+        % 5%, 50%, 95% percentile
+        [~, idx5]  = min(abs(pcts - 5));
+        [~, idx50] = min(abs(pcts - 50));
+        [~, idx95] = min(abs(pcts - 95));
+
+        fprintf('\n  %s:\n', metricName);
+        fprintf('    5%%  percentile: %.2f\n', yVals(idx5));
+        fprintf('    50%% percentile: %.2f\n', yVals(idx50));
+        fprintf('    95%% percentile: %.2f\n', yVals(idx95));
+    end
+end
+
+fprintf('\nDone!\n');
+
+
+%% ========================================================================
+%  로컬 함수
+%  ========================================================================
+
+function data = readCdfDat(filepath)
+% readCdfDat - 시뮬레이터 출력 CDF .dat 파일 읽기
+%   탭 구분: percentile<TAB>value
+%
+% 출력: data = [percentile, value] (Nx2 행렬)
+
+    fid = fopen(filepath, 'r');
+    if fid == -1
+        warning('Cannot open file: %s', filepath);
+        data = [];
+        return;
+    end
+
+    data = [];
+    while ~feof(fid)
+        line = strtrim(fgetl(fid));
+        if isempty(line) || line(1) == -1
+            continue;
+        end
+        parts = strsplit(line, '\t');
+        if length(parts) >= 2
+            pct = str2double(parts{1});
+            val = str2double(parts{2});
+            if ~isnan(pct) && ~isnan(val)
+                data(end+1, :) = [pct, val]; %#ok<AGROW>
+            end
+        end
+    end
+    fclose(fid);
+end
+
+
+function [compNames, compData] = extractCompanyData(rawData, ...
+    companyRow, dataStartRow, nPercentiles, startCol, maxCompanies)
+% extractCompanyData - 엑셀 rawData에서 기업명과 CDF 데이터 추출
+%
+% 입력:
+%   rawData      - xlsread로 읽은 raw 데이터
+%   companyRow   - 기업명 행 (1-based)
+%   dataStartRow - 데이터 시작 행
+%   nPercentiles - 데이터 행 수 (101)
+%   startCol     - 섹션 시작 열 (1-based)
+%   maxCompanies - 최대 검색할 기업 수
+%
+% 출력:
+%   compNames - 기업명 셀 배열
+%   compData  - 각 기업의 CDF 값 셀 배열 (NaN 포함 가능)
+
+    compNames = {};
+    compData  = {};
+
+    for c = (startCol + 1):(startCol + maxCompanies)
+        if c > size(rawData, 2), break; end
+
+        cellVal = rawData{companyRow, c};
+        if isempty(cellVal) || (ischar(cellVal) && strcmpi(strtrim(cellVal), 'mean'))
+            break;
+        end
+        if isnumeric(cellVal), cellVal = num2str(cellVal); end
+        cName = strtrim(cellVal);
+        if isempty(cName), break; end
+
+        vals = nan(nPercentiles, 1);
+        for r = 1:nPercentiles
+            excelRow = dataStartRow + r - 1;
+            if excelRow <= size(rawData, 1)
+                v = rawData{excelRow, c};
+                if isnumeric(v) && ~isempty(v)
+                    vals(r) = v;
+                end
+            end
+        end
+
+        if sum(~isnan(vals)) > 10
+            compNames{end+1} = cName; %#ok<SAGROW>
+            compData{end+1}  = vals;  %#ok<SAGROW>
+        end
+    end
+end

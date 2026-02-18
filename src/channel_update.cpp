@@ -785,6 +785,37 @@ void MS::Fourier_Transform_of_Channel_Optimized(int ms_idx)
 							const complex<Real>& gain = channel[_bs_idx][self_idx].CHIR[sec_idx][t_idx][r_idx][path_idx];
 							Hc += gain * phasor[path_idx];      // 복소곱 + 복소합
 							phasor[path_idx] *= step[path_idx]; // 다음 RB를 위한 누적 (복소곱 1회)
+
+							// NaN 검출: gain 또는 phasor에서 NaN 발생 시 즉시 출력
+							if (std::isnan(Hc.real()) || std::isnan(Hc.imag())) {
+								static int nan_count = 0;
+								if (nan_count < 5) {
+									nan_count++;
+									cout << "\n*** NaN DETECTED in Fourier Transform ***" << endl;
+									cout << "  ms_idx=" << ms_idx << " t=" << t
+									     << " coeff=" << coeff_idx << " rb=" << rbs_idx
+									     << " rx=" << r_idx << " tx=" << t_idx
+									     << " path=" << path_idx << endl;
+									cout << "  bs_idx=" << _bs_idx << " sec_idx=" << sec_idx
+									     << " Prop=" << channel[_bs_idx][self_idx].Propagation
+									     << " LOS=" << channel[_bs_idx][self_idx].LOS
+									     << " K=" << channel[_bs_idx][self_idx].K_linear << endl;
+									cout << "  gain=(" << gain.real() << "," << gain.imag() << ")"
+									     << " phasor=(" << phasor[path_idx].real() << "," << phasor[path_idx].imag() << ")"
+									     << " step=(" << step[path_idx].real() << "," << step[path_idx].imag() << ")" << endl;
+									cout << "  delay[" << path_idx << "]=" << channel[_bs_idx][self_idx].delay[path_idx]
+									     << " power[" << path_idx << "]=" << channel[_bs_idx][self_idx].power[path_idx] << endl;
+									cout << "  Hc so far=(" << Hc.real() << "," << Hc.imag() << ")" << endl;
+									// 전체 CHIR 덤프
+									for (int p = 0; p < NUM_PATH; p++) {
+										const complex<Real>& g = channel[_bs_idx][self_idx].CHIR[sec_idx][t_idx][r_idx][p];
+										cout << "    CHIR[" << p << "]=(" << g.real() << "," << g.imag()
+										     << ") delay=" << channel[_bs_idx][self_idx].delay[p]
+										     << " power=" << channel[_bs_idx][self_idx].power[p] << endl;
+									}
+								}
+								break; // 이 RB의 나머지 path 스킵
+							}
 						}
 
 						H_m[coeff_idx][rbs_idx](r_idx, t_idx) = Hc;
@@ -903,5 +934,76 @@ VectorXcReal MS::PowerIteration_DominantEigenvector(const MatrixXcReal& M, int m
 	}
 
 	return v;
+}
+
+
+// ====================================================================
+// Element-Level Fourier Transform (ns-3 style)
+// ====================================================================
+// Converts H_usn[cluster](totalRx, totalTx) in delay domain
+// to H_m_elem[rb](totalRx, totalTx) in frequency domain.
+// Uses the same recursive phasor technique as Fourier_Transform_of_Channel_Optimized.
+// ====================================================================
+
+void MS::Fourier_Transform_ElementLevel(int ms_idx)
+{
+	if (CH_CAL != 1) return;
+
+	int self_idx = ms_idx;
+	int _bs_idx = 0;
+
+	// Only process the serving BS (coeff_idx=0)
+	int coeff_idx = 0;
+	if (TYPE == 11 && num_Indoor_TRxP == 1)
+		_bs_idx = (int)(links[self_idx].adj_sector[coeff_idx]);
+	else
+		_bs_idx = (int)(links[self_idx].adj_sector[coeff_idx] / 3);
+
+	int totalTx = BS_M * BS_N * BS_P;
+	int totalRx = MS_M * MS_N * MS_P;
+	const int NUM_PATH = channel[_bs_idx][self_idx].NUM_PATH_for_channelcoeff;
+
+	if (NUM_PATH <= 0) return;
+	if ((int)channel[_bs_idx][self_idx].H_usn.size() < NUM_PATH) return;
+
+	// Allocate H_m_elem if needed
+	if (H_m_elem == NULL) {
+		H_m_elem = new MatrixXcReal[num_rb];
+		for (int rb = 0; rb < num_rb; rb++) {
+			H_m_elem[rb] = MatrixXcReal::Zero(totalRx, totalTx);
+		}
+	}
+
+	// FFT parameters (same as Fourier_Transform_of_Channel_Optimized)
+	int pointer = (int(fft_size) - (num_rb * num_freq_per_rbs)) / 2;
+	const unsigned long long f0 = (pointer + (num_freq_per_rbs / 2)) * subcarrier_spacing;
+	const Real df   = subcarrier_spacing;
+	const Real dfrb = num_freq_per_rbs * df;
+
+	// Initialize phasor and step per path
+	std::vector<complex<Real>> phasor(NUM_PATH);
+	std::vector<complex<Real>> step_val(NUM_PATH);
+
+	for (int path_idx = 0; path_idx < NUM_PATH; path_idx++) {
+		const Real tau = channel[_bs_idx][self_idx].delay[path_idx];
+		phasor[path_idx] = exp(complex<Real>(0.0, -2.0 * pi * f0 * tau));
+		step_val[path_idx] = exp(complex<Real>(0.0, -2.0 * pi * dfrb * tau));
+	}
+
+	// RB loop with recursive phasor updates
+	for (int rbs_idx = 0; rbs_idx < num_rb; rbs_idx++) {
+		H_m_elem[rbs_idx].setZero();
+
+		for (int path_idx = 0; path_idx < NUM_PATH; path_idx++) {
+			// H_m_elem[rb] += H_usn[path] * phasor[path]
+			H_m_elem[rbs_idx] += channel[_bs_idx][self_idx].H_usn[path_idx] * phasor[path_idx];
+
+			// Advance phasor for next RB
+			phasor[path_idx] *= step_val[path_idx];
+		}
+	}
+
+	// Reset phasors for potential re-use
+	// (not strictly needed since this is called once per drop)
 }
 

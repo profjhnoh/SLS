@@ -1,6 +1,7 @@
 #include "const.h"
 #include "channel.h"
 #include <Eigen/Dense>
+#include <vector>
 
 // 220809 jhnoh ---------------------------------------------------
 typedef std::pair<Real,int> Real_int_pair;
@@ -13,6 +14,45 @@ typedef struct {
 	int sector_a;
 	int sector_z;
 } beam_selection;
+
+// ===== v2 refactoring structs =====
+struct ScenarioConfig {
+    int  num_candidate_bs;                // number of candidate BSs to evaluate
+    int  sectors_per_bs;                  // 1 for InH 1TRxP, 3 for InH 3TRxP / DU / Rural
+    bool use_wraparound;                  // DU/Rural: wraparound topology
+    bool apply_penetration_loss;          // DU/Rural: incar + O2I loss in pathloss
+    bool use_single_cell_mode;            // single_cell_mode constraint for serving cell selection
+    bool use_rsrp_table_for_interference; // DU/Rural: signal_RSRP_gain table lookup for interference
+    bool store_los_indoor_info;           // DU/Rural: store link_los, link_indoor
+    int  configuration_type;              // 0=ConfigA, 1=ConfigB (InH interference method)
+    int  ms_to_bs_wrap_idx;               // wraparound mapping index
+};
+
+struct BeamSearchResult {
+    Real max_rsrp_dB  = -1e30;   // maximum RSRP (dB)
+    int  ue_azimuth_idx  = 0;    // selected UE beam azimuth index
+    int  ue_zenith_idx   = 0;    // selected UE beam zenith index
+    int  ue_panel_idx    = 0;    // selected UE panel index
+    int  sec_azimuth_idx = 0;    // selected BS beam azimuth index
+    int  sec_zenith_idx  = 0;    // selected BS beam zenith index
+};
+
+struct CandidateCell {
+    int   bs_idx       = 0;
+    int   sector_idx   = 0;
+    int   flat_idx     = 0;       // bs_idx * sectors_per_bs + sector_idx
+    Real  signal_dBm   = -1e30;   // tx_power + max_rsrp_dB - pathloss_final
+    Real  pathloss_final = 0;
+    Real  max_rsrp_dB  = -1e30;
+    Real  distance     = 0;
+    Real  rms_delay_spread = 0;
+    Real  aoa_spread   = 0;
+    Real  aod_spread   = 0;
+    bool  is_los       = false;
+    bool  is_indoor    = false;
+    BeamSearchResult beam;
+};
+// ===== end v2 structs =====
 
 class LINK
 {
@@ -33,6 +73,20 @@ class LINK
         //Real Get_antgain(LOCATION, LOCATION, int, int, int, int);
 	    //void Get_TX_SmallScale_antgain(LOCATION, int, int, int, int);
 	    //Real Get_RSRP(int, int, int, int, int, int);
+
+	    // ===== v2 refactored methods =====
+	    void            Get_signal_interference_v2();
+	    ScenarioConfig  build_scenario_config_v2() const;
+	    Real            compute_pathloss_final_v2(const ScenarioConfig& cfg, int bs_idx);
+	    Real            compute_tx_antenna_gains_v2(CHANNEL* ch, int bs_idx, int sector_idx, int tilt_a, int tilt_z);
+	    void            compute_tx_smallscale_gains_v2(CHANNEL* ch, int bs_idx, int sector_idx, int tilt_a, int tilt_z);
+	    Real            compute_rsrp_v2(CHANNEL* ch, int sec_number, int sec_z_idx, int sec_a_idx, int mode);
+	    BeamSearchResult find_best_tx_beam_v2(CHANNEL* ch, int bs_idx, int sector_idx);
+	    CandidateCell   evaluate_candidate_cell_v2(const ScenarioConfig& cfg, int bs_idx, int sector_idx);
+	    std::vector<CandidateCell> compute_all_candidate_cells_v2(const ScenarioConfig& cfg);
+	    void            select_serving_cell_v2(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates);
+	    void            compute_interference_v2(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates);
+	    // ===== end v2 methods =====
 
 	    // Real combined_antgain;
 	    ComplexReal TransmitterAntennaGainXLOS_theta       = ComplexReal(0, 0);

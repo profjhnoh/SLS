@@ -1,6 +1,8 @@
 #include "const.h"
 
-
+#include <vector>
+#include <Eigen/Dense>
+using namespace Eigen;
 
 #ifndef _CHANNEL_H_
 #define _CHANNEL_H_
@@ -18,6 +20,8 @@ public:
 	void Update(Real, int, int);
 	void Update_per_time(Real,int, int);
 	void Update_per_time_precise(Real,int, int);  // Ray-level precision mode
+	void Update_v2(Real, int, int);               // v2: K-factor corrected channel coefficients
+	void Update_per_time_v2(Real, int, int);      // v2: Linear-phase Doppler update
 	void Precalculate(int);
 	void Load_precalculate(Real, int, int);
 	void Set_LOS_Prob();
@@ -34,6 +38,12 @@ public:
 	void Set_RMS_delay_spread();
 	void Set_circular_angle_spread();
 	void Precompute_ray_angles();
+
+	// ns-3 style element-level channel generation (no beamforming weights)
+	void GetNewChannel_ElementLevel(int bs_idx, int ms_idx, int sector_idx);
+	void Allocate_ElementLevel_memory(int N);
+	void Reset_ElementLevel_memory();
+
 	void Set_AOAAOD_LOS();
 	void Set_AOAAOD_NLOS();
 	void Set_ZOAZOD_LOS();
@@ -149,6 +159,7 @@ public:
 	Real*           delay                             = NULL;
 	Real*           delay_LOS                         = NULL;
 	Real*           power                             = NULL;
+	Real*           powerForAngles                    = NULL;  // K-factor applied power for angle generation only (Eq. 7.5-8)
 	Real*           power_LOS                         = NULL;
 	Real*           power_NLOS                        = NULL;
 
@@ -193,6 +204,13 @@ public:
 	ComplexReal **** CHIR                          = NULL;
 	ComplexReal *** CHIR_LOS                       = NULL;
 
+	// v2: Initial CHIR storage (Doppler-free, K-factor applied)
+	ComplexReal **** CHIR_init                     = NULL;  // [sector][TX_port][RX_port][cluster]
+
+	// v2: Pre-computed Doppler frequencies (Hz)
+	Real doppler_freq_per_cluster[24]              = {0};   // per NLOS cluster
+	Real doppler_freq_LOS_val                      = 0;     // LOS path
+
 	// ====================================================================
 	// CHIR_vec: Channel Impulse Response in time domain (FFT input/output)
 	// ====================================================================
@@ -225,6 +243,29 @@ public:
 
 	bool CHIR_allocated                                 = false;
 	bool sector_allocated[3]                            = {false, false, false};
+
+	// ====================================================================
+	// Element-Level Channel Matrix (ns-3 style)
+	// H_usn[cluster](rxElement, txElement) — no beamforming weights
+	// ====================================================================
+
+	// raysPreComp: pre-computed polarization matrix per (polTx, polRx, cluster, ray)
+	// Value: F_rx_θ·e^(jΦ_θθ)·F_tx_θ + F_rx_θ·√(1/κ)·e^(jΦ_θφ)·F_tx_φ + ...
+	ComplexReal **** elem_raysPreComp              = NULL;  // [polTx][polRx][cluster][ray]
+
+	// Spherical unit vector cache (per ray)
+	Real ** elem_sinZoA_cosAoA                     = NULL;  // [cluster][ray]
+	Real ** elem_sinZoA_sinAoA                     = NULL;
+	Real ** elem_cosZoA                            = NULL;
+	Real ** elem_sinZoD_cosAoD                     = NULL;
+	Real ** elem_sinZoD_sinAoD                     = NULL;
+	Real ** elem_cosZoD                            = NULL;
+
+	// Element-level channel matrix: cluster-indexed vector of (totalRx × totalTx) matrices
+	std::vector<MatrixXcReal> H_usn;
+
+	bool H_usn_allocated                                = false;
+	int  H_usn_num_clusters                             = 0;
 
 private:
 	

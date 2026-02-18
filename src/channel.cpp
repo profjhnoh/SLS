@@ -201,6 +201,7 @@ void CHANNEL::Reset2Default(void)
 					for (int i = 0; i < MAX_NUM_CLUSTERS; i++)
 					{
 						CHIR[sec_idx][u][s][i] = complex<Real>(0, 0);
+						CHIR_init[sec_idx][u][s][i] = complex<Real>(0, 0);
 					}
 
 					// COMMENTED OUT: CHIR_vec not allocated to save memory
@@ -307,6 +308,7 @@ void CHANNEL::Allocate_memory()
 	delay = new Real[MAX_NUM_CLUSTERS];
 	delay_LOS = new Real[MAX_NUM_CLUSTERS];
 	power = new Real[MAX_NUM_CLUSTERS];
+	powerForAngles = new Real[MAX_NUM_CLUSTERS];  // K-factor applied power for angle generation only
 	power_LOS = new Real[MAX_NUM_CLUSTERS];
 	power_NLOS = new Real[MAX_NUM_CLUSTERS]; /// LOS, NLOS separate for pre-calc
 
@@ -391,11 +393,13 @@ void CHANNEL::Allocate_CHIR_memory(int sector_idx)
 		CHIR = new complex<Real> ***[3];
 		// CHIR_vec = new complex<Real> ***[3];  // COMMENTED OUT: Not used in optimized version
 		CHIR_LOS = new complex<Real> **[3];
+		CHIR_init = new complex<Real> ***[3];
 
 		for (int i = 0; i < 3; i++) {
 			CHIR[i] = NULL;
 			// CHIR_vec[i] = NULL;  // COMMENTED OUT: Not used in optimized version
 			CHIR_LOS[i] = NULL;
+			CHIR_init[i] = NULL;
 		}
 
 		CHIR_allocated = true;
@@ -408,21 +412,25 @@ void CHANNEL::Allocate_CHIR_memory(int sector_idx)
 	CHIR[sector_idx] = new complex<Real> **[NUM_TX_Port];
 	// CHIR_vec[sector_idx] = new complex<Real> **[NUM_TX_Port];  // COMMENTED OUT: Not used in optimized version
 	CHIR_LOS[sector_idx] = new complex<Real> *[NUM_TX_Port];
+	CHIR_init[sector_idx] = new complex<Real> **[NUM_TX_Port];
 
 	for (int u = 0; u < NUM_TX_Port; u++)
 	{
 		CHIR[sector_idx][u] = new complex<Real> *[NUM_RX_Port];
 		// CHIR_vec[sector_idx][u] = new complex<Real> *[NUM_RX_Port];  // COMMENTED OUT: Not used in optimized version
 		CHIR_LOS[sector_idx][u] = new complex<Real>[NUM_RX_Port];
+		CHIR_init[sector_idx][u] = new complex<Real> *[NUM_RX_Port];
 
 		for (int s = 0; s < NUM_RX_Port; s++)
 		{
 			CHIR[sector_idx][u][s] = new complex<Real>[MAX_NUM_CLUSTERS];
+			CHIR_init[sector_idx][u][s] = new complex<Real>[MAX_NUM_CLUSTERS];
 			// CHIR_vec[sector_idx][u][s] = new complex<Real>[fft_size];  // COMMENTED OUT: Not used in optimized version
 
 			for (int i = 0; i < MAX_NUM_CLUSTERS; i++)
 			{
 				CHIR[sector_idx][u][s][i] = complex<Real>(0, 0);
+				CHIR_init[sector_idx][u][s][i] = complex<Real>(0, 0);
 			}
 
 			// COMMENTED OUT: CHIR_vec initialization not needed
@@ -472,6 +480,7 @@ void CHANNEL::Delete_memory()
 	delete[] delay;
 	delete[] delay_LOS;
 	delete[] power;
+	delete[] powerForAngles;
 	delete[] power_LOS;
 	delete[] power_NLOS; /// LOS, NLOS separate for pre-calc
 	delete[] AOA;
@@ -531,13 +540,16 @@ void CHANNEL::Delete_CHIR_memory()
 			for (int s = 0; s < NUM_RX_Port; s++)
 			{
 				delete[] CHIR[sec_idx][u][s];
+				delete[] CHIR_init[sec_idx][u][s];
 				// delete[] CHIR_vec[sec_idx][u][s];  // COMMENTED OUT: CHIR_vec not allocated
 			}
 			delete[] CHIR[sec_idx][u];
+			delete[] CHIR_init[sec_idx][u];
 			// delete[] CHIR_vec[sec_idx][u];  // COMMENTED OUT: CHIR_vec not allocated
 			delete[] CHIR_LOS[sec_idx][u];
 		}
 		delete[] CHIR[sec_idx];
+		delete[] CHIR_init[sec_idx];
 		// delete[] CHIR_vec[sec_idx];  // COMMENTED OUT: CHIR_vec not allocated
 		delete[] CHIR_LOS[sec_idx];
 
@@ -545,10 +557,12 @@ void CHANNEL::Delete_CHIR_memory()
 	}
 
 	delete[] CHIR;
+	delete[] CHIR_init;
 	// delete[] CHIR_vec;  // COMMENTED OUT: CHIR_vec not allocated
 	delete[] CHIR_LOS;
 
 	CHIR = NULL;
+	CHIR_init = NULL;
 	// CHIR_vec = NULL;  // COMMENTED OUT: CHIR_vec not allocated
 	CHIR_LOS = NULL;
 	CHIR_allocated = false;
@@ -1366,7 +1380,7 @@ void CHANNEL::Set_PATHLOSS()
 						pathloss = 40. * log10(distance_3d) + 28 + 20. * log10(carrier_freq / 1000000000.) - 9 * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
 					}
 				}
-				//////////////////////////////////////////////// NLOS
+				// NLOS
 				else if (LOS == 0)
 				{
 					if (distance <= d_BP)
@@ -1379,9 +1393,7 @@ void CHANNEL::Set_PATHLOSS()
 						sigma_SF = 6.;
 						pathloss = 40. * log10(distance_3d) + 28 + 20. * log10(carrier_freq / 1000000000.) - 9 * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
 					}
-
 					pathloss_2 = 13.54 + 39.08 * log10(distance_3d) + 20 * log10(carrier_freq / 1000000000.) - 0.6 * (ms_height_in_channel - 1.5);
-
 					pathloss = MAX(pathloss, pathloss_2);
 				}
 
@@ -1572,11 +1584,10 @@ void CHANNEL::Set_Channel_Parameters()
 		{
 			if (carrier_freq >= 500000000 && carrier_freq <= 6000000000) //// 0.5GHz <= fc <= 6GHz
 			{
-
-				XPR_mean[LOS_propagation] = 11;
+				XPR_mean[LOS_propagation ] = 11;
 				XPR_mean[NLOS_propagation] = 10;
-				XPR_std[LOS_propagation] = 4;
-				XPR_std[NLOS_propagation] = 4;
+				XPR_std [LOS_propagation ] =  4;
+				XPR_std [NLOS_propagation] =  4;
 
 				if (LOS == 1) // LOS
 				{
@@ -1586,27 +1597,27 @@ void CHANNEL::Set_Channel_Parameters()
 					// K_factor = normal(7, 4);
 					mu_K_factor = 7.;
 					sigma_K_factor = 4.;
-					K_factor = pow(10, normal(mu_K_factor, sigma_K_factor) / 10); // linear
+					K_factor  = pow(10, normal(mu_K_factor, sigma_K_factor) / 10); // linear
 
-					mu_DS = -7.70;
-					sigma_DS = 0.18;
-					DS = pow(10, normal(-7.70, 0.18)); // = sigma_tau in M.2135
+					mu_DS     = -7.70;
+					sigma_DS  = 0.18;
+					DS        = pow(10, normal(-7.70, 0.18)); // = sigma_tau in M.2135
 
-					mu_ASD = 1.6;
+					mu_ASD    = 1.6;
 					sigma_ASD = 0.18;
-					mu_ASA = 1.62;
+					mu_ASA    = 1.62;
 					sigma_ASA = 0.22;
 
-					mu_ZSA = 1.22;
+					mu_ZSA    = 1.22;
 					sigma_ZSA = 0.23;
-					mu_ZSD = 1.02;
+					mu_ZSD    = 1.02;
 					sigma_ZSD = 0.41;
 					mu_offset_ZOD = 0;
 
-					cluster_DS = -1; /// N/A
-					cluster_ASD = 5;
-					cluster_ASA = 8;
-					cluster_ZSA = 9;
+					cluster_DS  = -1; /// N/A
+					cluster_ASD =  5;
+					cluster_ASA =  8;
+					cluster_ZSA =  9;
 
 					XPR = normal(11, 4);
 					cluster_shadowing = 6;
@@ -3086,15 +3097,17 @@ void CHANNEL::Set_POWER()
 	for (int i = 0; i < MAX_NUM_CLUSTERS; i++)
 	{
 		power[i] = 0.;
+		powerForAngles[i] = 0.;
 		power_LOS[i] = 0.;
 		power_NLOS[i] = 0.;
 	} //// initialize
 
+	// Step 6: Generate cluster powers using UNSCALED delays (ns-3: GenerateClusterPowers)
 	for (int i = 0; i < num_path; i++)
 	{
 		power[i]        = exp(-delay[i] * (r_tau - 1.) / (r_tau * _DS)) * pow(10., -1 * normal(0, cluster_shadowing) / 10.);
 
-		power_LOS[i]    = power[i]; // delay LOS -> cluster power generation
+		power_LOS[i]    = power[i];
 		power_NLOS[i]   = power[i];
 
 		sum_power      += power[i];
@@ -3107,18 +3120,34 @@ void CHANNEL::Set_POWER()
 
 	if (LOS == 1)
 	{
-		Real denominator = sum_power * (k_R + 1);
-		if (denominator < EPSILON)
+		// Normalize cluster power WITHOUT K-factor (ns-3: m_clusterPower)
+		// K-factor is only applied to powerForAngles for angle generation (Eq. 7.5-8)
+		if (sum_power < EPSILON)
 		{
-			cout << "WARNING: Near-zero denominator detected in LOS power normalization!" << endl;
+			cout << "WARNING: Near-zero sum_power detected in LOS power normalization!" << endl;
 			cout << "  sum_power = " << sum_power << ", k_R = " << k_R << endl;
 			cout << "  BS_idx = " << self_bs_idx << ", MS_idx = " << self_ms_idx << endl;
 		}
 		for (int i = 0; i < num_path; i++)
 		{
-			power[i] = power[i] / (sum_power * (k_R + 1));
+			power[i] = power[i] / sum_power;  // Simple normalization, NO K-factor
 		}
-		power[0] = power[0] + k_R / (k_R + 1);
+
+		// Create powerForAngles with K-factor (Eq. 7.5-8) — used ONLY for angle generation
+		// ns-3: clusterPowerForAngles in RemoveWeakClusters()
+		for (int i = 0; i < num_path; i++)
+		{
+			if (i == 0)
+			{
+				// LOS cluster: P'_1 = P_1/(K_R+1) + K_R/(K_R+1)
+				powerForAngles[i] = power[i] / (k_R + 1) + k_R / (k_R + 1);
+			}
+			else
+			{
+				// NLOS clusters: P'_n = P_n/(K_R+1)
+				powerForAngles[i] = power[i] / (k_R + 1);
+			}
+		}
 	}
 	else if (LOS == 0)
 	{
@@ -3131,6 +3160,60 @@ void CHANNEL::Set_POWER()
 		for (int i = 0; i < num_path; i++)
 		{
 			power[i] = power[i] / sum_power;
+			powerForAngles[i] = power[i];  // NLOS: same as power
+		}
+	}
+
+	// Remove clusters with power more than 25 dB below the maximum cluster power
+	// Use powerForAngles for threshold (ns-3: RemoveWeakClusters uses clusterPowerForAngles)
+	Real max_power = powerForAngles[0];
+	for (int i = 1; i < num_path; i++)
+	{
+		if (powerForAngles[i] > max_power)
+			max_power = powerForAngles[i];
+	}
+
+	Real threshold = max_power * pow(10.0, -25.0 / 10.0); // -25 dB relative to max
+
+	int new_num_path = 0;
+	for (int i = 0; i < num_path; i++)
+	{
+		if (powerForAngles[i] >= threshold)
+		{
+			if (new_num_path != i)
+			{
+				power[new_num_path]           = power[i];
+				powerForAngles[new_num_path]  = powerForAngles[i];
+				power_LOS[new_num_path]       = power_LOS[i];
+				power_NLOS[new_num_path]      = power_NLOS[i];
+				delay[new_num_path]           = delay[i];
+				delay_LOS[new_num_path]       = delay_LOS[i];
+			}
+			new_num_path++;
+		}
+	}
+
+	// Zero out removed entries
+	for (int i = new_num_path; i < num_path; i++)
+	{
+		power[i]           = 0.0;
+		powerForAngles[i]  = 0.0;
+		power_LOS[i]       = 0.0;
+		power_NLOS[i]      = 0.0;
+		delay[i]           = 0.0;
+		delay_LOS[i]       = 0.0;
+	}
+
+	num_path = new_num_path;
+
+	// Step 5 (resumed): Replace delays with LOS-scaled delays for channel generation
+	// ns-3: AdjustClusterDelaysForLosCondition — applied AFTER power generation
+	// The scaled delays (delay/D) are used in Fourier Transform for frequency-domain conversion
+	if (LOS == 1)
+	{
+		for (int i = 0; i < num_path; i++)
+		{
+			delay[i] = delay_LOS[i];  // Replace with scaled delay (= original / D)
 		}
 	}
 }
@@ -3140,36 +3223,37 @@ void CHANNEL::Find_Strong2Clusters()
 	/////////////////////////////////////////////////
 	///
 	/// Small Scale parameter --  find the 2 strongest clusters
+	/// Uses powerForAngles[] (K-factor applied) for angle generation reference
 	///
 	/////////////////////////////////////////////////
 
-	strongest_power = power[0];
-	strongest_power2 = power[1];
+	strongest_power = powerForAngles[0];
+	strongest_power2 = powerForAngles[1];
 	strongest_power_idx = 0;
 	strongest_power_idx2 = 1;
 
-	if (power[0] < power[1])
+	if (powerForAngles[0] < powerForAngles[1])
 	{
-		strongest_power = power[1];
-		strongest_power2 = power[0];
+		strongest_power = powerForAngles[1];
+		strongest_power2 = powerForAngles[0];
 		strongest_power_idx = 1;
 		strongest_power_idx2 = 0;
 	}
 
 	for (int i = 2; i < num_path; i++)
 	{
-		if (power[i] > strongest_power2)
+		if (powerForAngles[i] > strongest_power2)
 		{
-			if (power[i] > strongest_power)
+			if (powerForAngles[i] > strongest_power)
 			{
 				strongest_power2 = strongest_power;
 				strongest_power_idx2 = strongest_power_idx;
-				strongest_power = power[i];
+				strongest_power = powerForAngles[i];
 				strongest_power_idx = i;
 			}
 			else
 			{
-				strongest_power2 = power[i];
+				strongest_power2 = powerForAngles[i];
 				strongest_power_idx2 = i;
 			}
 		}
@@ -3456,7 +3540,7 @@ void CHANNEL::Set_AOAAOD(int _bs_idx, int _ue_idx)
 			Y1_AOA = Y_AOA;
 		}
 
-		if (power[i] == 0.)
+		if (powerForAngles[i] == 0.)
 		{
 			AOD[i] = 0.;
 			AOA[i] = 0.;
@@ -3465,13 +3549,13 @@ void CHANNEL::Set_AOAAOD(int _bs_idx, int _ue_idx)
 		{
 			if ((TYPE == 11) &&  ((Channel_Model_Type == 0) || (Channel_Model_Type == 2)) && (carrier_freq >= 500000000 && carrier_freq <= 6000000000)) //// 0.5GHz <= fc <= 6GHz)   //// Laplacian (InH_A && F<=6GHz)
 			{
-				AOD[i] = -1 * ASD * log(power[i] / strongest_power) / C;
-				AOA[i] = -1 * ASA * log(power[i] / strongest_power) / C;
+				AOD[i] = -1 * ASD * log(powerForAngles[i] / strongest_power) / C;
+				AOA[i] = -1 * ASA * log(powerForAngles[i] / strongest_power) / C;
 			}
 			else ///// Gaussian
 			{
-				AOD[i] = 2. * (ASD / 1.4) * sqrt(-1 * log(power[i] / strongest_power)) / C;
-				AOA[i] = 2. * (ASA / 1.4) * sqrt(-1 * log(power[i] / strongest_power)) / C;
+				AOD[i] = 2. * (ASD / 1.4) * sqrt(-1 * log(powerForAngles[i] / strongest_power)) / C;
+				AOA[i] = 2. * (ASA / 1.4) * sqrt(-1 * log(powerForAngles[i] / strongest_power)) / C;
 			}
 		}
 
@@ -3847,15 +3931,15 @@ void CHANNEL::Set_ZOAZOD(int _bs_idx, int _ue_idx)
 			Y1_ZOA = Y_ZOA;
 		}
 
-		if (power[i] == 0.)
+		if (powerForAngles[i] == 0.)
 		{
 			ZOD[i] = 0.;
 			ZOA[i] = 0.;
 		}
 		else
 		{
-			ZOD[i] = -1 * ZSD * log(power[i] / strongest_power) / C;
-			ZOA[i] = -1 * ZSA * log(power[i] / strongest_power) / C;
+			ZOD[i] = -1 * ZSD * log(powerForAngles[i] / strongest_power) / C;
+			ZOA[i] = -1 * ZSA * log(powerForAngles[i] / strongest_power) / C;
 		}
 		if (i == 0)
 		{
@@ -4035,14 +4119,17 @@ void CHANNEL::Set_SUBCLUSTER()
 	//////////////////////////////////////////////
 	/////
 	///// Set_subcluster
-	////  strong 2 cluster -> divide in 3 cluster and add offset, -> In my code, not divide -> add 4 cluster... the number of ray is different
+	////  strong 2 cluster -> 
+	////  divide in 3 cluster and add offset, -> 
+	////  In my code, not divide -> 
+	////  add 4 cluster... the number of ray is different
 	////
 	/////////////////////////////////////////////
 
 	// modified by jhnoh (multiplying 1e-9 for making nanosec)
 	if (cluster_DS < 0) ///// cluster_DS == N/A
 	{
-		delay[num_path]     = delay[strongest_power_idx]  + 1.28 * 3.91 * 1e-9;
+		delay[num_path]     = delay[strongest_power_idx]  + 1.28 * 3.91 * 1e-9; 
 		delay[num_path + 1] = delay[strongest_power_idx]  + 2.56 * 3.91 * 1e-9;
 		delay[num_path + 2] = delay[strongest_power_idx2] + 1.28 * 3.91 * 1e-9;
 		delay[num_path + 3] = delay[strongest_power_idx2] + 2.56 * 3.91 * 1e-9;
@@ -4084,7 +4171,8 @@ void CHANNEL::Set_SUBCLUSTER()
 
 	for (int path_idx = 0; path_idx < num_path + 4; path_idx++)
 	{
-		if (path_idx == strongest_power_idx || path_idx == strongest_power_idx2) /// Subcluster No.1 (1,2,3,4,5,6,7,8,19,20 rays)
+		if (path_idx == strongest_power_idx || path_idx == strongest_power_idx2) 
+		/// Subcluster No.1 (1,2,3,4,5,6,7,8,19,20 rays)
 		{
 			// num_ray = 10;
 			NUM_RAY_per_ClusterNUM[path_idx] = 10;
@@ -4115,7 +4203,8 @@ void CHANNEL::Set_SUBCLUSTER()
 			offset_angle_rand_coupling[path_idx][9] = offset_angle[path_idx][v.at(9)];
 		}
 
-		else if (path_idx == num_path || path_idx == num_path + 2) /// Subcluster No.2 (9,10,11,12,17,18 rays)
+		else if (path_idx == num_path || path_idx == num_path + 2) 
+		/// Subcluster No.2 (9,10,11,12,17,18 rays)
 		{
 			// num_ray = 6;
 			NUM_RAY_per_ClusterNUM[path_idx] = 6;
@@ -4137,7 +4226,8 @@ void CHANNEL::Set_SUBCLUSTER()
 			offset_angle_rand_coupling[path_idx][5] = offset_angle[path_idx][v.at(5)];
 		}
 
-		else if (path_idx == num_path + 1 || path_idx == num_path + 3) /// Subcluster No.3 (13,14,15,16 rays)
+		else if (path_idx == num_path + 1 || path_idx == num_path + 3) 
+		/// Subcluster No.3 (13,14,15,16 rays)
 		{
 			// num_ray = 4;
 			NUM_RAY_per_ClusterNUM[path_idx] = 4;
@@ -4206,7 +4296,9 @@ void CHANNEL::Set_SUBCLUSTER()
 		}
 	}
 
-	NUM_PATH_for_channelcoeff = num_path + 4;
+	NUM_PATH_for_channelcoeff = num_path + 4; 
+	// +4: strongest 2 clusters each split into 3 sub-clusters (Step 11), 
+	// adding 2 extra entries per strong cluster
 }
 
 void CHANNEL::Precompute_ray_angles()
@@ -4524,7 +4616,7 @@ void CHANNEL::Update(Real t, int _ms_idx, int adj_sector)
 	{
 		for (int n_idx = 0; n_idx < MS_Np; n_idx++)
 		{
-			for (int p = 0; p < 2; p++)
+			for (int p = 0; p < MS_P; p++)
 			{
 				Real UE_LOS_h_angle_pi = channel[_bs_idx][_ms_idx].LOS_AOA_GCS * (pi / 180.);	   //// pi in GCS, rad
 				Real UE_LOS_v_angle_theta = channel[_bs_idx][_ms_idx].LOS_ZOA_GCS * (pi / 180.); ///// theta in GCS, rad
@@ -4563,8 +4655,8 @@ void CHANNEL::Update(Real t, int _ms_idx, int adj_sector)
 					F_pi_temp = (UE_F_pi_GCS[p]);
 				}
 
-				RX_LOS_gain_theta[m_idx * MS_Np * 2 + n_idx * 2 + p] = F_theta_temp;
-				RX_LOS_gain_pi[m_idx * MS_Np * 2 + n_idx * 2 + p] = F_pi_temp;
+				RX_LOS_gain_theta[m_idx * MS_Np * MS_P + n_idx * MS_P + p] = F_theta_temp;
+				RX_LOS_gain_pi[m_idx * MS_Np * MS_P + n_idx * MS_P + p] = F_pi_temp;
 			}
 		}
 	}
@@ -4578,16 +4670,10 @@ void CHANNEL::Update(Real t, int _ms_idx, int adj_sector)
 			{
 				for (int n_idx = 0; n_idx < MS_Np; n_idx++)
 				{
-					for (int p = 0; p < 2; p++)
+					for (int p = 0; p < MS_P; p++)
 					{
-						Real UE_NLOS_h_angle_pi = channel[_bs_idx][_ms_idx].AOA[i] + channel[_bs_idx][_ms_idx].cluster_ASA * channel[_bs_idx][_ms_idx].offset_angle[i][j];
-						Real UE_NLOS_v_angle_theta = channel[_bs_idx][_ms_idx].ZOA[i] + channel[_bs_idx][_ms_idx].cluster_ZSA * channel[_bs_idx][_ms_idx].offset_angle[i][j];
-
-						Transform_angle_minus_180_to_plus_180(UE_NLOS_h_angle_pi);
-						Transform_angle_0_to_plus_180(UE_NLOS_v_angle_theta);
-
-						UE_NLOS_h_angle_pi = UE_NLOS_h_angle_pi * (pi / 180.);
-						UE_NLOS_v_angle_theta = UE_NLOS_v_angle_theta * (pi / 180.);
+						Real UE_NLOS_h_angle_pi = channel[_bs_idx][_ms_idx].ray_AOA[i][j][0] * (pi / 180.);
+						Real UE_NLOS_v_angle_theta = channel[_bs_idx][_ms_idx].ray_AOA[i][j][1] * (pi / 180.);
 
 						Real UE_NLOS_combined_antenna_gain = Get_UE_antenna_pattern(p, UE_NLOS_v_angle_theta, UE_NLOS_h_angle_pi, _ms_idx, 0, UE_NLOS_F_theta_GCS[0], UE_NLOS_F_pi_GCS[0], UE_NLOS_F_theta_GCS[1], UE_NLOS_F_pi_GCS[1]);
 
@@ -4619,8 +4705,8 @@ void CHANNEL::Update(Real t, int _ms_idx, int adj_sector)
 							F_pi_temp = (UE_NLOS_F_pi_GCS[p]);
 						}
 
-						RX_NLOS_gain_theta[m_idx * MS_Np * 2 + n_idx * 2 + p][i][j] = F_theta_temp;
-						RX_NLOS_gain_pi[m_idx * MS_Np * 2 + n_idx * 2 + p][i][j] = F_pi_temp;
+						RX_NLOS_gain_theta[m_idx * MS_Np * MS_P + n_idx * MS_P + p][i][j] = F_theta_temp;
+						RX_NLOS_gain_pi[m_idx * MS_Np * MS_P + n_idx * MS_P + p][i][j] = F_pi_temp;
 					}
 				}
 			}
@@ -4640,14 +4726,11 @@ void CHANNEL::Update(Real t, int _ms_idx, int adj_sector)
 
 	// for (int tx_port_idx = 0; tx_port_idx < (NUM_TX_Port / 2.); tx_port_idx++)  // 1/2 => polar
 	//{
-	for (int p = 0; p < 2; p++)
-	// for (int m_idx = 0; m_idx < BS_Mp; m_idx++)
+	for (int p = 0; p < BS_P; p++)
 	{
 		for (int m_idx = 0; m_idx < BS_Mp; m_idx++)
-		// for (int n_idx = 0; n_idx < BS_Np; n_idx++)
 		{
 			for (int n_idx = 0; n_idx < BS_Np; n_idx++)
-			// for (int p = 0; p < 2; p++)
 			{
 				r_tx.x = sin(v_angle_theta) * cos(h_angle_pi);
 				r_tx.y = sin(v_angle_theta) * sin(h_angle_pi);
@@ -4657,9 +4740,8 @@ void CHANNEL::Update(Real t, int _ms_idx, int adj_sector)
 
 				for (int k = 0; k < K; k++) // vertical element
 				{
-					for (int l = 0; l < L; l++) // horizental element  links[_ms_idx].analog_beam_selection[adj_sector].a
+					for (int l = 0; l < L; l++) // horizental element
 					{
-						// w = virtualization_weight_wv[links[_ms_idx].sector_zenith_angle_idx][links[_ms_idx].sector_azimuth_angle_idx][k][l];
 						w = virtualization_weight_wv[links[_ms_idx].analog_beam_selection[adj_sector].sector_z]
 													[links[_ms_idx].analog_beam_selection[adj_sector].sector_a][k][l];
 						d_tx = bs[_bs_idx].d_tx[sector_num_idx][m_idx * K + k][n_idx * L + l][p][0][0]; //// sector(rx) [M][N][P][Mg][Ng]
@@ -4669,13 +4751,10 @@ void CHANNEL::Update(Real t, int _ms_idx, int adj_sector)
 				F_theta_temp = (F_theta_GCS[p] * weight);
 				F_pi_temp = (F_pi_GCS[p] * weight);
 
-				// TX_LOS_gain_theta[m_idx*BS_Np*2 + n_idx*2 + p]  = F_theta_temp;
 				TX_LOS_gain_theta[p * BS_Mp * BS_Np + m_idx * BS_Np + n_idx] = F_theta_temp;
 				TX_LOS_gain_pi[p * BS_Mp * BS_Np + m_idx * BS_Np + n_idx] = F_pi_temp;
-				// TX_LOS_gain_pi[m_idx*BS_Np * 2 + n_idx * 2 + p] = F_pi_temp;
 			}
 		}
-		//}
 	}
 
 	//////////////////////////////////// TX NLOS
@@ -4684,25 +4763,16 @@ void CHANNEL::Update(Real t, int _ms_idx, int adj_sector)
 	{
 		for (int j = 0; j < channel[_bs_idx][_ms_idx].NUM_RAY_per_ClusterNUM[i]; j++)
 		{
-			Real NLOS_h_angle_pi = channel[_bs_idx][_ms_idx].AOD[i] + channel[_bs_idx][_ms_idx].cluster_ASD * channel[_bs_idx][_ms_idx].offset_angle_rand_coupling[i][j];
-			Real NLOS_v_angle_theta = channel[_bs_idx][_ms_idx].ZOD[i] + (3. / 8.) * pow(10, channel[_bs_idx][_ms_idx].mu_ZSD) * channel[_bs_idx][_ms_idx].offset_angle_rand_coupling[i][j];
-
-			Transform_angle_minus_180_to_plus_180(NLOS_h_angle_pi);
-			Transform_angle_0_to_plus_180(NLOS_v_angle_theta);
-
-			NLOS_h_angle_pi = NLOS_h_angle_pi * (pi / 180.);
-			NLOS_v_angle_theta = NLOS_v_angle_theta * (pi / 180.);
+			Real NLOS_h_angle_pi = channel[_bs_idx][_ms_idx].ray_AOD[i][j][0] * (pi / 180.);
+			Real NLOS_v_angle_theta = channel[_bs_idx][_ms_idx].ray_AOD[i][j][1] * (pi / 180.);
 
 			Real NLOS_combined_antenna_gain = Get_BS_antenna_pattern(NLOS_v_angle_theta, NLOS_h_angle_pi, _bs_idx, sector_num_idx, NLOS_F_theta_GCS[0], NLOS_F_pi_GCS[0], NLOS_F_theta_GCS[1], NLOS_F_pi_GCS[1]);
 
-			for (int p = 0; p < 2; p++)
-			// for (int m_idx = 0; m_idx < BS_Mp; m_idx++)
+			for (int p = 0; p < BS_P; p++)
 			{
 				for (int m_idx = 0; m_idx < BS_Mp; m_idx++)
-				// for (int n_idx = 0; n_idx < BS_Np; n_idx++)
 				{
 					for (int n_idx = 0; n_idx < BS_Np; n_idx++)
-					// for (int p = 0; p < 2; p++)
 					{
 						r_tx.x = sin(NLOS_v_angle_theta) * cos(NLOS_h_angle_pi);
 						r_tx.y = sin(NLOS_v_angle_theta) * sin(NLOS_h_angle_pi);
@@ -4734,11 +4804,15 @@ void CHANNEL::Update(Real t, int _ms_idx, int adj_sector)
 	}
 
 	////////////// CHIR
+	// NOTE: power[] no longer includes K-factor.
+	// v0 Update stores raw NLOS CHIR (without K-factor scaling).
+	// K-factor scaling is applied in Update_per_time (v1) for cluster 0 only,
+	// and for all clusters in Update_per_time_v2 via CHIR_init with nlos_scale.
 	for (int tp = 0; tp < NUM_TX_Port; tp++)
 	{
 		for (int rp = 0; rp < NUM_RX_Port; rp++)
 		{
-			complex<Real> Big_PI_LOS(0., (360. * randnum.u() - 180.0) * (pi / 180.0));
+			complex<Real> Big_PI_LOS(0., channel[_bs_idx][_ms_idx].random_phase_vv_LOS * (pi / 180.0));   // use stored initial phase
 
 			complex<Real> alpha_zero_temp = (RX_LOS_gain_theta[rp] * exp(Big_PI_LOS) * TX_LOS_gain_theta[tp] - RX_LOS_gain_pi[rp] * exp(Big_PI_LOS) * TX_LOS_gain_pi[tp]);
 
@@ -4752,10 +4826,10 @@ void CHANNEL::Update(Real t, int _ms_idx, int adj_sector)
 					Real kappa = channel[_bs_idx][_ms_idx].kappa[i][j];
 					Real _1_over_sqrt_K = 1.0 / sqrt(kappa);
 
-					complex<Real> Big_pi_NLOS_thetatheta(0, (360. * randnum.u() - 180.0) * (pi / 180.0));
-					complex<Real> Big_pi_NLOS_thetapi(0, (360. * randnum.u() - 180.0) * (pi / 180.0));
-					complex<Real> Big_pi_NLOS_pitheta(0, (360. * randnum.u() - 180.0) * (pi / 180.0));
-					complex<Real> Big_pi_NLOS_pipi(0, (360. * randnum.u() - 180.0) * (pi / 180.0));
+					complex<Real> Big_pi_NLOS_thetatheta(0, channel[_bs_idx][_ms_idx].random_phase_vv[i][j] * (pi / 180.0));   // use stored initial phase
+					complex<Real> Big_pi_NLOS_thetapi(0, channel[_bs_idx][_ms_idx].random_phase_vh[i][j] * (pi / 180.0));
+					complex<Real> Big_pi_NLOS_pitheta(0, channel[_bs_idx][_ms_idx].random_phase_hv[i][j] * (pi / 180.0));
+					complex<Real> Big_pi_NLOS_pipi(0, channel[_bs_idx][_ms_idx].random_phase_hh[i][j] * (pi / 180.0));
 
 					// panel 1
 					complex<Real> alpha_nmup_temp =
@@ -4889,6 +4963,9 @@ void CHANNEL::Update_per_time(Real t, int adj_sector, int _ms_idx)
 		v_rx.y = ms[_ms_idx].speed * sin(moving_elevation) * sin(moving_azimuth);
 		v_rx.z = ms[_ms_idx].speed * cos(moving_elevation);
 
+		Real v1_nlos_scale = sqrt(1.0 / (K_linear + 1.0));
+		Real v1_los_scale  = sqrt(K_linear / (K_linear + 1.0));
+
 		for (int tp = 0; tp < NUM_TX_Port; tp++)
 		{
 			for (int rp = 0; rp < NUM_RX_Port; rp++)
@@ -4906,7 +4983,14 @@ void CHANNEL::Update_per_time(Real t, int adj_sector, int _ms_idx)
 				r_v = r_v / Wavelength;
 
 				CHIR_LOS[sector_num_idx][tp][rp] *= exp(jay * (Real)2. * pi * r_v * time);
-				CHIR    [sector_num_idx][tp][rp][0] = sqrt(1 / (K_linear + 1)) * CHIR[sector_num_idx][tp][rp][0] + sqrt(K_linear / (K_linear + 1)) * CHIR_LOS[sector_num_idx][tp][rp];
+
+				// Apply K-factor scaling to ALL clusters (power[] no longer includes K-factor)
+				for (int i = 0; i < channel[_bs_idx][_ms_idx].NUM_PATH_for_channelcoeff; i++) {
+					CHIR[sector_num_idx][tp][rp][i] *= v1_nlos_scale;
+				}
+
+				// Add LOS component to cluster 0
+				CHIR[sector_num_idx][tp][rp][0] += v1_los_scale * CHIR_LOS[sector_num_idx][tp][rp];
 
 				// COMMENTED OUT: CHIR_vec not allocated to save memory
 				// CHIR_vec[sector_num_idx][tp][rp][0] = CHIR[sector_num_idx][tp][rp][0];
@@ -5020,11 +5104,462 @@ void CHANNEL::Update_per_time_precise(Real t, int adj_sector, int _ms_idx)
 				// Update LOS component
 				CHIR_LOS[sector_num_idx][tp][rp] *= exp(jay * (Real)2. * pi * r_v * time);
 
-				// Combine LOS and NLOS with K-factor (first cluster contains combined)
-				CHIR[sector_num_idx][tp][rp][0] =
-					sqrt(1 / (K_linear + 1)) * CHIR[sector_num_idx][tp][rp][0] +
-					sqrt(K_linear / (K_linear + 1)) * CHIR_LOS[sector_num_idx][tp][rp];
+				// Apply K-factor scaling to ALL clusters (power[] no longer includes K-factor)
+				Real precise_nlos_scale = sqrt(1.0 / (K_linear + 1.0));
+				Real precise_los_scale  = sqrt(K_linear / (K_linear + 1.0));
+				for (int i = 0; i < channel[_bs_idx][_ms_idx].NUM_PATH_for_channelcoeff; i++) {
+					CHIR[sector_num_idx][tp][rp][i] *= precise_nlos_scale;
+				}
+
+				// Add LOS component to cluster 0
+				CHIR[sector_num_idx][tp][rp][0] += precise_los_scale * CHIR_LOS[sector_num_idx][tp][rp];
 			}
+		}
+	}
+}
+
+// ====================================================================
+// v2: Channel coefficient generation with K-factor correction and
+//     Doppler frequency precomputation (3GPP TR 38.901 Eq. 7.5-22/29/30)
+// ====================================================================
+void CHANNEL::Update_v2(Real t, int _ms_idx, int adj_sector)
+{
+	#ifdef ENABLE_MULTITHREADING
+	Rand& randnum = get_thread_local_rng();
+	#endif
+
+	int _bs_idx;
+	if (TYPE == 11 && num_Indoor_TRxP == 1)
+		_bs_idx = adj_sector;
+	else
+		_bs_idx = (int)(adj_sector / 3);
+
+	int sector_num_idx = adj_sector % 3;
+	Allocate_CHIR_memory(sector_num_idx);
+
+	Real F_theta_GCS[2];
+	Real F_pi_GCS[2];
+	Real NLOS_F_theta_GCS[2];
+	Real NLOS_F_pi_GCS[2];
+
+	Real UE_F_theta_GCS[2];
+	Real UE_F_pi_GCS[2];
+	Real UE_NLOS_F_theta_GCS[2];
+	Real UE_NLOS_F_pi_GCS[2];
+
+	complex<Real> F_tx_theta = {0, 0};
+	complex<Real> F_tx_pi = {0, 0};
+	complex<Real> NLOS_F_tx_theta = {0, 0};
+	complex<Real> NLOS_F_tx_pi = {0, 0};
+
+	LOCATION3D r_tx;
+	LOCATION3D d_tx;
+	LOCATION3D r_rx;
+	LOCATION3D d_rx;
+	complex<Real> w;
+	complex<Real> weight = 0;
+	complex<Real> jay(0.0, 1.0);
+	complex<Real> F_theta_temp(0, 0);
+	complex<Real> F_pi_temp(0, 0);
+
+	int K = BS_M / BS_Mp;
+	int L = BS_N / BS_Np;
+	int ue_K = MS_M / MS_Mp;
+	int ue_L = MS_N / MS_Np;
+
+	// ---- RX LOS antenna pattern (same as Update) ----
+	for (int m_idx = 0; m_idx < MS_Mp; m_idx++)
+	{
+		for (int n_idx = 0; n_idx < MS_Np; n_idx++)
+		{
+			for (int p = 0; p < MS_P; p++)
+			{
+				Real UE_LOS_h_angle_pi = channel[_bs_idx][_ms_idx].LOS_AOA_GCS * (pi / 180.);
+				Real UE_LOS_v_angle_theta = channel[_bs_idx][_ms_idx].LOS_ZOA_GCS * (pi / 180.);
+
+				Real UE_LOS_combined_antenna_gain = Get_UE_antenna_pattern(p, UE_LOS_v_angle_theta, UE_LOS_h_angle_pi, _ms_idx, 0, UE_F_theta_GCS[0], UE_F_pi_GCS[0], UE_F_theta_GCS[1], UE_F_pi_GCS[1]);
+
+				r_rx.x = sin(UE_LOS_v_angle_theta) * cos(UE_LOS_h_angle_pi);
+				r_rx.y = sin(UE_LOS_v_angle_theta) * sin(UE_LOS_h_angle_pi);
+				r_rx.z = cos(UE_LOS_v_angle_theta);
+
+				weight = {0, 0};
+				for (int k = 0; k < ue_K; k++)
+				{
+					for (int l = 0; l < ue_L; l++)
+					{
+						w = ue_virtualization_weight_wv[links[_ms_idx].analog_beam_selection[adj_sector].z]
+													   [links[_ms_idx].analog_beam_selection[adj_sector].a][k][l];
+						d_rx = ms[_ms_idx].d_rx[m_idx * ue_K + k][n_idx * ue_L + l][p][0][links[_ms_idx].analog_beam_selection[adj_sector].p];
+						weight += w * exp(jay * (Real)2.0 * pi / Wavelength * dot(r_rx, d_rx));
+					}
+				}
+				F_theta_temp = (UE_F_theta_GCS[p] * weight);
+				F_pi_temp = (UE_F_pi_GCS[p] * weight);
+
+				if (ue_antenna_element_gain == 0)
+				{
+					F_theta_temp = (UE_F_theta_GCS[p]);
+					F_pi_temp = (UE_F_pi_GCS[p]);
+				}
+
+				if (std::isnan(F_theta_temp.real()) || std::isnan(F_pi_temp.real()))
+				{
+					cout << "NLOS_F_theta_GCS[p] =" << NLOS_F_theta_GCS[p] << endl;
+					cout << "NLOS_F_pi_GCS[p] = " << NLOS_F_pi_GCS[p] << endl;
+					cout << "weight = " << weight << endl; 
+					cout <<"==============================" << endl;
+				}				
+
+				RX_LOS_gain_theta[m_idx * MS_Np * MS_P + n_idx * MS_P + p] = F_theta_temp;
+				RX_LOS_gain_pi[m_idx * MS_Np * MS_P + n_idx * MS_P + p] = F_pi_temp;
+			}
+		}
+	}
+
+	// ---- RX NLOS antenna pattern (same as Update) ----
+	for (int i = 0; i < channel[_bs_idx][_ms_idx].NUM_PATH_for_channelcoeff; i++)
+	{
+		for (int j = 0; j < channel[_bs_idx][_ms_idx].NUM_RAY_per_ClusterNUM[i]; j++)
+		{
+			for (int m_idx = 0; m_idx < MS_Mp; m_idx++)
+			{
+				for (int n_idx = 0; n_idx < MS_Np; n_idx++)
+				{
+					for (int p = 0; p < MS_P; p++)
+					{
+						Real UE_NLOS_h_angle_pi = channel[_bs_idx][_ms_idx].ray_AOA[i][j][0] * (pi / 180.);
+						Real UE_NLOS_v_angle_theta = channel[_bs_idx][_ms_idx].ray_AOA[i][j][1] * (pi / 180.);
+
+						Real UE_NLOS_combined_antenna_gain = Get_UE_antenna_pattern(p, UE_NLOS_v_angle_theta, UE_NLOS_h_angle_pi, _ms_idx, 0, UE_NLOS_F_theta_GCS[0], UE_NLOS_F_pi_GCS[0], UE_NLOS_F_theta_GCS[1], UE_NLOS_F_pi_GCS[1]);
+
+						r_rx.x = sin(UE_NLOS_v_angle_theta) * cos(UE_NLOS_h_angle_pi);
+						r_rx.y = sin(UE_NLOS_v_angle_theta) * sin(UE_NLOS_h_angle_pi);
+						r_rx.z = cos(UE_NLOS_v_angle_theta);
+
+						weight = {0, 0};
+						for (int k = 0; k < ue_K; k++)
+						{
+							for (int l = 0; l < ue_L; l++)
+							{
+								w = ue_virtualization_weight_wv[links[_ms_idx].analog_beam_selection[adj_sector].z]
+															   [links[_ms_idx].analog_beam_selection[adj_sector].a][k][l];
+								d_rx = ms[_ms_idx].d_rx[m_idx * ue_K + k][n_idx * ue_L + l][p][0][links[_ms_idx].analog_beam_selection[adj_sector].p];
+								weight += w * exp(jay * (Real)2.0 * pi / Wavelength * dot(r_rx, d_rx));
+							}
+						}
+						F_theta_temp = (UE_NLOS_F_theta_GCS[p] * weight);
+						F_pi_temp    = (UE_NLOS_F_pi_GCS[p] * weight);
+
+						if (ue_antenna_element_gain == 0)
+						{
+							F_theta_temp = (UE_NLOS_F_theta_GCS[p]);
+							F_pi_temp = (UE_NLOS_F_pi_GCS[p]);
+						}
+
+						if (std::isnan(F_theta_temp.real()) || std::isnan(F_pi_temp.real()))
+						{
+							cout << "NLOS_F_theta_GCS[p] =" << NLOS_F_theta_GCS[p] << endl;
+							cout << "NLOS_F_pi_GCS[p] = " << NLOS_F_pi_GCS[p] << endl;
+							cout << "weight = " << weight << endl; 
+							cout <<"==============================" << endl;
+						}						
+
+						RX_NLOS_gain_theta[m_idx * MS_Np * MS_P + n_idx * MS_P + p][i][j] = F_theta_temp;
+						RX_NLOS_gain_pi[m_idx * MS_Np * MS_P + n_idx * MS_P + p][i][j] = F_pi_temp;
+					}
+				}
+			}
+		}
+	}
+
+	// ---- TX LOS antenna pattern (same as Update) ----
+	Real h_angle_pi = channel[_bs_idx][_ms_idx].LOS_AOD_GCS * (pi / 180.);
+	Real v_angle_theta = channel[_bs_idx][_ms_idx].LOS_ZOD_GCS * (pi / 180.);
+
+	Real combined_antenna_gain = Get_BS_antenna_pattern(v_angle_theta, h_angle_pi, _bs_idx, sector_num_idx, F_theta_GCS[0], F_pi_GCS[0], F_theta_GCS[1], F_pi_GCS[1]);
+
+	for (int p = 0; p < BS_P; p++)
+	{
+		for (int m_idx = 0; m_idx < BS_Mp; m_idx++)
+		{
+			for (int n_idx = 0; n_idx < BS_Np; n_idx++)
+			{
+				r_tx.x = sin(v_angle_theta) * cos(h_angle_pi);
+				r_tx.y = sin(v_angle_theta) * sin(h_angle_pi);
+				r_tx.z = cos(v_angle_theta);
+
+				weight = {0, 0};
+				for (int k = 0; k < K; k++)
+				{
+					for (int l = 0; l < L; l++)
+					{
+						w = virtualization_weight_wv[links[_ms_idx].analog_beam_selection[adj_sector].sector_z]
+													[links[_ms_idx].analog_beam_selection[adj_sector].sector_a][k][l];
+						d_tx = bs[_bs_idx].d_tx[sector_num_idx][m_idx * K + k][n_idx * L + l][p][0][0];
+						weight += w * exp(jay * (Real)2.0 * pi / Wavelength * dot(r_tx, d_tx));
+					}
+				}
+				F_theta_temp = (F_theta_GCS[p] * weight);
+				F_pi_temp = (F_pi_GCS[p] * weight);
+
+				TX_LOS_gain_theta[p * BS_Mp * BS_Np + m_idx * BS_Np + n_idx] = F_theta_temp;
+				TX_LOS_gain_pi[p * BS_Mp * BS_Np + m_idx * BS_Np + n_idx] = F_pi_temp;
+			}
+		}
+	}
+
+	// ---- TX NLOS antenna pattern ----
+	for (int i = 0; i < channel[_bs_idx][_ms_idx].NUM_PATH_for_channelcoeff; i++)
+	{
+		for (int j = 0; j < channel[_bs_idx][_ms_idx].NUM_RAY_per_ClusterNUM[i]; j++)
+		{
+			Real NLOS_h_angle_pi = channel[_bs_idx][_ms_idx].ray_AOD[i][j][0] * (pi / 180.);
+			Real NLOS_v_angle_theta = channel[_bs_idx][_ms_idx].ray_AOD[i][j][1] * (pi / 180.);
+
+			Real NLOS_combined_antenna_gain = Get_BS_antenna_pattern(NLOS_v_angle_theta, NLOS_h_angle_pi, _bs_idx, sector_num_idx, NLOS_F_theta_GCS[0], NLOS_F_pi_GCS[0], NLOS_F_theta_GCS[1], NLOS_F_pi_GCS[1]);
+
+			for (int p = 0; p < BS_P; p++)
+			{
+				for (int m_idx = 0; m_idx < BS_Mp; m_idx++)
+				{
+					for (int n_idx = 0; n_idx < BS_Np; n_idx++)
+					{
+						r_tx.x = sin(NLOS_v_angle_theta) * cos(NLOS_h_angle_pi);
+						r_tx.y = sin(NLOS_v_angle_theta) * sin(NLOS_h_angle_pi);
+						r_tx.z = cos(NLOS_v_angle_theta);
+
+						weight = {0, 0};
+						for (int k = 0; k < K; k++)
+						{
+							for (int l = 0; l < L; l++)
+							{
+								w = virtualization_weight_wv[links[_ms_idx].analog_beam_selection[adj_sector].sector_z]
+															[links[_ms_idx].analog_beam_selection[adj_sector].sector_a][k][l];
+								d_tx = bs[_bs_idx].d_tx[sector_num_idx][m_idx * K + k][n_idx * L + l][p][0][0];
+								weight += w * exp(jay * (Real)2.0 * pi / Wavelength * dot(r_tx, d_tx));
+							}
+						}
+						F_theta_temp = (NLOS_F_theta_GCS[p] * weight);
+						F_pi_temp = (NLOS_F_pi_GCS[p] * weight);
+
+						TX_NLOS_gain_theta[p * BS_Mp * BS_Np + m_idx * BS_Np + n_idx][i][j] = F_theta_temp;
+						TX_NLOS_gain_pi[p * BS_Mp * BS_Np + m_idx * BS_Np + n_idx][i][j] = F_pi_temp;
+					}
+				}
+			}
+		}
+	}
+
+	// ====================================================================
+	// v2 CHIR assembly per 3GPP TR 38.901 Eq. 7.5-22/29/30
+	// NOTE: power[i] from Set_POWER() is normalized WITHOUT K-factor.
+	//       For LOS case, NLOS clusters are scaled by sqrt(1/(K+1)) * sqrt(P_n/M_n)
+	//       and LOS component is scaled by sqrt(K/(K+1)).
+	// ====================================================================
+	Real K_R = channel[_bs_idx][_ms_idx].K_linear;  // Ricean K-factor (linear)
+	Real nlos_scale = (Propagation == LOS_propagation) ? sqrt(1.0 / (K_R + 1.0)) : 1.0;
+	Real los_scale  = (Propagation == LOS_propagation) ? sqrt(K_R / (K_R + 1.0))  : 0.0;
+
+	static int nan_report_count = 0;  // 전역 NaN 리포트 횟수 제한
+
+	for (int tp = 0; tp < NUM_TX_Port; tp++)
+	{
+		for (int rp = 0; rp < NUM_RX_Port; rp++)
+		{
+			// LOS component — Eq. 7.5-29: [1,0;0,-1] polarization matrix
+			// Scaled by sqrt(K/(K+1)) since H_LOS has no cluster power
+			complex<Real> Big_PI_LOS(0., channel[_bs_idx][_ms_idx].random_phase_vv_LOS * (pi / 180.0));
+			complex<Real> alpha_LOS = los_scale *
+				(RX_LOS_gain_theta[rp] * exp(Big_PI_LOS) * TX_LOS_gain_theta[tp]
+			   - RX_LOS_gain_pi[rp]    * exp(Big_PI_LOS) * TX_LOS_gain_pi[tp]);
+
+			CHIR_LOS[sector_num_idx][tp][rp] = alpha_LOS;
+
+			// NLOS components — Eq. 7.5-22
+			// power[i] is normalized WITHOUT K-factor; nlos_scale applies sqrt(1/(K+1)) for LOS
+			for (int i = 0; i < channel[_bs_idx][_ms_idx].NUM_PATH_for_channelcoeff; i++)
+			{
+				Real cluster_power = channel[_bs_idx][_ms_idx].power[i];
+
+				complex<Real> alpha_nmup(0, 0);
+				for (int j = 0; j < channel[_bs_idx][_ms_idx].NUM_RAY_per_ClusterNUM[i]; j++)
+				{
+					Real kappa = channel[_bs_idx][_ms_idx].kappa[i][j];
+					Real _1_over_sqrt_K = 1.0 / sqrt(kappa);
+
+					complex<Real> Big_pi_NLOS_thetatheta(0, channel[_bs_idx][_ms_idx].random_phase_vv[i][j] * (pi / 180.0));
+					complex<Real> Big_pi_NLOS_thetapi(0, channel[_bs_idx][_ms_idx].random_phase_vh[i][j] * (pi / 180.0));
+					complex<Real> Big_pi_NLOS_pitheta(0, channel[_bs_idx][_ms_idx].random_phase_hv[i][j] * (pi / 180.0));
+					complex<Real> Big_pi_NLOS_pipi(0, channel[_bs_idx][_ms_idx].random_phase_hh[i][j] * (pi / 180.0));
+
+					// nlos_scale * sqrt(P_n / M_n) — nlos_scale = sqrt(1/(K+1)) for LOS, 1.0 for NLOS
+					complex<Real> alpha_nmup_temp =
+					nlos_scale * sqrt(cluster_power / (channel[_bs_idx][_ms_idx].NUM_RAY_per_ClusterNUM[i])) *
+					( ( RX_NLOS_gain_theta[rp][i][j] * exp(Big_pi_NLOS_thetatheta) +
+					    RX_NLOS_gain_pi[rp][i][j] * _1_over_sqrt_K * exp(Big_pi_NLOS_pitheta) )
+					  * TX_NLOS_gain_theta[tp][i][j] +
+					  ( RX_NLOS_gain_theta[rp][i][j] * _1_over_sqrt_K * exp(Big_pi_NLOS_thetapi) +
+					    RX_NLOS_gain_pi[rp][i][j] * exp(Big_pi_NLOS_pipi) )
+					  * TX_NLOS_gain_pi[tp][i][j] );
+
+					// NaN 검출: ray 단위
+					if (std::isnan(alpha_nmup_temp.real()) || std::isnan(alpha_nmup_temp.imag())) {
+						if (nan_report_count < 10) {
+							nan_report_count++;
+							cout << "\n*** NaN in Update_v2 NLOS ray ***" << endl;
+							cout << "  ms=" << _ms_idx << " bs=" << _bs_idx
+							     << " sec=" << sector_num_idx
+							     << " tp=" << tp << " rp=" << rp
+							     << " cluster=" << i << " ray=" << j << endl;
+							cout << "  cluster_power=" << cluster_power
+							     << " power[" << i << "]=" << channel[_bs_idx][_ms_idx].power[i]
+							     << " NUM_RAY=" << channel[_bs_idx][_ms_idx].NUM_RAY_per_ClusterNUM[i] << endl;
+							cout << "  kappa=" << kappa
+							     << " 1/sqrt(kappa)=" << _1_over_sqrt_K << endl;
+							cout << "  sqrt(Pn/Mn)=" << sqrt(cluster_power / channel[_bs_idx][_ms_idx].NUM_RAY_per_ClusterNUM[i]) << endl;
+							cout << "  RX_theta=(" << RX_NLOS_gain_theta[rp][i][j].real() << "," << RX_NLOS_gain_theta[rp][i][j].imag() << ")"
+							     << " RX_pi=(" << RX_NLOS_gain_pi[rp][i][j].real() << "," << RX_NLOS_gain_pi[rp][i][j].imag() << ")" << endl;
+							cout << "  TX_theta=(" << TX_NLOS_gain_theta[tp][i][j].real() << "," << TX_NLOS_gain_theta[tp][i][j].imag() << ")"
+							     << " TX_pi=(" << TX_NLOS_gain_pi[tp][i][j].real() << "," << TX_NLOS_gain_pi[tp][i][j].imag() << ")" << endl;
+							cout << "  phases vv=" << channel[_bs_idx][_ms_idx].random_phase_vv[i][j]
+							     << " vh=" << channel[_bs_idx][_ms_idx].random_phase_vh[i][j]
+							     << " hv=" << channel[_bs_idx][_ms_idx].random_phase_hv[i][j]
+							     << " hh=" << channel[_bs_idx][_ms_idx].random_phase_hh[i][j] << endl;
+							cout << "  Prop=" << Propagation << " LOS=" << channel[_bs_idx][_ms_idx].LOS
+							     << " K_R=" << K_R << endl;
+						}
+					}
+
+					alpha_nmup += alpha_nmup_temp;
+				}
+
+				// NaN 검출: cluster 합산 후
+				if (std::isnan(alpha_nmup.real()) || std::isnan(alpha_nmup.imag())) {
+					if (nan_report_count < 10) {
+						nan_report_count++;
+						cout << "\n*** NaN in Update_v2 NLOS cluster sum ***" << endl;
+						cout << "  ms=" << _ms_idx << " bs=" << _bs_idx
+						     << " cluster=" << i << " tp=" << tp << " rp=" << rp
+						     << " alpha_nmup=(" << alpha_nmup.real() << "," << alpha_nmup.imag() << ")" << endl;
+					}
+				}
+
+				// Store NLOS-only initial value
+				CHIR_init[sector_num_idx][tp][rp][i] = alpha_nmup;
+
+				// CHIR = NLOS (Doppler added in Update_per_time_v2)
+				CHIR[sector_num_idx][tp][rp][i] = alpha_nmup;
+			}
+
+			// Add LOS to cluster 0 (Eq. 7.5-30)
+			if (Propagation == LOS_propagation)
+			{
+				CHIR[sector_num_idx][tp][rp][0] += CHIR_LOS[sector_num_idx][tp][rp];
+
+				// NaN 검출: LOS 추가 후
+				if (std::isnan(CHIR[sector_num_idx][tp][rp][0].real()) || std::isnan(CHIR[sector_num_idx][tp][rp][0].imag())) {
+					if (nan_report_count < 10) {
+						nan_report_count++;
+						cout << "\n*** NaN in Update_v2 after LOS add ***" << endl;
+						cout << "  ms=" << _ms_idx << " bs=" << _bs_idx
+						     << " tp=" << tp << " rp=" << rp
+						     << " CHIR_LOS=(" << CHIR_LOS[sector_num_idx][tp][rp].real() << "," << CHIR_LOS[sector_num_idx][tp][rp].imag() << ")"
+						     << " los_scale=" << los_scale << " K_R=" << K_R << endl;
+					}
+				}
+			}
+		}
+	}
+
+	// ====================================================================
+	// v2: Pre-compute Doppler frequencies per cluster and LOS
+	// ====================================================================
+	LOCATION3D v_rx;
+	Real moving_elevation = ms[_ms_idx].moving_direction * (pi / 180.);
+	Real moving_azimuth = ms[_ms_idx].moving_direction_azimuth * (pi / 180.);
+
+	v_rx.x = ms[_ms_idx].speed * sin(moving_elevation) * cos(moving_azimuth);
+	v_rx.y = ms[_ms_idx].speed * sin(moving_elevation) * sin(moving_azimuth);
+	v_rx.z = ms[_ms_idx].speed * cos(moving_elevation);
+
+	// NLOS cluster Doppler (using cluster center AOA/ZOA)
+	for (int i = 0; i < channel[_bs_idx][_ms_idx].NUM_PATH_for_channelcoeff; i++)
+	{
+		Real aoa_rad = channel[_bs_idx][_ms_idx].AOA[i] * (pi / 180.);
+		Real zoa_rad = channel[_bs_idx][_ms_idx].ZOA[i] * (pi / 180.);
+
+		LOCATION3D r_hat;
+		r_hat.x = sin(zoa_rad) * cos(aoa_rad);
+		r_hat.y = sin(zoa_rad) * sin(aoa_rad);
+		r_hat.z = cos(zoa_rad);
+
+		doppler_freq_per_cluster[i] = (r_hat.x * v_rx.x + r_hat.y * v_rx.y + r_hat.z * v_rx.z) / Wavelength;
+	}
+
+	// LOS Doppler
+	{
+		Real los_aoa_rad = channel[_bs_idx][_ms_idx].LOS_AOA_GCS * (pi / 180.);
+		Real los_zoa_rad = channel[_bs_idx][_ms_idx].LOS_ZOA_GCS * (pi / 180.);
+
+		LOCATION3D r_hat;
+		r_hat.x = sin(los_zoa_rad) * cos(los_aoa_rad);
+		r_hat.y = sin(los_zoa_rad) * sin(los_aoa_rad);
+		r_hat.z = cos(los_zoa_rad);
+
+		doppler_freq_LOS_val = (r_hat.x * v_rx.x + r_hat.y * v_rx.y + r_hat.z * v_rx.z) / Wavelength;
+	}
+}
+
+// ====================================================================
+// v2: Time-domain update with linear-phase Doppler (no cumulative error)
+// CHIR[i] = CHIR_init[i] * exp(j*2π*fd[i]*t) + LOS
+// ====================================================================
+void CHANNEL::Update_per_time_v2(Real t, int adj_sector, int _ms_idx)
+{
+	complex<Real> jay(0, 1);
+
+	Real slot_duration = 1.0e-3 / pow(2.0, numerology);
+	Real time = t * slot_duration;
+
+	int _bs_idx;
+	if (TYPE == 11 && num_Indoor_TRxP == 1)
+		_bs_idx = adj_sector;
+	else
+		_bs_idx = (int)(adj_sector / 3);
+
+	int sector_num_idx = adj_sector % 3;
+	if (!sector_allocated[sector_num_idx])
+	{
+		Allocate_CHIR_memory(sector_num_idx);
+	}
+
+	int num_path = channel[_bs_idx][_ms_idx].NUM_PATH_for_channelcoeff;
+
+	// Pre-compute Doppler phasors (outside tp/rp loops)
+	complex<Real> doppler_phase[24];
+	for (int i = 0; i < num_path; i++)
+		doppler_phase[i] = exp(jay * (Real)2.0 * pi * doppler_freq_per_cluster[i] * time);
+
+	complex<Real> doppler_phase_LOS = exp(jay * (Real)2.0 * pi * doppler_freq_LOS_val * time);
+
+	for (int tp = 0; tp < NUM_TX_Port; tp++)
+	{
+		for (int rp = 0; rp < NUM_RX_Port; rp++)
+		{
+			// NLOS: initial value × Doppler (clean linear phase)
+			for (int i = 0; i < num_path; i++) {
+				CHIR[sector_num_idx][tp][rp][i] = CHIR_init[sector_num_idx][tp][rp][i] * doppler_phase[i];
+				//if (_ms_idx == 30 )
+				//{
+				//	cout << "CHIR["<<sector_num_idx<<"]["<<tp<<"]["<<rp<<"]["<<i<<"] = " 
+				//	<< CHIR_init[sector_num_idx][tp][rp][i] * doppler_phase[i] << endl;
+				//}
+			}
+
+			// LOS: add to cluster 0 with separate Doppler
+			if (Propagation == LOS_propagation)
+				CHIR[sector_num_idx][tp][rp][0] += CHIR_LOS[sector_num_idx][tp][rp] * doppler_phase_LOS;
 		}
 	}
 }
@@ -5082,4 +5617,315 @@ Real Get_sin_psi(Real alpha, Real beta, Real gamma, Real GCS_theta, Real GCS_pi)
 	Real sin_psi = A / sqrt(1 - B * B);
 
 	return sin_psi;
+}
+
+
+// ====================================================================
+// Element-Level Channel Matrix Generation (ns-3 GetNewChannel style)
+// ====================================================================
+// Generates H_usn[cluster](rxElement, txElement) without beamforming weights.
+// This is equivalent to ns-3's ThreeGppChannelModel::GetNewChannel().
+// ====================================================================
+
+void CHANNEL::Allocate_ElementLevel_memory(int N)
+{
+	// Allocate once with MAX sizes (MAX_NUM_CLUSTERS × MAX_NUM_RAYS).
+	// Subsequent calls skip allocation — only update H_usn_num_clusters.
+	if (H_usn_allocated) {
+		H_usn_num_clusters = N;
+		return;
+	}
+
+	// raysPreComp[polTx][polRx][cluster][ray] — fixed MAX sizes
+	elem_raysPreComp = new ComplexReal***[BS_P];
+	for (int pt = 0; pt < BS_P; pt++) {
+		elem_raysPreComp[pt] = new ComplexReal**[MS_P];
+		for (int pr = 0; pr < MS_P; pr++) {
+			elem_raysPreComp[pt][pr] = new ComplexReal*[MAX_NUM_CLUSTERS];
+			for (int n = 0; n < MAX_NUM_CLUSTERS; n++) {
+				elem_raysPreComp[pt][pr][n] = new ComplexReal[MAX_NUM_RAYS]{};
+			}
+		}
+	}
+
+	// Spherical unit vector cache [cluster][ray] — fixed MAX sizes
+	elem_sinZoA_cosAoA = new Real*[MAX_NUM_CLUSTERS];
+	elem_sinZoA_sinAoA = new Real*[MAX_NUM_CLUSTERS];
+	elem_cosZoA        = new Real*[MAX_NUM_CLUSTERS];
+	elem_sinZoD_cosAoD = new Real*[MAX_NUM_CLUSTERS];
+	elem_sinZoD_sinAoD = new Real*[MAX_NUM_CLUSTERS];
+	elem_cosZoD        = new Real*[MAX_NUM_CLUSTERS];
+	for (int n = 0; n < MAX_NUM_CLUSTERS; n++) {
+		elem_sinZoA_cosAoA[n] = new Real[MAX_NUM_RAYS]{};
+		elem_sinZoA_sinAoA[n] = new Real[MAX_NUM_RAYS]{};
+		elem_cosZoA[n]        = new Real[MAX_NUM_RAYS]{};
+		elem_sinZoD_cosAoD[n] = new Real[MAX_NUM_RAYS]{};
+		elem_sinZoD_sinAoD[n] = new Real[MAX_NUM_RAYS]{};
+		elem_cosZoD[n]        = new Real[MAX_NUM_RAYS]{};
+	}
+
+	// H_usn: vector of (totalRx × totalTx) matrices — fixed MAX_NUM_CLUSTERS
+	int totalTx = BS_M * BS_N * BS_P;
+	int totalRx = MS_M * MS_N * MS_P;
+	H_usn.resize(MAX_NUM_CLUSTERS);
+	for (int n = 0; n < MAX_NUM_CLUSTERS; n++) {
+		H_usn[n] = MatrixXcReal::Zero(totalRx, totalTx);
+	}
+
+	H_usn_allocated = true;
+	H_usn_num_clusters = N;
+}
+
+void CHANNEL::Reset_ElementLevel_memory()
+{
+	// Zero-fill all element-level buffers for reuse. No deallocation.
+	if (!H_usn_allocated) return;
+
+	int N = H_usn_num_clusters;
+
+	// Zero-fill raysPreComp (only used range)
+	for (int pt = 0; pt < BS_P; pt++) {
+		for (int pr = 0; pr < MS_P; pr++) {
+			for (int n = 0; n < N; n++) {
+				int M = (int)NUM_RAY_per_ClusterNUM[n];
+				for (int m = 0; m < M; m++) {
+					elem_raysPreComp[pt][pr][n][m] = ComplexReal(REAL(0.0), REAL(0.0));
+				}
+			}
+		}
+	}
+
+	// Zero-fill spherical caches (only used range)
+	for (int n = 0; n < N; n++) {
+		int M = (int)NUM_RAY_per_ClusterNUM[n];
+		for (int m = 0; m < M; m++) {
+			elem_sinZoA_cosAoA[n][m] = REAL(0.0);
+			elem_sinZoA_sinAoA[n][m] = REAL(0.0);
+			elem_cosZoA[n][m]        = REAL(0.0);
+			elem_sinZoD_cosAoD[n][m] = REAL(0.0);
+			elem_sinZoD_sinAoD[n][m] = REAL(0.0);
+			elem_cosZoD[n][m]        = REAL(0.0);
+		}
+	}
+
+	// Zero-fill H_usn matrices (only used range)
+	for (int n = 0; n < N; n++) {
+		H_usn[n].setZero();
+	}
+}
+
+void CHANNEL::GetNewChannel_ElementLevel(int bs_idx, int ms_idx, int sector_idx)
+{
+	// ====================================================================
+	// ns-3 style element-level channel coefficient generation
+	// Output: H_usn[cluster](rxElement, txElement) without beamforming
+	// Reference: 3GPP TR 38.901 Eq. 7.5-22 (NLOS), 7.5-29/30 (LOS)
+	// ====================================================================
+
+	int N = NUM_PATH_for_channelcoeff;
+	if (N <= 0) return;
+
+	// Phase A: Allocate memory
+	Allocate_ElementLevel_memory(N);
+
+	int totalTx = BS_M * BS_N * BS_P;
+	int totalRx = MS_M * MS_N * MS_P;
+	Real k_2pi = REAL(2.0) * pi / Wavelength;
+	complex<Real> jay(REAL(0.0), REAL(1.0));
+	const Real deg2rad = pi / REAL(180.0);
+
+	// Phase B: Cache spherical unit vectors per ray
+	for (int n = 0; n < N; n++) {
+		int M = (int)NUM_RAY_per_ClusterNUM[n];
+		for (int m = 0; m < M; m++) {
+			// RX arrival direction (AOA, ZOA) — ray_AOA[n][m][0]=azimuth, [1]=zenith
+			Real aoa_rad = ray_AOA[n][m][0] * deg2rad;
+			Real zoa_rad = ray_AOA[n][m][1] * deg2rad;
+			elem_sinZoA_cosAoA[n][m] = sin(zoa_rad) * cos(aoa_rad);
+			elem_sinZoA_sinAoA[n][m] = sin(zoa_rad) * sin(aoa_rad);
+			elem_cosZoA[n][m]        = cos(zoa_rad);
+
+			// TX departure direction (AOD, ZOD) — ray_AOD[n][m][0]=azimuth, [1]=zenith
+			Real aod_rad = ray_AOD[n][m][0] * deg2rad;
+			Real zod_rad = ray_AOD[n][m][1] * deg2rad;
+			elem_sinZoD_cosAoD[n][m] = sin(zod_rad) * cos(aod_rad);
+			elem_sinZoD_sinAoD[n][m] = sin(zod_rad) * sin(aod_rad);
+			elem_cosZoD[n][m]        = cos(zod_rad);
+		}
+	}
+
+	// Phase C: Pre-compute raysPreComp[polTx][polRx][cluster][ray]
+	// = antenna_pattern × polarization_matrix × initial_phases
+	// (independent of element position u, s)
+	Real tx_F_theta_GCS[2], tx_F_pi_GCS[2];
+	Real rx_F_theta_GCS[2], rx_F_pi_GCS[2];
+
+	for (int n = 0; n < N; n++) {
+		int M = (int)NUM_RAY_per_ClusterNUM[n];
+		for (int m = 0; m < M; m++) {
+			// Initial random phases (degrees → radians)
+			Real phase_vv = random_phase_vv[n][m] * deg2rad;
+			Real phase_vh = random_phase_vh[n][m] * deg2rad;
+			Real phase_hv = random_phase_hv[n][m] * deg2rad;
+			Real phase_hh = random_phase_hh[n][m] * deg2rad;
+			Real kappa_nm = kappa[n][m];
+			Real inv_sqrt_kappa = REAL(1.0) / sqrt(kappa_nm);
+
+			// TX antenna pattern (BS) — returns both polarization patterns
+			Real aod_rad = ray_AOD[n][m][0] * deg2rad;
+			Real zod_rad = ray_AOD[n][m][1] * deg2rad;
+			Get_BS_antenna_pattern(zod_rad, aod_rad, bs_idx, sector_idx,
+				tx_F_theta_GCS[0], tx_F_pi_GCS[0], tx_F_theta_GCS[1], tx_F_pi_GCS[1]);
+
+			// RX antenna pattern (UE) — returns both polarization patterns
+			Real aoa_rad = ray_AOA[n][m][0] * deg2rad;
+			Real zoa_rad = ray_AOA[n][m][1] * deg2rad;
+			Get_UE_antenna_pattern(0, zoa_rad, aoa_rad, ms_idx, 0,
+				rx_F_theta_GCS[0], rx_F_pi_GCS[0], rx_F_theta_GCS[1], rx_F_pi_GCS[1]);
+
+			// Pre-compute exp(j*phase)
+			ComplexReal exp_vv = exp(jay * phase_vv);
+			ComplexReal exp_vh = exp(jay * phase_vh);
+			ComplexReal exp_hv = exp(jay * phase_hv);
+			ComplexReal exp_hh = exp(jay * phase_hh);
+
+			for (int polTx = 0; polTx < BS_P; polTx++) {
+				Real tx_Ft = tx_F_theta_GCS[polTx];
+				Real tx_Fp = tx_F_pi_GCS[polTx];
+
+				for (int polRx = 0; polRx < MS_P; polRx++) {
+					Real rx_Ft = rx_F_theta_GCS[polRx];
+					Real rx_Fp = rx_F_pi_GCS[polRx];
+
+					// Eq. 7.5-22 polarization matrix
+					// [F_rx_θ, F_rx_φ] · [[e^jΦ_θθ, √(1/κ)·e^jΦ_θφ],
+					//                      [√(1/κ)·e^jΦ_φθ, e^jΦ_φφ]] · [F_tx_θ; F_tx_φ]
+					elem_raysPreComp[polTx][polRx][n][m] =
+						rx_Ft * exp_vv * tx_Ft +
+						rx_Ft * inv_sqrt_kappa * exp_vh * tx_Fp +
+						rx_Fp * inv_sqrt_kappa * exp_hv * tx_Ft +
+						rx_Fp * exp_hh * tx_Fp;
+				}
+			}
+		}
+	}
+
+	// Phase D: Compute H_usn[n](u, s) = Σ_m { √(P_n/M) · raysPreComp · exp(j·rxPhase) · exp(j·txPhase) }
+	for (int n = 0; n < N; n++) {
+		H_usn[n].setZero();
+		int M = (int)NUM_RAY_per_ClusterNUM[n];
+		Real norm = sqrt(power[n] / REAL(M));
+
+		for (int u = 0; u < totalRx; u++) {
+			// RX element decomposition: u = u_m*(MS_N*MS_P) + u_n*MS_P + u_p
+			int u_p = u % MS_P;                    // polRx index
+			int u_n = (u / MS_P) % MS_N;
+			int u_m = u / (MS_N * MS_P);
+			LOCATION3D rxLoc = ms[ms_idx].d_rx[u_m][u_n][u_p][0][0];
+
+			for (int s = 0; s < totalTx; s++) {
+				// TX element decomposition: s = s_m*(BS_N*BS_P) + s_n*BS_P + s_p
+				int s_p = s % BS_P;                // polTx index
+				int s_n = (s / BS_P) % BS_N;
+				int s_m = s / (BS_N * BS_P);
+				LOCATION3D txLoc = bs[bs_idx].d_tx[sector_idx][s_m][s_n][s_p][0][0];
+
+				ComplexReal h_val(REAL(0.0), REAL(0.0));
+				for (int m = 0; m < M; m++) {
+					// RX spatial phase: 2π/λ · r̂_rx · d_rx
+					Real rxPhase = k_2pi * (
+						elem_sinZoA_cosAoA[n][m] * rxLoc.x +
+						elem_sinZoA_sinAoA[n][m] * rxLoc.y +
+						elem_cosZoA[n][m]        * rxLoc.z);
+
+					// TX spatial phase: 2π/λ · r̂_tx · d_tx
+					Real txPhase = k_2pi * (
+						elem_sinZoD_cosAoD[n][m] * txLoc.x +
+						elem_sinZoD_sinAoD[n][m] * txLoc.y +
+						elem_cosZoD[n][m]        * txLoc.z);
+
+					h_val += elem_raysPreComp[s_p][u_p][n][m] *
+						ComplexReal(cos(rxPhase), sin(rxPhase)) *
+						ComplexReal(cos(txPhase), sin(txPhase));
+				}
+				H_usn[n](u, s) = norm * h_val;
+			}
+		}
+	}
+
+	// Phase E: LOS component (Eq. 7.5-29, 7.5-30)
+	if (Propagation == LOS_propagation) {
+		Real K_R = K_linear;
+
+		// LOS direction
+		Real los_aoa_rad = LOS_AOA_GCS * deg2rad;
+		Real los_zoa_rad = LOS_ZOA_GCS * deg2rad;
+		Real los_aod_rad = LOS_AOD_GCS * deg2rad;
+		Real los_zod_rad = LOS_ZOD_GCS * deg2rad;
+
+		// LOS propagation phase (ns-3: phaseDiffDueToDistance)
+		ComplexReal losPhase = exp(-jay * REAL(2.0) * pi * distance / Wavelength);
+
+		// LOS initial phase (from random_phase_vv_LOS)
+		Real los_init_phase_rad = random_phase_vv_LOS * deg2rad;
+		ComplexReal losInitPhase = exp(jay * los_init_phase_rad);
+
+		// LOS antenna patterns
+		Real los_tx_Ft[2], los_tx_Fp[2];
+		Real los_rx_Ft[2], los_rx_Fp[2];
+		Get_BS_antenna_pattern(los_zod_rad, los_aod_rad, bs_idx, sector_idx,
+			los_tx_Ft[0], los_tx_Fp[0], los_tx_Ft[1], los_tx_Fp[1]);
+		Get_UE_antenna_pattern(0, los_zoa_rad, los_aoa_rad, ms_idx, 0,
+			los_rx_Ft[0], los_rx_Fp[0], los_rx_Ft[1], los_rx_Fp[1]);
+
+		// LOS unit vectors
+		Real los_sinZoA_cosAoA = sin(los_zoa_rad) * cos(los_aoa_rad);
+		Real los_sinZoA_sinAoA = sin(los_zoa_rad) * sin(los_aoa_rad);
+		Real los_cosZoA        = cos(los_zoa_rad);
+		Real los_sinZoD_cosAoD = sin(los_zod_rad) * cos(los_aod_rad);
+		Real los_sinZoD_sinAoD = sin(los_zod_rad) * sin(los_aod_rad);
+		Real los_cosZoD        = cos(los_zod_rad);
+
+		Real scale_nlos = sqrt(REAL(1.0) / (K_R + REAL(1.0)));
+		Real scale_los  = sqrt(K_R / (K_R + REAL(1.0)));
+
+		for (int u = 0; u < totalRx; u++) {
+			int u_p = u % MS_P;
+			int u_n = (u / MS_P) % MS_N;
+			int u_m = u / (MS_N * MS_P);
+			LOCATION3D rxLoc = ms[ms_idx].d_rx[u_m][u_n][u_p][0][0];
+
+			Real rxLosPhase = k_2pi * (
+				los_sinZoA_cosAoA * rxLoc.x +
+				los_sinZoA_sinAoA * rxLoc.y +
+				los_cosZoA        * rxLoc.z);
+
+			for (int s = 0; s < totalTx; s++) {
+				int s_p = s % BS_P;
+				int s_n = (s / BS_P) % BS_N;
+				int s_m = s / (BS_N * BS_P);
+				LOCATION3D txLoc = bs[bs_idx].d_tx[sector_idx][s_m][s_n][s_p][0][0];
+
+				Real txLosPhase = k_2pi * (
+					los_sinZoD_cosAoD * txLoc.x +
+					los_sinZoD_sinAoD * txLoc.y +
+					los_cosZoD        * txLoc.z);
+
+				// LOS polarization (Eq. 7.5-29): [F_rx_θ·F_tx_θ − F_rx_φ·F_tx_φ]
+				ComplexReal losRay =
+					(los_rx_Ft[u_p] * los_tx_Ft[s_p] - los_rx_Fp[u_p] * los_tx_Fp[s_p]) *
+					losInitPhase * losPhase *
+					ComplexReal(cos(rxLosPhase), sin(rxLosPhase)) *
+					ComplexReal(cos(txLosPhase), sin(txLosPhase));
+
+				// K-factor (Eq. 7.5-30): combine NLOS + LOS for cluster 0
+				H_usn[0](u, s) = scale_nlos * H_usn[0](u, s) + scale_los * losRay;
+			}
+		}
+
+		// Scale remaining clusters by √(1/(K+1)) (ns-3 line 4309-4312)
+		for (int n = 1; n < N; n++) {
+			H_usn[n] *= ComplexReal(scale_nlos, REAL(0.0));
+		}
+	}
 }

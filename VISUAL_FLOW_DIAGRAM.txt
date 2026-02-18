@@ -1,0 +1,231 @@
+================================================================================
+ZSD CIRCULAR ANGLE SPREAD: DATA FLOW DIAGRAM
+================================================================================
+
+CORRECT FLOW (ORIGINAL)
+========================
+
+Step 1: Generate cluster-level ZOD values
+┌──────────────────────────────────────────────────────────┐
+│ Set_ZOAZOD()                                             │
+│ ────────────                                             │
+│ ZOD[i] generated from power distribution + transformations
+│ Result: ZOD[] ∈ [0, 180] (mostly, but can exceed range  │
+│         during intermediate calculations)               │
+└──────────────────────────────────────────────────────────┘
+                         ↓
+
+Step 2: Precompute per-ray angles
+┌──────────────────────────────────────────────────────────┐
+│ Precompute_ray_angles()                                  │
+│ ─────────────────────────                                │
+│ For each cluster i and ray j:                            │
+│   tx_zenith = ZOD[i] + (3/8)*10^(mu_ZSD) * offset[i][j] │
+│   ↓                                                       │
+│   Apply Transform_angle_0_to_plus_180(tx_zenith)         │
+│   ✓ CORRECT FUNCTION with all 3 cases:                  │
+│     • (180, 360) range                                   │
+│     • [-180, 0) range                                    │
+│     • (-∞, -180) range ← Handles outliers correctly      │
+│   ↓                                                       │
+│   ray_AOD[i][j][1] = transformed_value ∈ [0, 180] ✓     │
+└──────────────────────────────────────────────────────────┘
+                         ↓
+
+Step 3: Flatten per-ray angles
+┌──────────────────────────────────────────────────────────┐
+│ Set_circular_angle_spread()                              │
+│ ────────────────────────────                             │
+│ for each cluster and ray:                                │
+│   flat_zod[idx] = ray_AOD[i][j][1]                       │
+│   ✓ All values in [0, 180]                               │
+└──────────────────────────────────────────────────────────┘
+                         ↓
+
+Step 4: Compute circular spread
+┌──────────────────────────────────────────────────────────┐
+│ compute_circular_angle_spread(flat_zod, flat_pow)        │
+│ ──────────────────────────────────────────────────────   │
+│ Algorithm: Search delta (0-359°) to minimize variance    │
+│ Input: flat_zod[] ∈ [0, 180]  ✓ VALID                   │
+│ Output: spread ≈ 14.2° at 95th percentile  ✓ CORRECT   │
+└──────────────────────────────────────────────────────────┘
+                         ↓
+                    ✓ CORRECT RESULT
+
+
+BUGGY FLOW (v2)
+===============
+
+Step 1: Generate cluster-level ZOD values
+┌──────────────────────────────────────────────────────────┐
+│ GenerateZOAZOD()                                         │
+│ ───────────────                                          │
+│ ZOD[i] generated from power distribution + transformations
+│ Result: ZOD[] ∈ [0, 180] (mostly, same as original)     │
+└──────────────────────────────────────────────────────────┘
+                         ↓
+
+Step 2: Precompute per-ray angles
+┌──────────────────────────────────────────────────────────┐
+│ PrecomputeRayAngles()                                    │
+│ ───────────────────                                      │
+│ For each cluster i and ray j:                            │
+│   tx_zenith = ZOD[i] + (3/8)*10^(mu_ZSD) * offset[i][j] │
+│   ↓                                                       │
+│   Apply TransformAngle0To180(tx_zenith)                  │
+│   ✗ BUGGY FUNCTION - Missing case:                       │
+│     • (180, 360) range ✓ Handled                         │
+│     • [-180, 0) range ✓ Handled                          │
+│     • (-∞, -180) range ✗ NOT HANDLED!                    │
+│   ↓                                                       │
+│   ray_AOD[i][j][1] = ???                                 │
+│   ╔════════════════════════════════════════════════════╗ │
+│   ║ For tx_zenith in (-∞, -180):                        ║ │
+│   ║ fmod() → value in (-∞, -180)                        ║ │
+│   ║ First if (> 180)? NO                                ║ │
+│   ║ Second if (< 0)? YES  ← Executes incorrectly!       ║ │
+│   ║ Result: negates to value > 180  ✗ OUTSIDE RANGE!    ║ │
+│   ╚════════════════════════════════════════════════════╝ │
+│   Examples:                                              │
+│     tx_zenith = -190° → ray_AOD = 190° ✗ INVALID!       │
+│     tx_zenith = -185° → ray_AOD = 185° ✗ INVALID!       │
+│     tx_zenith = -175° → ray_AOD = 175° ✓ OK (by chance) │
+└──────────────────────────────────────────────────────────┘
+                         ↓
+
+Step 3: Flatten per-ray angles
+┌──────────────────────────────────────────────────────────┐
+│ ComputeCircularAngleSpread()                             │
+│ ───────────────────────────                              │
+│ for each cluster and ray:                                │
+│   flat_zod[idx] = ray_AOD[i][j][1]                       │
+│   ✗ CORRUPTED: Some values > 180!                        │
+│   Example: flat_zod = [84, 85, 185, 84, 185, 86, ...]   │
+│                               ↑      ↑                   │
+│                            INVALID INVALID                │
+└──────────────────────────────────────────────────────────┘
+                         ↓
+
+Step 4: Compute circular spread
+┌──────────────────────────────────────────────────────────┐
+│ ComputeCircularAngleSpreadHelper(flat_zod, flat_pow)     │
+│ ────────────────────────────────────────────────────────│
+│ Algorithm: Search delta (0-359°) to minimize variance    │
+│ Input: flat_zod[] ∈ [0, 180] ∪ (180, ∞)  ✗ INVALID     │
+│        with ~5-10% values > 180                          │
+│                                                          │
+│ Result: Algorithm finds smallest spread that:           │
+│   • Keeps invalid angles (185°, 190°) in variance calc  │
+│   • Minimizes variance with corrupted data               │
+│ Output: spread ≈ 1.4° at 95th percentile ✗ WRONG       │
+│                                                          │
+│ Note: Algorithm is correct; it correctly minimizes       │
+│       variance on the corrupted input it receives.       │
+└──────────────────────────────────────────────────────────┘
+                         ↓
+                    ✗ WRONG RESULT
+
+
+COMPARISON: EFFECT ON STATISTICS
+=================================
+
+Original (Correct):
+  flat_zod[] = [84.5, 85.2, 85.1, 84.9, 83.9, 86.1, ...]
+                All values properly distributed in [0, 180]
+  Circular spread algorithm → 14.2° (95th percentile) ✓
+
+v2 Buggy:
+  flat_zod[] = [84.5, 85.2, 185.1, 84.9, 185.9, 86.1, ...]
+                         ↑              ↑
+                    Invalid (> 180)  Invalid (> 180)
+  Circular spread algorithm → 1.4° (95th percentile) ✗
+  
+  Why small?
+  ──────────
+  When 5-10% of angles are > 180 (corrupted), the algorithm
+  can only find a small spread that keeps these outliers
+  within the variance calculation. The minimum spread is
+  artificially constrained by the corruption.
+
+
+THE BUG IN CODE FLOW
+====================
+
+ORIGINAL (Correct Control Flow):
+────────────────────────────────
+  if (x > 180)           {x = 360 - x;}
+  else if (x<0 && x>=-180) {x = -x;}      ← else if: mutually exclusive
+  else if (x < -180)     {x = x + 360;}
+
+  All input ranges covered:
+  • (180, 360): First case ✓
+  • [-180, 0): Second case ✓
+  • (-∞, -180): Third case ✓
+  • [0, 180]: Unchanged ✓
+
+
+v2 BUGGY (Wrong Control Flow):
+──────────────────────────────
+  if (x > 180)           {x = 360 - x;}
+  if (x < 0)             {x = -x;}        ← if: NOT else if!
+                                          ← This always evaluates!
+  
+  Problem input ranges:
+  • (180, 360): First case ✓, second case skipped ✓
+  • (-∞, -180): First case ✗, SECOND CASE EXECUTES ✗
+    Example: x = -190
+    First:  if (-190 > 180)? NO → skip
+    Second: if (-190 < 0)? YES → x = 190
+    Result: 190 ✗ (Outside [0, 180]!)
+
+
+VERIFICATION: BEFORE AND AFTER FIX
+===================================
+
+Before Fix (v2 Buggy):
+┌─────────────────────────────────────┐
+│ ZSD Circular Spread Percentiles:     │
+│ ─────────────────────────────────    │
+│ 5%:  0.195°                         │
+│ 50%: 1.028°  ← Saturation region   │
+│ 95%: 1.418°  ← Compressed!         │
+│                                     │
+│ Transform validity:                 │
+│ Output > 180°: 5-10% of rays ✗      │
+│ Output < 0°:   0%            ✓      │
+└─────────────────────────────────────┘
+
+After Fix (v2 Corrected):
+┌─────────────────────────────────────┐
+│ ZSD Circular Spread Percentiles:     │
+│ ─────────────────────────────────    │
+│ 5%:  0.254°  ← Matches original ✓   │
+│ 50%: 2.169°  ← Full range ✓         │
+│ 95%: 14.20°  ← 10x increase! ✓      │
+│                                     │
+│ Transform validity:                 │
+│ Output ∈ [0, 180]: 100%  ✓           │
+│ Output outside:    0%    ✓           │
+└─────────────────────────────────────┘
+
+
+KEY INSIGHT
+===========
+
+The circular spread algorithm itself is CORRECT.
+The per-ray angle generation logic is CORRECT.
+The ZOD value generation is CORRECT.
+
+Only the angle transformation function is BUGGY.
+
+The spread calculation is "wrong" not because of flawed math,
+but because it receives corrupted input due to the
+transformation bug. Fix the transformation, and the spread
+values return to normal immediately.
+
+This is a classic example of garbage-in-garbage-out (GIGO),
+where downstream logic is correct but upstream data corruption
+propagates through the system.
+
+================================================================================

@@ -28,6 +28,7 @@ class MS
 		void   Received_SINR(void);
 		void   Fourier_Transform_of_Channel(int);
 		void   Fourier_Transform_of_Channel_Optimized(int);  // Optimized version using recursive phasor updates
+		void   Fourier_Transform_ElementLevel(int);          // Element-level DFT (ns-3 style, no beamforming)
 		void   Declare_ch_matrix(void);
 		void   Receive_DL(int);
 		void   Find_Allocated_Rbs_Mcs(int);
@@ -126,6 +127,7 @@ class MS
 		Real ***            CQI_comp        = NULL;
 
 		MatrixXcReal **          H_m             = NULL;
+		MatrixXcReal *           H_m_elem        = NULL;  // Element-level freq-domain channel [rb_idx](totalRx, totalTx)
 		PMI_FEEDBACK ***      PMI             = NULL;
 		VectorXcReal ***      PMI_vector      = NULL;
 		MatrixXcReal ***      CSI_matrix      = NULL;  // TDD: Full channel matrix (NUM_RX_Port × NUM_TX_Port) for reciprocity-based precoding

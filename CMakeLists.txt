@@ -11,7 +11,7 @@ SET( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} )
 # 실수 정밀도 옵션 (기본값: DOUBLE)
 OPTION(USE_FLOAT "Use float precision instead of double" ON)
 OPTION(ENABLE_PROGRESSBAR "Enable progress bar display during simulation" ON)
-OPTION(ENABLE_MULTITHREADING "Enable OpenMP multithreading" ON)
+OPTION(ENABLE_MULTITHREADING "Enable OpenMP multithreading" OFF)
 
 if(USE_FLOAT)
     ADD_DEFINITIONS(-DUSE_FLOAT)
