@@ -3829,6 +3829,11 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 	Real sinZoD_sinAoD[MAX_NUM_CLUSTERS][MAX_NUM_RAYS];
 	Real cosZoD       [MAX_NUM_CLUSTERS][MAX_NUM_RAYS];
 
+	// 1b'. Cache RX arrival direction unit vectors per ray (for UE AF)
+	Real sinZoA_cosAoA[MAX_NUM_CLUSTERS][MAX_NUM_RAYS];
+	Real sinZoA_sinAoA[MAX_NUM_CLUSTERS][MAX_NUM_RAYS];
+	Real cosZoA       [MAX_NUM_CLUSTERS][MAX_NUM_RAYS];
+
 	// 1c. Compute |raysPreComp[polRx][n][m]|² — Eq. (8.1-2) without port virtualization
 	//     raysPreComp = [F_rx,u]^T × [PolMatrix] × [F_tx,element(polTx=0)]
 	//     This is the beam-INDEPENDENT part of |α_{n,m,u,p}|²
@@ -3847,6 +3852,11 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 			sinZoD_cosAoD[n][m] = sin(zod_rad) * cos(aod_rad);
 			sinZoD_sinAoD[n][m] = sin(zod_rad) * sin(aod_rad);
 			cosZoD[n][m]        = cos(zod_rad);
+
+			// Cache RX direction unit vector (for UE AF in Phase 2)
+			sinZoA_cosAoA[n][m] = sin(zoa_rad) * cos(aoa_rad);
+			sinZoA_sinAoA[n][m] = sin(zoa_rad) * sin(aoa_rad);
+			cosZoA[n][m]        = cos(zoa_rad);
 
 			// TX element pattern (BS) — polTx=0 for port 0
 			Real tx_Ft_P1, tx_Fp_P1, tx_Ft_P2, tx_Fp_P2;
@@ -3892,6 +3902,7 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 	// 1d. LOS pre-computation — Eq. (8.1-3)
 	Real los_ray_power[2] = {0.0, 0.0};
 	Real los_sinZoD_cosAoD = 0, los_sinZoD_sinAoD = 0, los_cosZoD = 0;
+	Real los_sinZoA_cosAoA = 0, los_sinZoA_sinAoA = 0, los_cosZoA = 0;
 	Real K_linear = ch->K_linear;
 	bool is_los = (ch->Propagation == LOS_propagation);
 
@@ -3905,6 +3916,11 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 		los_sinZoD_cosAoD = sin(los_zod_rad) * cos(los_aod_rad);
 		los_sinZoD_sinAoD = sin(los_zod_rad) * sin(los_aod_rad);
 		los_cosZoD        = cos(los_zod_rad);
+
+		// LOS RX direction unit vector (for UE AF)
+		los_sinZoA_cosAoA = sin(los_zoa_rad) * cos(los_aoa_rad);
+		los_sinZoA_sinAoA = sin(los_zoa_rad) * sin(los_aoa_rad);
+		los_cosZoA        = cos(los_zoa_rad);
 
 		// LOS antenna patterns
 		Real tx_Ft, tx_Fp, tx_Ft2, tx_Fp2;
@@ -3938,95 +3954,222 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 
 	// ================================================================
 	// Phase 2: Beam search — only virtualization weights change
-	// Eq. (8.1-1): RSRP = PL·SF · (1/U) · Σ_u (|α_0|² + Σ_n Σ_m |α_nm|²) · TX_power
-	// TX power and PL·SF cancel in coupling loss, so we compute the gain part only.
 	// ================================================================
 
 	Real K_denom = is_los ? (K_linear + REAL(1.0)) : REAL(1.0);  // (K_R + 1)
 	Real K_los_num = is_los ? K_linear : REAL(0.0);               // K_R
 
+	// UE port-0 panel-0 element positions (for UE AF in BF case)
+	int K_ue = MS_M / MS_Mp;
+	int L_ue = MS_N / MS_Np;
+	LOCATION3D ue_pos[8][8];
+	if (ue_antenna_element_gain != 0) {
+		for (int k = 0; k < K_ue; k++)
+			for (int l = 0; l < L_ue; l++)
+				ue_pos[k][l] = ms[self_ms_idx].d_rx[k][l][0][0][0];  // panel 0
+	}
+
 	BeamSearchResult best;
 	bool first = true;
 
-	for (int a = 0; a < tilt_azimuth_angle_LCS_size; a++)
+	if (ue_antenna_element_gain == 0)
 	{
-		for (int z = 0; z < tilt_zenith_angle_LCS_size; z++)
+		// --- Omni UE: no UE beam search, no UE AF ---
+		for (int a = 0; a < tilt_azimuth_angle_LCS_size; a++)
 		{
-			Real alpha = 0.0;
+			for (int z = 0; z < tilt_zenith_angle_LCS_size; z++)
+			{
+				Real alpha = 0.0;
 
-			// --- NLOS clusters: Σ_n Σ_m |α_{n,m,u,p}|² summed over u ---
-			for (int n = 0; n < N; n++) {
-				int M_n = ch->NUM_RAY_per_ClusterNUM[n];
-				Real P_n = ch->power[n];
+				for (int n = 0; n < N; n++) {
+					int M_n = ch->NUM_RAY_per_ClusterNUM[n];
+					Real P_n = ch->power[n];
+					for (int m = 0; m < M_n; m++) {
+						ComplexReal AF(0.0, 0.0);
+						for (int k = 0; k < K; k++) {
+							for (int l = 0; l < L; l++) {
+								Real phase = k_2pi * (
+									sinZoD_cosAoD[n][m] * port0_pos[k][l].x +
+									sinZoD_sinAoD[n][m] * port0_pos[k][l].y +
+									cosZoD[n][m]        * port0_pos[k][l].z);
+								AF += virtualization_weight_wv[z][a][k][l] *
+									ComplexReal(cos(phase), sin(phase));
+							}
+						}
+						Real AF_sq = std::norm(AF);
 
-				for (int m = 0; m < M_n; m++) {
-					// Compute array factor: AF = Σ_{k,l} w(z,a,k,l)·exp(j·k_2pi·r̂·d_tx)
-					// This is the beam-dependent part from Eq. (8.1-4)/(8.1-5)
-					ComplexReal AF(0.0, 0.0);
+						Real sum_u_ray_power = 0.0;
+						for (int p = 0; p < MS_P; p++)
+							sum_u_ray_power += ray_power[p][n][m];
+						//sum_u_ray_power = ray_power[0][n][m];
+
+						sum_u_ray_power *= (Real)(MS_M * MS_N);
+
+						alpha += (P_n / (Real)M_n) * AF_sq * sum_u_ray_power;
+					}
+				}
+				alpha /= K_denom;
+
+				if (is_los) {
+					ComplexReal AF_LOS(0.0, 0.0);
 					for (int k = 0; k < K; k++) {
 						for (int l = 0; l < L; l++) {
 							Real phase = k_2pi * (
-								sinZoD_cosAoD[n][m] * port0_pos[k][l].x +
-								sinZoD_sinAoD[n][m] * port0_pos[k][l].y +
-								cosZoD[n][m]        * port0_pos[k][l].z);
-							AF += virtualization_weight_wv[z][a][k][l] *
+								los_sinZoD_cosAoD * port0_pos[k][l].x +
+								los_sinZoD_sinAoD * port0_pos[k][l].y +
+								los_cosZoD        * port0_pos[k][l].z);
+							AF_LOS += virtualization_weight_wv[z][a][k][l] *
 								ComplexReal(cos(phase), sin(phase));
 						}
 					}
-					Real AF_sq = std::norm(AF);   // |AF|²
+					Real AF_LOS_sq = std::norm(AF_LOS);
 
-					// Σ_u |α|² = (P_n/(M_n·(K_R+1))) · |AF|² · Σ_{u_p} |raysPreComp|²
-					// For MS_M>1 or MS_N>1: each u_p has MS_M×MS_N identical elements
-					Real sum_u_ray_power = 0.0;
+					Real sum_u_los_power = 0.0;
 					for (int p = 0; p < MS_P; p++)
-						sum_u_ray_power += ray_power[p][n][m];
-					//sum_u_ray_power = ray_power[0][n][m];
-					sum_u_ray_power *= (Real)(MS_M * MS_N);
+						sum_u_los_power += los_ray_power[p];
+					sum_u_los_power *= (Real)(MS_M * MS_N);
 
-					alpha += (P_n / (Real)M_n) * AF_sq * sum_u_ray_power;
+					alpha += (K_los_num / K_denom) * AF_LOS_sq * sum_u_los_power;
+				}
+
+				Real rsrp_gain = alpha / (Real)totalRx;
+				Real rsrp_dB = 10.0 * log10(rsrp_gain);
+
+				ch->signal_RSRP_gain[sector_idx][z][a][0][0][0] = rsrp_gain;
+
+				if (first || rsrp_dB > best.max_rsrp_dB)
+				{
+					best.max_rsrp_dB     = rsrp_dB;
+					best.sec_azimuth_idx = a;
+					best.sec_zenith_idx  = z;
+					best.ue_azimuth_idx  = 0;
+					best.ue_zenith_idx   = 0;
+					best.ue_panel_idx    = 0;
+					first = false;
 				}
 			}
-			alpha /= K_denom;   // ÷ (K_R + 1)
+		}
+	}
+	else
+	{
+		// --- Directional UE: joint TX beam × UE beam search with UE AF ---
+		// Panel 0 only. UE AF = Σ_{k,l} ue_wv[ue_z][ue_a][k][l] * exp(j·k_2pi·r̂_rx·d_rx[k][l])
 
-			// --- LOS component: |α_{0,u,p}|² summed over u ---
-			if (is_los) {
-				ComplexReal AF_LOS(0.0, 0.0);
-				for (int k = 0; k < K; k++) {
-					for (int l = 0; l < L; l++) {
-						Real phase = k_2pi * (
-							los_sinZoD_cosAoD * port0_pos[k][l].x +
-							los_sinZoD_sinAoD * port0_pos[k][l].y +
-							los_cosZoD        * port0_pos[k][l].z);
-						AF_LOS += virtualization_weight_wv[z][a][k][l] *
-							ComplexReal(cos(phase), sin(phase));
+		for (int ue_a = 0; ue_a < ue_tilt_azimuth_angle_LCS_size; ue_a++)
+		{
+			for (int ue_z = 0; ue_z < ue_tilt_zenith_angle_LCS_size; ue_z++)
+			{
+				// Pre-compute |AF_rx|² per NLOS ray for this UE beam
+				Real ue_af_sq[MAX_NUM_CLUSTERS][MAX_NUM_RAYS];
+				for (int n = 0; n < N; n++) {
+					int M_n = ch->NUM_RAY_per_ClusterNUM[n];
+					for (int m = 0; m < M_n; m++) {
+						ComplexReal AF_rx(0.0, 0.0);
+						for (int k = 0; k < K_ue; k++) {
+							for (int l = 0; l < L_ue; l++) {
+								Real phase = k_2pi * (
+									sinZoA_cosAoA[n][m] * ue_pos[k][l].x +
+									sinZoA_sinAoA[n][m] * ue_pos[k][l].y +
+									cosZoA[n][m]        * ue_pos[k][l].z);
+								AF_rx += ue_virtualization_weight_wv[ue_z][ue_a][k][l] *
+									ComplexReal(cos(phase), sin(phase));
+							}
+						}
+						ue_af_sq[n][m] = std::norm(AF_rx);
 					}
 				}
-				Real AF_LOS_sq = std::norm(AF_LOS);
 
-				Real sum_u_los_power = 0.0;
-				for (int p = 0; p < MS_P; p++)
-					sum_u_los_power += los_ray_power[p];
-				sum_u_los_power *= (Real)(MS_M * MS_N);
+				// |AF_rx|² for LOS
+				Real ue_los_af_sq = 1.0;
+				if (is_los) {
+					ComplexReal AF_rx_los(0.0, 0.0);
+					for (int k = 0; k < K_ue; k++) {
+						for (int l = 0; l < L_ue; l++) {
+							Real phase = k_2pi * (
+								los_sinZoA_cosAoA * ue_pos[k][l].x +
+								los_sinZoA_sinAoA * ue_pos[k][l].y +
+								los_cosZoA        * ue_pos[k][l].z);
+							AF_rx_los += ue_virtualization_weight_wv[ue_z][ue_a][k][l] *
+								ComplexReal(cos(phase), sin(phase));
+						}
+					}
+					ue_los_af_sq = std::norm(AF_rx_los);
+				}
 
-				alpha += (K_los_num / K_denom) * AF_LOS_sq * sum_u_los_power;
-			}
+				// TX beam search
+				for (int a = 0; a < tilt_azimuth_angle_LCS_size; a++)
+				{
+					for (int z = 0; z < tilt_zenith_angle_LCS_size; z++)
+					{
+						Real alpha = 0.0;
 
-			// RSRP = 10·log10(alpha / U)  where U = totalRx
-			Real rsrp_gain = alpha / (Real)totalRx;
-			Real rsrp_dB = 10.0 * log10(rsrp_gain);
+						// NLOS clusters
+						for (int n = 0; n < N; n++) {
+							int M_n = ch->NUM_RAY_per_ClusterNUM[n];
+							Real P_n = ch->power[n];
+							for (int m = 0; m < M_n; m++) {
+								// TX array factor
+								ComplexReal AF(0.0, 0.0);
+								for (int k = 0; k < K; k++) {
+									for (int l = 0; l < L; l++) {
+										Real phase = k_2pi * (
+											sinZoD_cosAoD[n][m] * port0_pos[k][l].x +
+											sinZoD_sinAoD[n][m] * port0_pos[k][l].y +
+											cosZoD[n][m]        * port0_pos[k][l].z);
+										AF += virtualization_weight_wv[z][a][k][l] *
+											ComplexReal(cos(phase), sin(phase));
+									}
+								}
+								Real AF_sq = std::norm(AF);
 
-			// Store in signal_RSRP_gain table (for interference computation)
-			ch->signal_RSRP_gain[sector_idx][z][a][0][0][0] = rsrp_gain;
+								Real sum_pol_power = 0.0;
+								for (int p = 0; p < MS_P; p++)
+									sum_pol_power += ray_power[p][n][m];
 
-			if (first || rsrp_dB > best.max_rsrp_dB)
-			{
-				best.max_rsrp_dB     = rsrp_dB;
-				best.sec_azimuth_idx = a;
-				best.sec_zenith_idx  = z;
-				best.ue_azimuth_idx  = 0;
-				best.ue_zenith_idx   = 0;
-				best.ue_panel_idx    = 0;
-				first = false;
+								alpha += (P_n / (Real)M_n) * AF_sq * ue_af_sq[n][m] * sum_pol_power;
+							}
+						}
+						alpha /= K_denom;
+
+						// LOS component
+						if (is_los) {
+							ComplexReal AF_LOS(0.0, 0.0);
+							for (int k = 0; k < K; k++) {
+								for (int l = 0; l < L; l++) {
+									Real phase = k_2pi * (
+										los_sinZoD_cosAoD * port0_pos[k][l].x +
+										los_sinZoD_sinAoD * port0_pos[k][l].y +
+										los_cosZoD        * port0_pos[k][l].z);
+									AF_LOS += virtualization_weight_wv[z][a][k][l] *
+										ComplexReal(cos(phase), sin(phase));
+								}
+							}
+							Real AF_LOS_sq = std::norm(AF_LOS);
+
+							Real sum_pol_los_power = 0.0;
+							for (int p = 0; p < MS_P; p++)
+								sum_pol_los_power += los_ray_power[p];
+
+							alpha += (K_los_num / K_denom) * AF_LOS_sq * ue_los_af_sq * sum_pol_los_power;
+						}
+
+						Real rsrp_gain = alpha / (Real)MS_P;
+						Real rsrp_dB = 10.0 * log10(rsrp_gain);
+
+						ch->signal_RSRP_gain[sector_idx][z][a][ue_z][ue_a][0] = rsrp_gain;
+
+						if (first || rsrp_dB > best.max_rsrp_dB)
+						{
+							best.max_rsrp_dB     = rsrp_dB;
+							best.sec_azimuth_idx = a;
+							best.sec_zenith_idx  = z;
+							best.ue_azimuth_idx  = ue_a;
+							best.ue_zenith_idx   = ue_z;
+							best.ue_panel_idx    = 0;
+							first = false;
+						}
+					}
+				}
 			}
 		}
 	}
