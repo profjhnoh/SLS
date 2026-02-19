@@ -1132,8 +1132,7 @@ void Initialize_CHANNEL()
 void Link_configuration()
 {
 	////////////////////////////////////////////////////////////////////////////////////////////////////
-	// 230616 mTRP
-	for (int idx = 0; idx < num_SECTORS + num_mTRP_SECTORS; idx++)
+	for (int idx = 0; idx < num_SECTORS; idx++)
 	{
 		sector[idx].ue_in_control.clear();
 		sector[idx].ue_in_comp.clear();

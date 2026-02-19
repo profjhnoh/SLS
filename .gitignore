@@ -21,3 +21,5 @@ doc/R1-165975
 v2/
 ns3_reference/
 reference_code/
+*.pdf
+*.json

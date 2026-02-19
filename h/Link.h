@@ -15,7 +15,7 @@ typedef struct {
 	int sector_z;
 } beam_selection;
 
-// ===== v2 refactoring structs =====
+// Signal/interference computation helper structs
 struct ScenarioConfig {
     int  num_candidate_bs;                // number of candidate BSs to evaluate
     int  sectors_per_bs;                  // 1 for InH 1TRxP, 3 for InH 3TRxP / DU / Rural
@@ -52,14 +52,13 @@ struct CandidateCell {
     bool  is_indoor    = false;
     BeamSearchResult beam;
 };
-// ===== end v2 structs =====
 
 class LINK
 {
    public:
 	    void   Configuration(int);
 	    void   Delete_link_memory();
-	    void   Get_signal_interference();
+	    // void   Get_signal_interference_old();  // deprecated: original monolithic version
 	    void   Get_adj_SECTORS();
 	    void   Get_interference();
 	    Real Get_angle(LOCATION, LOCATION, LOCATION);
@@ -70,23 +69,19 @@ class LINK
 	    Real Get_RSRP(CHANNEL * , int, int, int, int);
 	    void   UE_Initial_Setting(void);
 		void   Reset2Default(void);
-        //Real Get_antgain(LOCATION, LOCATION, int, int, int, int);
-	    //void Get_TX_SmallScale_antgain(LOCATION, int, int, int, int);
-	    //Real Get_RSRP(int, int, int, int, int, int);
 
-	    // ===== v2 refactored methods =====
-	    void            Get_signal_interference_v2();
-	    ScenarioConfig  build_scenario_config_v2() const;
-	    Real            compute_pathloss_final_v2(const ScenarioConfig& cfg, int bs_idx);
-	    Real            compute_tx_antenna_gains_v2(CHANNEL* ch, int bs_idx, int sector_idx, int tilt_a, int tilt_z);
-	    void            compute_tx_smallscale_gains_v2(CHANNEL* ch, int bs_idx, int sector_idx, int tilt_a, int tilt_z);
-	    Real            compute_rsrp_v2(CHANNEL* ch, int sec_number, int sec_z_idx, int sec_a_idx, int mode);
-	    BeamSearchResult find_best_tx_beam_v2(CHANNEL* ch, int bs_idx, int sector_idx);
-	    CandidateCell   evaluate_candidate_cell_v2(const ScenarioConfig& cfg, int bs_idx, int sector_idx);
-	    std::vector<CandidateCell> compute_all_candidate_cells_v2(const ScenarioConfig& cfg);
-	    void            select_serving_cell_v2(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates);
-	    void            compute_interference_v2(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates);
-	    // ===== end v2 methods =====
+	    // Refactored signal/interference computation
+	    void            Get_signal_interference();
+	    ScenarioConfig  build_scenario_config() const;
+	    Real            compute_pathloss_final(const ScenarioConfig& cfg, int bs_idx);
+	    Real            compute_tx_antenna_gains(CHANNEL* ch, int bs_idx, int sector_idx, int tilt_a, int tilt_z);
+	    void            compute_tx_smallscale_gains(CHANNEL* ch, int bs_idx, int sector_idx, int tilt_a, int tilt_z);
+	    Real            compute_rsrp(CHANNEL* ch, int sec_number, int sec_z_idx, int sec_a_idx, int mode);
+	    BeamSearchResult find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx);
+	    CandidateCell   evaluate_candidate_cell(const ScenarioConfig& cfg, int bs_idx, int sector_idx);
+	    std::vector<CandidateCell> compute_all_candidate_cells(const ScenarioConfig& cfg);
+	    void            select_serving_cell(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates);
+	    void            compute_interference(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates);
 
 	    // Real combined_antgain;
 	    ComplexReal TransmitterAntennaGainXLOS_theta       = ComplexReal(0, 0);

@@ -222,7 +222,7 @@ void LINK::Configuration(int _self_ms_idx)
 {
 	self_ms_idx = _self_ms_idx;
 	UE_Initial_Setting();
-	Get_signal_interference_v2();
+	Get_signal_interference();
 	Get_adj_SECTORS();
 
 	SINR = 10. * log10(dBm2linear(signal) / (dBm2linear(interference) + noise));
@@ -230,7 +230,8 @@ void LINK::Configuration(int _self_ms_idx)
 
 
 
-void LINK::Get_signal_interference()
+#if 0  // deprecated: original monolithic Get_signal_interference — replaced by refactored version below
+void LINK::Get_signal_interference_old()
 {
 
 	Real strongest_signal;
@@ -1582,8 +1583,9 @@ void LINK::Get_signal_interference()
 	Real noise = dBm2linear(thermal_noise + (10. * log10(bandwidth)) + MS_noisefig);
 	geometry = dBm2linear(signal)/(dBm2linear(interference) + noise);
 }
+#endif  // deprecated Get_signal_interference_old
 
-void LINK::Get_adj_SECTORS() 
+void LINK::Get_adj_SECTORS()
 {
 	Real pathlosss;
 	Real antgainn;
@@ -1847,7 +1849,7 @@ Real LINK::Get_antgain(CHANNEL * channel_of_interest, int _bs_idx, int sector_id
 	v_angle_theta, h_angle_pi, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, F_tx_theta, F_tx_pi);
 
 	TransmitterAntennaGainXLOS_theta = F_tx_theta;
-	TransmitterAntennaGainXLOS_pi = F_tx_pi;
+	TransmitterAntennaGainXLOS_pi    = F_tx_pi;
 
 	return combined_antenna_gain;
 }
@@ -2041,7 +2043,6 @@ void LINK::Get_RX_SmallScale_antgain(int M, int N, int P, CHANNEL * channel_of_i
 			}
 		}
 
-		//
 		for (int i = 0; i < channel_of_interest->NUM_PATH_for_channelcoeff; i++)
 		{
 			for (int j = 0; j < channel_of_interest->NUM_RAY_per_ClusterNUM[i]; j++)
@@ -2133,7 +2134,6 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 	Real kappa;
 	Real _1_over_sqrt_K;
 
-
 	if (ue_antenna_element_gain == 0)  //// 1 to 1 mapping, NOT USE ue beam, ue PORT
 	{
 		int M = MS_M;
@@ -2146,7 +2146,6 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 			{
 				for (int p = 0; p < P; p++)
 				{
-
 					alpha_zero = 0;
 					alpha_nmup = 0;
 
@@ -2187,15 +2186,13 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 				}
 			}
 		}
-
-		channel_of_interest->signal_RSRP_gain[sec_number][sec_z_idx][sec_a_idx][0][0][0] = alpha / (Real)(M*N*P);
-
+		channel_of_interest->signal_RSRP_gain[sec_number][sec_z_idx][sec_a_idx][0][0][0] = alpha / (Real)(M*N*P); // *P
 
 		selected_a = 0;
 		selected_z = 0;
 		selected_p = 0;
 
-		Real RSRP_antenna_gain = (alpha) / (M*N*P);
+		Real RSRP_antenna_gain = (alpha) / (M*N*P); // *P
 
 		return 10 * log10(RSRP_antenna_gain);
 			
@@ -2469,7 +2466,9 @@ MatrixXReal Get_distance_angular(Real a, Real b, Real c, Real x, Real y, Real z)
 }
 
 
-Real LINK::Get_MS_antgain(int M, int N, int P, CHANNEL * channel_of_interest , int sector_idx, int tilt_z_idx, int tilt_a_idx, int ue_interference_index)
+Real LINK::Get_MS_antgain(int M, int N, int P, 
+	                      CHANNEL * channel_of_interest , int sector_idx, 
+						  int tilt_z_idx, int tilt_a_idx, int ue_interference_index)
 {
 	int ms_idx = self_ms_idx;
 
@@ -2488,13 +2487,9 @@ Real LINK::Get_MS_antgain(int M, int N, int P, CHANNEL * channel_of_interest , i
 
 	Real combined_antenna_gain;
 
-
 	if (ue_antenna_element_gain == 0) // UE omni-antenna case
-	{
-
-		
+	{		
 		combined_antenna_gain = 0;
-
 		if (P == 0)
 		{
 			ReceiverAntennaGainXLOS_theta = 1.;
@@ -2505,14 +2500,10 @@ Real LINK::Get_MS_antgain(int M, int N, int P, CHANNEL * channel_of_interest , i
 			ReceiverAntennaGainXLOS_theta = 0.;
 			ReceiverAntennaGainXLOS_pi = 1.;
 		}
-		
-		
 	}
 	else
 	{
-
 		combined_antenna_gain = Get_UE_antenna_pattern(P, v_angle_theta, h_angle_pi, ms_idx, sector_idx, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2);
-
 		Get_UE_antenna_field_pattern(channel_of_interest->self_ms, M, N, P, ms_idx, sector_idx, tilt_z_idx, tilt_a_idx, v_angle_theta, h_angle_pi, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, F_rx_theta, F_rx_pi, F_rx_theta_2, F_rx_pi_2);
 
 		ReceiverAntennaGainXLOS_theta = F_rx_theta;
@@ -2732,8 +2723,8 @@ ComplexReal  Get_BS_antenna_field_pattern(LOCATION interferer,
 	dH = BS_dH;
 	dV = BS_dV;
 
-	int K = BS_M / BS_Mp;    /////   4 / 4 = 1
-	int L = BS_N / BS_Np;   //////   4/4 = 1
+	int K = BS_M / BS_Mp; //   4/4 = 1
+	int L = BS_N / BS_Np; //   4/4 = 1
 
 	ComplexReal jay(0.0, 1.0);
 	ComplexReal  F_theta_temp = {0,0};
@@ -3692,22 +3683,13 @@ void Print_FAST_EXP_Profile() {
 
 
 // =============================================================================
-// ===========================  v2 Refactored Code  ============================
-// =============================================================================
-//
-// The functions below provide the same functionality as Get_signal_interference()
-// but with improved readability by decomposing the 1350-line monolithic function
+// Refactored signal/interference computation
+// Decomposed from the original monolithic Get_signal_interference()
 // into 11 smaller functions with clear responsibilities.
-//
-// To use: call Get_signal_interference_v2() instead of Get_signal_interference()
-//         in LINK::Configuration().
-//
-// Note: randnum.u() call order differs from the original, so individual UE
-//       values will differ, but statistical distributions should be equivalent.
 // =============================================================================
 
 // Step 1: Build scenario configuration from global variables
-ScenarioConfig LINK::build_scenario_config_v2() const
+ScenarioConfig LINK::build_scenario_config() const
 {
 	ScenarioConfig cfg;
 
@@ -3753,7 +3735,7 @@ ScenarioConfig LINK::build_scenario_config_v2() const
 
 
 // Step 2: Compute final pathloss for a given BS
-Real LINK::compute_pathloss_final_v2(const ScenarioConfig& cfg, int bs_idx)
+Real LINK::compute_pathloss_final(const ScenarioConfig& cfg, int bs_idx)
 {
 	CHANNEL* ch = &channel[bs_idx][self_ms_idx];
 	Real pl = ch->pathloss;
@@ -3769,7 +3751,7 @@ Real LINK::compute_pathloss_final_v2(const ScenarioConfig& cfg, int bs_idx)
 
 
 // Step 3: Compute TX antenna gains (wrapper around Get_antgain)
-Real LINK::compute_tx_antenna_gains_v2(CHANNEL* ch, int bs_idx, int sector_idx, int tilt_a, int tilt_z)
+Real LINK::compute_tx_antenna_gains(CHANNEL* ch, int bs_idx, int sector_idx, int tilt_a, int tilt_z)
 {
 	return Get_antgain(ch, bs_idx, sector_idx, tilt_a, tilt_z);
 	// Side effect: sets TransmitterAntennaGainXLOS_theta/pi
@@ -3777,7 +3759,7 @@ Real LINK::compute_tx_antenna_gains_v2(CHANNEL* ch, int bs_idx, int sector_idx, 
 
 
 // Step 4: Compute TX small-scale gains (unified, no TYPE branch needed)
-void LINK::compute_tx_smallscale_gains_v2(CHANNEL* ch, int bs_idx, int sector_idx, int tilt_a, int tilt_z)
+void LINK::compute_tx_smallscale_gains(CHANNEL* ch, int bs_idx, int sector_idx, int tilt_a, int tilt_z)
 {
 	// The original Get_TX_SmallScale_antgain has TYPE==11 and TYPE==12/13 branches
 	// but they are identical in logic. We simply delegate to the existing function.
@@ -3786,7 +3768,7 @@ void LINK::compute_tx_smallscale_gains_v2(CHANNEL* ch, int bs_idx, int sector_id
 
 
 // Step 5: Compute RSRP (delegates to existing Get_RSRP)
-Real LINK::compute_rsrp_v2(CHANNEL* ch, int sec_number, int sec_z_idx, int sec_a_idx, int mode)
+Real LINK::compute_rsrp(CHANNEL* ch, int sec_number, int sec_z_idx, int sec_a_idx, int mode)
 {
 	// mode: 0 = find best UE beam & compute RSRP, 1 = fixed UE beam (for interference)
 	return Get_RSRP(ch, sec_number, sec_z_idx, sec_a_idx, mode);
@@ -3796,8 +3778,169 @@ Real LINK::compute_rsrp_v2(CHANNEL* ch, int sec_number, int sec_z_idx, int sec_a
 
 
 // Step 6: Find best TX beam for a given (BS, sector) pair
-BeamSearchResult LINK::find_best_tx_beam_v2(CHANNEL* ch, int bs_idx, int sector_idx)
+//
+// Optimized RSRP computation following TR 36.873 Eq. (8.1-1)~(8.1-5).
+//
+// Key insight: The RSRP formula computes |α_{n,m,u,p}|² per ray (incoherent sum),
+// and there is NO RX spatial phase in the formula. Therefore:
+//
+//   |α_{n,m,u,p}|² = (P_n / (M_n · (K_R+1))) · |raysPreComp[u_p][n][m]|² · |AF(n,m,beam)|²
+//
+// where:
+//   raysPreComp = F_rx,u × PolarizationMatrix × F_tx,element   (beam-INDEPENDENT)
+//   AF(n,m,beam) = Σ_{k,l} w_{k,l}(beam) · exp(j·2π/λ · r̂_{n,m} · d_tx(k,l,0))  (beam-DEPENDENT)
+//
+// This allows us to:
+//   Phase 1: Pre-compute antenna patterns and |raysPreComp|² for all rays ONCE
+//   Phase 2: Sweep beams — only compute |AF|² per ray (cheap weight × exp sum)
+//
+BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx)
 {
+	const int N = ch->NUM_PATH_for_channelcoeff;
+	if (N <= 0) {
+		BeamSearchResult empty;
+		return empty;
+	}
+
+	const int K = BS_M / BS_Mp;   // vertical elements per port 0
+	const int L = BS_N / BS_Np;   // horizontal elements per port 0
+	const int totalRx = MS_M * MS_N * MS_P;
+	const Real deg2rad = pi / REAL(180.0);
+	const Real k_2pi = REAL(2.0) * pi / Wavelength;
+
+	// ================================================================
+	// Phase 1: Pre-compute beam-independent ray data (ONCE)
+	// Follows TR 36.873 Eq. (8.1-2), (8.1-3) structure
+	// ================================================================
+
+	// 1a. Cache port-0 element positions: d_tx(k,l,p=0,Mg=0,Ng=0)
+	LOCATION3D port0_pos[8][8];   // [K_MAX][L_MAX]
+	for (int k = 0; k < K; k++)
+		for (int l = 0; l < L; l++)
+			port0_pos[k][l] = bs[bs_idx].d_tx[sector_idx][k][l][0][0][0];
+
+	// 1b. Cache TX departure direction unit vectors per ray
+	//     (for computing array factor AF in Phase 2)
+	Real sinZoD_cosAoD[MAX_NUM_CLUSTERS][MAX_NUM_RAYS];
+	Real sinZoD_sinAoD[MAX_NUM_CLUSTERS][MAX_NUM_RAYS];
+	Real cosZoD       [MAX_NUM_CLUSTERS][MAX_NUM_RAYS];
+
+	// 1c. Compute |raysPreComp[polRx][n][m]|² — Eq. (8.1-2) without port virtualization
+	//     raysPreComp = [F_rx,u]^T × [PolMatrix] × [F_tx,element(polTx=0)]
+	//     This is the beam-INDEPENDENT part of |α_{n,m,u,p}|²
+	Real ray_power[2][MAX_NUM_CLUSTERS][MAX_NUM_RAYS];   // [polRx][cluster][ray]
+	memset(ray_power, 0, sizeof(ray_power));
+
+	for (int n = 0; n < N; n++) {
+		int M_n = ch->NUM_RAY_per_ClusterNUM[n];
+		for (int m = 0; m < M_n; m++) {
+			Real aod_rad = ch->ray_AOD[n][m][0] * deg2rad;
+			Real zod_rad = ch->ray_AOD[n][m][1] * deg2rad;
+			Real aoa_rad = ch->ray_AOA[n][m][0] * deg2rad;
+			Real zoa_rad = ch->ray_AOA[n][m][1] * deg2rad;
+
+			// Cache TX direction unit vector (for AF computation in Phase 2)
+			sinZoD_cosAoD[n][m] = sin(zod_rad) * cos(aod_rad);
+			sinZoD_sinAoD[n][m] = sin(zod_rad) * sin(aod_rad);
+			cosZoD[n][m]        = cos(zod_rad);
+
+			// TX element pattern (BS) — polTx=0 for port 0
+			Real tx_Ft_P1, tx_Fp_P1, tx_Ft_P2, tx_Fp_P2;
+			Get_BS_antenna_pattern(zod_rad, aod_rad, bs_idx, sector_idx,
+				tx_Ft_P1, tx_Fp_P1, tx_Ft_P2, tx_Fp_P2);
+
+			// RX element pattern (UE)
+			// For omni UE (ue_antenna_element_gain==0): isotropic {1,0}/{0,1}
+			// For directional UE: actual pattern via Get_UE_antenna_pattern
+			Real rx_Ft[2], rx_Fp[2];
+			if (ue_antenna_element_gain == 0) {
+				rx_Ft[0] = 1.0; rx_Fp[0] = 0.0;  // polRx=0: θ-polarized
+				rx_Ft[1] = 0.0; rx_Fp[1] = 1.0;  // polRx=1: φ-polarized
+			} else {
+				Real rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2;
+				Get_UE_antenna_pattern(0, zoa_rad, aoa_rad, self_ms_idx, 0,
+					rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2);
+				rx_Ft[0] = rx_Ft_P1; rx_Fp[0] = rx_Fp_P1;
+				rx_Ft[1] = rx_Ft_P2; rx_Fp[1] = rx_Fp_P2;
+			}
+
+			// Initial random phases and XPR  — Eq. (8.1-2) polarization matrix
+			Real inv_sqrt_kappa = REAL(1.0) / sqrt(ch->kappa[n][m]);
+			ComplexReal exp_vv(cos(ch->random_phase_vv[n][m] * deg2rad), sin(ch->random_phase_vv[n][m] * deg2rad));
+			ComplexReal exp_vh(cos(ch->random_phase_vh[n][m] * deg2rad), sin(ch->random_phase_vh[n][m] * deg2rad));
+			ComplexReal exp_hv(cos(ch->random_phase_hv[n][m] * deg2rad), sin(ch->random_phase_hv[n][m] * deg2rad));
+			ComplexReal exp_hh(cos(ch->random_phase_hh[n][m] * deg2rad), sin(ch->random_phase_hh[n][m] * deg2rad));
+
+			// raysPreComp[polRx] for polTx=0 (port 0 uses first polarization)
+			// = [F_rx,θ; F_rx,φ]^T × [[e^jΦ_θθ, κ^{-1/2}·e^jΦ_θφ];
+			//                          [κ^{-1/2}·e^jΦ_φθ, e^jΦ_φφ]] × [F_tx,θ; F_tx,φ]
+			for (int polRx = 0; polRx < MS_P; polRx++) {
+				ComplexReal rpc =
+					rx_Ft[polRx] * exp_vv * tx_Ft_P1 +
+					rx_Ft[polRx] * inv_sqrt_kappa * exp_vh * tx_Fp_P1 +
+					rx_Fp[polRx] * inv_sqrt_kappa * exp_hv * tx_Ft_P1 +
+					rx_Fp[polRx] * exp_hh * tx_Fp_P1;
+				ray_power[polRx][n][m] = std::norm(rpc);   // |rpc|²
+			}
+		}
+	}
+
+	// 1d. LOS pre-computation — Eq. (8.1-3)
+	Real los_ray_power[2] = {0.0, 0.0};
+	Real los_sinZoD_cosAoD = 0, los_sinZoD_sinAoD = 0, los_cosZoD = 0;
+	Real K_linear = ch->K_linear;
+	bool is_los = (ch->Propagation == LOS_propagation);
+
+	if (is_los) {
+		Real los_aod_rad = ch->LOS_AOD_GCS * deg2rad;
+		Real los_zod_rad = ch->LOS_ZOD_GCS * deg2rad;
+		Real los_aoa_rad = ch->LOS_AOA_GCS * deg2rad;
+		Real los_zoa_rad = ch->LOS_ZOA_GCS * deg2rad;
+
+		// LOS TX direction unit vector
+		los_sinZoD_cosAoD = sin(los_zod_rad) * cos(los_aod_rad);
+		los_sinZoD_sinAoD = sin(los_zod_rad) * sin(los_aod_rad);
+		los_cosZoD        = cos(los_zod_rad);
+
+		// LOS antenna patterns
+		Real tx_Ft, tx_Fp, tx_Ft2, tx_Fp2;
+		Get_BS_antenna_pattern(los_zod_rad, los_aod_rad, bs_idx, sector_idx,
+			tx_Ft, tx_Fp, tx_Ft2, tx_Fp2);
+
+		// RX pattern for LOS: same omni/directional handling as NLOS above
+		Real los_rx_Ft[2], los_rx_Fp[2];
+		if (ue_antenna_element_gain == 0) {
+			los_rx_Ft[0] = 1.0; los_rx_Fp[0] = 0.0;
+			los_rx_Ft[1] = 0.0; los_rx_Fp[1] = 1.0;
+		} else {
+			Real rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2;
+			Get_UE_antenna_pattern(0, los_zoa_rad, los_aoa_rad, self_ms_idx, 0,
+				rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2);
+			los_rx_Ft[0] = rx_Ft_P1; los_rx_Fp[0] = rx_Fp_P1;
+			los_rx_Ft[1] = rx_Ft_P2; los_rx_Fp[1] = rx_Fp_P2;
+		}
+
+		// LOS polarization matrix: [[e^jΦ, 0]; [0, -e^jΦ]]  — Eq. (8.1-3)
+		Real los_phase_rad = ch->random_phase_vv_LOS * deg2rad;
+		ComplexReal los_exp(cos(los_phase_rad), sin(los_phase_rad));
+
+		for (int polRx = 0; polRx < MS_P; polRx++) {
+			ComplexReal los_rpc =
+				los_rx_Ft[polRx] * los_exp * tx_Ft -     // (1,1): +e^jΦ
+				los_rx_Fp[polRx] * los_exp * tx_Fp;      // (2,2): -e^jΦ
+			los_ray_power[polRx] = std::norm(los_rpc);
+		}
+	}
+
+	// ================================================================
+	// Phase 2: Beam search — only virtualization weights change
+	// Eq. (8.1-1): RSRP = PL·SF · (1/U) · Σ_u (|α_0|² + Σ_n Σ_m |α_nm|²) · TX_power
+	// TX power and PL·SF cancel in coupling loss, so we compute the gain part only.
+	// ================================================================
+
+	Real K_denom = is_los ? (K_linear + REAL(1.0)) : REAL(1.0);  // (K_R + 1)
+	Real K_los_num = is_los ? K_linear : REAL(0.0);               // K_R
+
 	BeamSearchResult best;
 	bool first = true;
 
@@ -3805,18 +3948,79 @@ BeamSearchResult LINK::find_best_tx_beam_v2(CHANNEL* ch, int bs_idx, int sector_
 	{
 		for (int z = 0; z < tilt_zenith_angle_LCS_size; z++)
 		{
-			compute_tx_antenna_gains_v2(ch, bs_idx, sector_idx, a, z);
-			compute_tx_smallscale_gains_v2(ch, bs_idx, sector_idx, a, z);
-			Real rsrp = compute_rsrp_v2(ch, sector_idx, z, a, 0);
+			Real alpha = 0.0;
 
-			if (first || rsrp > best.max_rsrp_dB)
+			// --- NLOS clusters: Σ_n Σ_m |α_{n,m,u,p}|² summed over u ---
+			for (int n = 0; n < N; n++) {
+				int M_n = ch->NUM_RAY_per_ClusterNUM[n];
+				Real P_n = ch->power[n];
+
+				for (int m = 0; m < M_n; m++) {
+					// Compute array factor: AF = Σ_{k,l} w(z,a,k,l)·exp(j·k_2pi·r̂·d_tx)
+					// This is the beam-dependent part from Eq. (8.1-4)/(8.1-5)
+					ComplexReal AF(0.0, 0.0);
+					for (int k = 0; k < K; k++) {
+						for (int l = 0; l < L; l++) {
+							Real phase = k_2pi * (
+								sinZoD_cosAoD[n][m] * port0_pos[k][l].x +
+								sinZoD_sinAoD[n][m] * port0_pos[k][l].y +
+								cosZoD[n][m]        * port0_pos[k][l].z);
+							AF += virtualization_weight_wv[z][a][k][l] *
+								ComplexReal(cos(phase), sin(phase));
+						}
+					}
+					Real AF_sq = std::norm(AF);   // |AF|²
+
+					// Σ_u |α|² = (P_n/(M_n·(K_R+1))) · |AF|² · Σ_{u_p} |raysPreComp|²
+					// For MS_M>1 or MS_N>1: each u_p has MS_M×MS_N identical elements
+					Real sum_u_ray_power = 0.0;
+					for (int p = 0; p < MS_P; p++)
+						sum_u_ray_power += ray_power[p][n][m];
+					sum_u_ray_power *= (Real)(MS_M * MS_N);
+
+					alpha += (P_n / (Real)M_n) * AF_sq * sum_u_ray_power;
+				}
+			}
+			alpha /= K_denom;   // ÷ (K_R + 1)
+
+			// --- LOS component: |α_{0,u,p}|² summed over u ---
+			if (is_los) {
+				ComplexReal AF_LOS(0.0, 0.0);
+				for (int k = 0; k < K; k++) {
+					for (int l = 0; l < L; l++) {
+						Real phase = k_2pi * (
+							los_sinZoD_cosAoD * port0_pos[k][l].x +
+							los_sinZoD_sinAoD * port0_pos[k][l].y +
+							los_cosZoD        * port0_pos[k][l].z);
+						AF_LOS += virtualization_weight_wv[z][a][k][l] *
+							ComplexReal(cos(phase), sin(phase));
+					}
+				}
+				Real AF_LOS_sq = std::norm(AF_LOS);
+
+				Real sum_u_los_power = 0.0;
+				for (int p = 0; p < MS_P; p++)
+					sum_u_los_power += los_ray_power[p];
+				sum_u_los_power *= (Real)(MS_M * MS_N);
+
+				alpha += (K_los_num / K_denom) * AF_LOS_sq * sum_u_los_power;
+			}
+
+			// RSRP = 10·log10(alpha / U)  where U = totalRx
+			Real rsrp_gain = alpha / (Real)totalRx;
+			Real rsrp_dB = 10.0 * log10(rsrp_gain);
+
+			// Store in signal_RSRP_gain table (for interference computation)
+			ch->signal_RSRP_gain[sector_idx][z][a][0][0][0] = rsrp_gain;
+
+			if (first || rsrp_dB > best.max_rsrp_dB)
 			{
-				best.max_rsrp_dB    = rsrp;
-				best.ue_azimuth_idx = selected_a;
-				best.ue_zenith_idx  = selected_z;
-				best.ue_panel_idx   = selected_p;
+				best.max_rsrp_dB     = rsrp_dB;
 				best.sec_azimuth_idx = a;
 				best.sec_zenith_idx  = z;
+				best.ue_azimuth_idx  = 0;
+				best.ue_zenith_idx   = 0;
+				best.ue_panel_idx    = 0;
 				first = false;
 			}
 		}
@@ -3827,7 +4031,7 @@ BeamSearchResult LINK::find_best_tx_beam_v2(CHANNEL* ch, int bs_idx, int sector_
 
 
 // Step 7: Evaluate one candidate cell (one BS + one sector)
-CandidateCell LINK::evaluate_candidate_cell_v2(const ScenarioConfig& cfg, int bs_idx, int sector_idx)
+CandidateCell LINK::evaluate_candidate_cell(const ScenarioConfig& cfg, int bs_idx, int sector_idx)
 {
 	CandidateCell cell;
 	CHANNEL* ch = &channel[bs_idx][self_ms_idx];
@@ -3847,7 +4051,7 @@ CandidateCell LINK::evaluate_candidate_cell_v2(const ScenarioConfig& cfg, int bs
 	cell.is_indoor         = ch->Indoor;
 
 	// Beam search
-	cell.beam       = find_best_tx_beam_v2(ch, bs_idx, sector_idx);
+	cell.beam        = find_best_tx_beam(ch, bs_idx, sector_idx);
 	cell.max_rsrp_dB = cell.beam.max_rsrp_dB;
 
 	// Signal power
@@ -3858,7 +4062,7 @@ CandidateCell LINK::evaluate_candidate_cell_v2(const ScenarioConfig& cfg, int bs
 
 
 // Step 8: Compute all candidate cells
-std::vector<CandidateCell> LINK::compute_all_candidate_cells_v2(const ScenarioConfig& cfg)
+std::vector<CandidateCell> LINK::compute_all_candidate_cells(const ScenarioConfig& cfg)
 {
 	std::vector<CandidateCell> candidates;
 	candidates.reserve(cfg.num_candidate_bs * cfg.sectors_per_bs);
@@ -3870,11 +4074,11 @@ std::vector<CandidateCell> LINK::compute_all_candidate_cells_v2(const ScenarioCo
 		           : wrap_idx;
 
 		// Compute pathloss once per BS (shared across sectors of same BS)
-		compute_pathloss_final_v2(cfg, bs_idx);
+		compute_pathloss_final(cfg, bs_idx);
 
 		for (int sec = 0; sec < cfg.sectors_per_bs; sec++)
 		{
-			CandidateCell cell = evaluate_candidate_cell_v2(cfg, bs_idx, sec);
+			CandidateCell cell = evaluate_candidate_cell(cfg, bs_idx, sec);
 			int flat = cell.flat_idx;
 
 			// Store in legacy arrays for backward compatibility
@@ -3896,7 +4100,7 @@ std::vector<CandidateCell> LINK::compute_all_candidate_cells_v2(const ScenarioCo
 
 
 // Step 9: Select serving cell from candidates
-void LINK::select_serving_cell_v2(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates)
+void LINK::select_serving_cell(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates)
 {
 	int best_idx = -1;
 	Real best_signal = -1e30;
@@ -3949,7 +4153,7 @@ void LINK::select_serving_cell_v2(const ScenarioConfig& cfg, const std::vector<C
 
 
 // Step 10: Compute interference from non-serving cells
-void LINK::compute_interference_v2(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates)
+void LINK::compute_interference(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates)
 {
 	interference = 0.0;
 
@@ -3996,9 +4200,9 @@ void LINK::compute_interference_v2(const ScenarioConfig& cfg, const std::vector<
 						rand_sec_z[flat] = zz;
 					}
 
-					compute_tx_antenna_gains_v2(ch, bs_idx, sec, aa, zz);
-					compute_tx_smallscale_gains_v2(ch, bs_idx, sec, aa, zz);
-					Real random_rsrp = compute_rsrp_v2(ch, sec, zz, aa, 1);
+					compute_tx_antenna_gains(ch, bs_idx, sec, aa, zz);
+					compute_tx_smallscale_gains(ch, bs_idx, sec, aa, zz);
+					Real random_rsrp = compute_rsrp(ch, sec, zz, aa, 1);
 
 					Real sig = bs_maxpower + random_rsrp - pl;
 
@@ -4140,16 +4344,16 @@ void LINK::compute_interference_v2(const ScenarioConfig& cfg, const std::vector<
 
 
 // Step 11: Main entry point
-void LINK::Get_signal_interference_v2()
+void LINK::Get_signal_interference()
 {
 	// Phase 0: Build scenario configuration
-	ScenarioConfig cfg = build_scenario_config_v2();
+	ScenarioConfig cfg = build_scenario_config();
 
 	// Phase 1: Evaluate all candidate cells (beam search + signal power)
-	std::vector<CandidateCell> candidates = compute_all_candidate_cells_v2(cfg);
+	std::vector<CandidateCell> candidates = compute_all_candidate_cells(cfg);
 
 	// Phase 2: Select serving cell (strongest signal)
-	select_serving_cell_v2(cfg, candidates);
+	select_serving_cell(cfg, candidates);
 
 	// Find the strongest signal value from serving cell
 	Real strongest_signal = -1e30;
@@ -4165,7 +4369,7 @@ void LINK::Get_signal_interference_v2()
 	}
 
 	// Phase 3: Compute interference
-	compute_interference_v2(cfg, candidates);
+	compute_interference(cfg, candidates);
 
 	// Phase 4: Compute geometry (SIR/SINR)
 	str_signal   = strongest_signal;

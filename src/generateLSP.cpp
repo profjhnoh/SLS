@@ -561,25 +561,16 @@ NOTES:
 
 void Get_TLSPs_by_interpolation()
 {
-	int x_[4];
-	int y_[4];
-	Real x_pos;
-	Real y_pos;
-	Real D_corr = grid_interval;
-
-	VectorXReal (6);
-	VectorXReal radom_NLOS(7);
-	for (int bs_idx = 0; bs_idx < num_BS + num_mTRP ; bs_idx++)
+	for (int bs_idx = 0; bs_idx < num_BS + num_mTRP; bs_idx++)
 	{
-
 		for (int ue_idx = 0; ue_idx < num_MS; ue_idx++)
 		{
-			ArrayXReal random_V;
 			int propagation_condition = channel[bs_idx][ue_idx].Propagation;
+
+			ArrayXReal random_V;
 			if (propagation_condition == LOS_propagation)
 			{
 				random_V = ArrayXReal(7);
-			
 				for (int i = 0; i < 7; i++)
 				{
 					random_V(i) = randnum.n();
@@ -592,23 +583,21 @@ void Get_TLSPs_by_interpolation()
 				{
 					random_V(i) = randnum.n();
 				}
-			
 			}
 
-			//cout << "bs_idx = "<< bs_idx << endl;
 			switch (propagation_condition)
 			{
-				case LOS_propagation:
-					ms[ue_idx].TLSPs[bs_idx] = sqrt_corr_matrx_LOS * random_V.matrix();
-					break;
-				case NLOS_propagation:
-					ms[ue_idx].TLSPs[bs_idx] = sqrt_corr_matrx_NLOS* random_V.matrix();
-					break;
-				case OUT2IN_propagation:
-					ms[ue_idx].TLSPs[bs_idx] = sqrt_corr_matrx_OUT2IN* random_V.matrix();
-					break;
-				default:
-					cout << "check propagation_condition " << endl;
+			case LOS_propagation:
+				ms[ue_idx].TLSPs[bs_idx] = sqrt_corr_matrx_LOS * random_V.matrix();
+				break;
+			case NLOS_propagation:
+				ms[ue_idx].TLSPs[bs_idx] = sqrt_corr_matrx_NLOS * random_V.matrix();
+				break;
+			case OUT2IN_propagation:
+				ms[ue_idx].TLSPs[bs_idx] = sqrt_corr_matrx_OUT2IN * random_V.matrix();
+				break;
+			default:
+				cout << "check propagation_condition in Get_TLSPs_by_interpolation" << endl;
 			}
 		}
 	}
