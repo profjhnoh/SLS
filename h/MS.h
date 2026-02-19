@@ -28,7 +28,8 @@ class MS
 		void   Received_SINR(void);
 		void   Fourier_Transform_of_Channel(int);
 		void   Fourier_Transform_of_Channel_Optimized(int);  // Optimized version using recursive phasor updates
-		void   Fourier_Transform_ElementLevel(int);          // Element-level DFT (ns-3 style, no beamforming)
+		void   Fourier_Transform_H_usn(int);                  // H_usn DFT (no beamforming)
+		void   Fourier_Transform_WithBF(int);                // Element-level DFT + BF weights → H_m
 		void   Declare_ch_matrix(void);
 		void   Receive_DL(int);
 		void   Find_Allocated_Rbs_Mcs(int);

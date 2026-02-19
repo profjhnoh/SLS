@@ -39,10 +39,12 @@ public:
 	void Set_circular_angle_spread();
 	void Precompute_ray_angles();
 
-	// ns-3 style element-level channel generation (no beamforming weights)
-	void GetNewChannel_ElementLevel(int bs_idx, int ms_idx, int sector_idx);
-	void Allocate_ElementLevel_memory(int N);
-	void Reset_ElementLevel_memory();
+	void GetNewChannel(int bs_idx, int ms_idx, int sector_idx);
+	void Allocate_H_usn_memory(int N);
+	void Allocate_H_usn_Init_memory(int N);
+	void Reset_H_usn_memory();
+	void Update_H_usn_per_time(Real t, int ms_idx, int sector_idx);
+	void PrecomputeDoppler(int bs_idx, int ms_idx);
 
 	void Set_AOAAOD_LOS();
 	void Set_AOAAOD_NLOS();
@@ -263,6 +265,11 @@ public:
 
 	// Element-level channel matrix: cluster-indexed vector of (totalRx × totalTx) matrices
 	std::vector<MatrixXcReal> H_usn;
+
+	// Element-level Doppler storage (Doppler-free initial values)
+	std::vector<MatrixXcReal> H_usn_init;  // [cluster] Doppler-free NLOS
+	MatrixXcReal H_usn_LOS;                // LOS component (separate Doppler)
+	bool H_usn_init_allocated                           = false;
 
 	bool H_usn_allocated                                = false;
 	int  H_usn_num_clusters                             = 0;

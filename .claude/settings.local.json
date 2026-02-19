@@ -40,7 +40,20 @@
       "Bash(del:*)",
       "Bash(tasklist:*)",
       "Bash(taskkill:*)",
-      "Bash(cmd //C \"taskkill /F /IM EMIMO_SLS.exe\")"
+      "Bash(cmd //C \"taskkill /F /IM EMIMO_SLS.exe\")",
+      "Bash(git -C \"D:/Dropbox/SLS/2026/Tbps_DLSLS_20251010\" diff -- src/Link.cpp)",
+      "Bash(git -C \"D:\\\\Dropbox\\\\SLS\\\\2026\\\\Tbps_DLSLS_20251010\" status)",
+      "Bash(git -C \"D:\\\\Dropbox\\\\SLS\\\\2026\\\\Tbps_DLSLS_20251010\" diff -- src/Link.cpp)",
+      "Bash(git --git-dir=\"D:/Dropbox/SLS/2026/Tbps_DLSLS_20251010/.git\" --work-tree=\"D:/Dropbox/SLS/2026/Tbps_DLSLS_20251010\" diff -- src/Initiallization.cpp)",
+      "Bash(pushd:*)",
+      "Bash(popd:*)",
+      "Bash(cmd.exe /c \"cd /d D:\\\\Dropbox\\\\SLS\\\\2026\\\\Tbps_DLSLS_20251010 && git diff src/Initiallization.cpp\")",
+      "WebFetch(domain:gitlab.com)",
+      "Bash(git checkout:*)",
+      "Bash(tee:*)",
+      "Bash(echo:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git stash pop:*)"
     ],
     "deny": [],
     "ask": []

@@ -52,12 +52,11 @@ void Compute_Channel_Coef()
 
 		if (TYPE == 11 && num_Indoor_TRxP == 1)   //// Get all BS-MS channel coefficient
 		{
-
 			for (int ms_idx = 0; ms_idx < num_MS; ms_idx++)
 			{
 				int adj_sector_num_to_BS = (int)(links[ms_idx]._sector_in_control);
-
-				channel[adj_sector_num_to_BS][ms_idx].Update_v2(0, ms_idx, adj_sector_num_to_BS);
+				int sec_idx = adj_sector_num_to_BS;  // InH 1TRxP: bs_idx == sector
+				channel[adj_sector_num_to_BS][ms_idx].GetNewChannel(adj_sector_num_to_BS, ms_idx, sec_idx);
 			}
 		}
 		else  // Get MS - adjacent_BS channel coefficient
@@ -71,9 +70,6 @@ void Compute_Channel_Coef()
 				#endif
 					for (int ms_idx = 0; ms_idx < num_MS; ms_idx++)
 					{
-						// jhnoh 230109
-						// Considering that UE to receive comp signal with the Rx panel
-						// which is different to Rx panel receiving main siganl.
 						int adj_sector_num_to_BS;
 						int adj_sector;
 						if ( g_comp_mode == 1 && coeff_idx == 1)
@@ -86,7 +82,8 @@ void Compute_Channel_Coef()
 							adj_sector_num_to_BS = (int)(links[ms_idx].adj_sector[coeff_idx] / 3);
 							adj_sector = links[ms_idx].adj_sector[coeff_idx];
 						}
-						channel[adj_sector_num_to_BS][ms_idx].Update_v2(0, ms_idx, adj_sector);
+						int sec_idx = adj_sector % 3;
+						channel[adj_sector_num_to_BS][ms_idx].GetNewChannel(adj_sector_num_to_BS, ms_idx, sec_idx);
 					}
 				#if ENABLE_MULTITHREADING
 				}
@@ -111,10 +108,9 @@ void Update_Channel_Coef()
 			for (int ms_idx = 0; ms_idx < num_MS; ms_idx++)
 			{
 				int adj_sector_num_to_BS = (int)(links[ms_idx]._sector_in_control);
-
-				channel[adj_sector_num_to_BS][ms_idx].Update_per_time_v2(t, adj_sector_num_to_BS, ms_idx);
+				int sec_idx = adj_sector_num_to_BS;
+				channel[adj_sector_num_to_BS][ms_idx].Update_H_usn_per_time(t, ms_idx, sec_idx);
 			}
-
 		}
 		else  ////// Get MS - adjacent_BS channel coefficient
 		{
@@ -129,8 +125,8 @@ void Update_Channel_Coef()
 					{
 						int adj_sector_num_to_BS = (int)(links[ms_idx].adj_sector[coeff_idx] / 3);
 						int adj_sector = links[ms_idx].adj_sector[coeff_idx];
-
-						channel[adj_sector_num_to_BS][ms_idx].Update_per_time_v2(t, adj_sector, ms_idx);
+						int sec_idx = adj_sector % 3;
+						channel[adj_sector_num_to_BS][ms_idx].Update_H_usn_per_time(t, ms_idx, sec_idx);
 					}
 				#if ENABLE_MULTITHREADING
 				}

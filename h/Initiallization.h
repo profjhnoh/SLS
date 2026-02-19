@@ -87,6 +87,9 @@ int Calibration_mode;
 int TDD_mode = 0;  // TDD reciprocity (1) vs FDD codebook (0)
 int USE_POWER_ITERATION = 0;  // 0: SelfAdjointEigenSolver, 1: Power Iteration (faster but approximate)
 int POWER_ITERATION_MAX_ITER = 5;  // Number of iterations for Power Iteration method
+int USE_RAY_LEVEL_DOPPLER = 0;  // 0: cluster-average Doppler (fast), 1: ray-level Doppler
+int USE_PRECODING_BASED_SINR = 0;  // 0: use feedback CQI, 1: precoding-based SINR
+Real INTERCELL_INTERFERENCE_MARGIN_DB = 0.0;  // Inter-cell interference margin in dB
 
 ComplexReal w[4][8];                              // [num_vertical steering angle][num element in a port] (maximum)
 ComplexReal v[4][8][8];                           // [num_vertical steering angle][num_horizontal sterring angle][num element in a port]  (maximum)

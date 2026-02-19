@@ -5627,7 +5627,7 @@ Real Get_sin_psi(Real alpha, Real beta, Real gamma, Real GCS_theta, Real GCS_pi)
 // This is equivalent to ns-3's ThreeGppChannelModel::GetNewChannel().
 // ====================================================================
 
-void CHANNEL::Allocate_ElementLevel_memory(int N)
+void CHANNEL::Allocate_H_usn_memory(int N)
 {
 	// Allocate once with MAX sizes (MAX_NUM_CLUSTERS × MAX_NUM_RAYS).
 	// Subsequent calls skip allocation — only update H_usn_num_clusters.
@@ -5676,7 +5676,7 @@ void CHANNEL::Allocate_ElementLevel_memory(int N)
 	H_usn_num_clusters = N;
 }
 
-void CHANNEL::Reset_ElementLevel_memory()
+void CHANNEL::Reset_H_usn_memory()
 {
 	// Zero-fill all element-level buffers for reuse. No deallocation.
 	if (!H_usn_allocated) return;
@@ -5714,7 +5714,7 @@ void CHANNEL::Reset_ElementLevel_memory()
 	}
 }
 
-void CHANNEL::GetNewChannel_ElementLevel(int bs_idx, int ms_idx, int sector_idx)
+void CHANNEL::GetNewChannel(int bs_idx, int ms_idx, int sector_idx)
 {
 	// ====================================================================
 	// ns-3 style element-level channel coefficient generation
@@ -5726,7 +5726,7 @@ void CHANNEL::GetNewChannel_ElementLevel(int bs_idx, int ms_idx, int sector_idx)
 	if (N <= 0) return;
 
 	// Phase A: Allocate memory
-	Allocate_ElementLevel_memory(N);
+	Allocate_H_usn_memory(N);
 
 	int totalTx = BS_M * BS_N * BS_P;
 	int totalRx = MS_M * MS_N * MS_P;
@@ -5780,8 +5780,15 @@ void CHANNEL::GetNewChannel_ElementLevel(int bs_idx, int ms_idx, int sector_idx)
 			// RX antenna pattern (UE) — returns both polarization patterns
 			Real aoa_rad = ray_AOA[n][m][0] * deg2rad;
 			Real zoa_rad = ray_AOA[n][m][1] * deg2rad;
-			Get_UE_antenna_pattern(0, zoa_rad, aoa_rad, ms_idx, 0,
-				rx_F_theta_GCS[0], rx_F_pi_GCS[0], rx_F_theta_GCS[1], rx_F_pi_GCS[1]);
+			if (ue_antenna_element_gain == 0) {
+				// Isotropic UE: use identity polarization in GCS (no LCS→GCS rotation)
+				// Matches find_best_tx_beam behavior: polRx=0 → (θ=1,φ=0), polRx=1 → (θ=0,φ=1)
+				rx_F_theta_GCS[0] = REAL(1.0); rx_F_pi_GCS[0] = REAL(0.0);
+				rx_F_theta_GCS[1] = REAL(0.0); rx_F_pi_GCS[1] = REAL(1.0);
+			} else {
+				Get_UE_antenna_pattern(0, zoa_rad, aoa_rad, ms_idx, 0,
+					rx_F_theta_GCS[0], rx_F_pi_GCS[0], rx_F_theta_GCS[1], rx_F_pi_GCS[1]);
+			}
 
 			// Pre-compute exp(j*phase)
 			ComplexReal exp_vv = exp(jay * phase_vv);
@@ -5853,7 +5860,9 @@ void CHANNEL::GetNewChannel_ElementLevel(int bs_idx, int ms_idx, int sector_idx)
 		}
 	}
 
-	// Phase E: LOS component (Eq. 7.5-29, 7.5-30)
+	// Phase E: LOS component (Eq. 7.5-29, 7.5-30) + Store H_usn_init / H_usn_LOS for Doppler
+	Allocate_H_usn_Init_memory(N);
+
 	if (Propagation == LOS_propagation) {
 		Real K_R = K_linear;
 
@@ -5875,8 +5884,14 @@ void CHANNEL::GetNewChannel_ElementLevel(int bs_idx, int ms_idx, int sector_idx)
 		Real los_rx_Ft[2], los_rx_Fp[2];
 		Get_BS_antenna_pattern(los_zod_rad, los_aod_rad, bs_idx, sector_idx,
 			los_tx_Ft[0], los_tx_Fp[0], los_tx_Ft[1], los_tx_Fp[1]);
-		Get_UE_antenna_pattern(0, los_zoa_rad, los_aoa_rad, ms_idx, 0,
-			los_rx_Ft[0], los_rx_Fp[0], los_rx_Ft[1], los_rx_Fp[1]);
+		if (ue_antenna_element_gain == 0) {
+			// Isotropic UE: identity polarization in GCS
+			los_rx_Ft[0] = REAL(1.0); los_rx_Fp[0] = REAL(0.0);
+			los_rx_Ft[1] = REAL(0.0); los_rx_Fp[1] = REAL(1.0);
+		} else {
+			Get_UE_antenna_pattern(0, los_zoa_rad, los_aoa_rad, ms_idx, 0,
+				los_rx_Ft[0], los_rx_Fp[0], los_rx_Ft[1], los_rx_Fp[1]);
+		}
 
 		// LOS unit vectors
 		Real los_sinZoA_cosAoA = sin(los_zoa_rad) * cos(los_aoa_rad);
@@ -5889,6 +5904,8 @@ void CHANNEL::GetNewChannel_ElementLevel(int bs_idx, int ms_idx, int sector_idx)
 		Real scale_nlos = sqrt(REAL(1.0) / (K_R + REAL(1.0)));
 		Real scale_los  = sqrt(K_R / (K_R + REAL(1.0)));
 
+		// Build H_usn_LOS matrix (before applying K-factor to H_usn)
+		H_usn_LOS.setZero();
 		for (int u = 0; u < totalRx; u++) {
 			int u_p = u % MS_P;
 			int u_n = (u / MS_P) % MS_N;
@@ -5918,14 +5935,128 @@ void CHANNEL::GetNewChannel_ElementLevel(int bs_idx, int ms_idx, int sector_idx)
 					ComplexReal(cos(rxLosPhase), sin(rxLosPhase)) *
 					ComplexReal(cos(txLosPhase), sin(txLosPhase));
 
-				// K-factor (Eq. 7.5-30): combine NLOS + LOS for cluster 0
-				H_usn[0](u, s) = scale_nlos * H_usn[0](u, s) + scale_los * losRay;
+				H_usn_LOS(u, s) = scale_los * losRay;
 			}
 		}
 
-		// Scale remaining clusters by √(1/(K+1)) (ns-3 line 4309-4312)
-		for (int n = 1; n < N; n++) {
-			H_usn[n] *= ComplexReal(scale_nlos, REAL(0.0));
+		// Store H_usn_init = NLOS scaled by sqrt(1/(K+1))
+		for (int n = 0; n < N; n++) {
+			H_usn_init[n] = H_usn[n] * ComplexReal(scale_nlos, REAL(0.0));
 		}
+
+		// Combine for t=0: H_usn[0] = H_usn_init[0] + H_usn_LOS
+		H_usn[0] = H_usn_init[0] + H_usn_LOS;
+		for (int n = 1; n < N; n++) {
+			H_usn[n] = H_usn_init[n];
+		}
+	}
+	else {
+		// NLOS/O2I: H_usn_init = H_usn (no K-factor scaling)
+		for (int n = 0; n < N; n++) {
+			H_usn_init[n] = H_usn[n];
+		}
+		H_usn_LOS.setZero();
+	}
+
+	// Phase F: Pre-compute Doppler frequencies
+	PrecomputeDoppler(bs_idx, ms_idx);
+}
+
+// ====================================================================
+// Allocate H_usn_init and H_usn_LOS for Doppler time evolution
+// ====================================================================
+void CHANNEL::Allocate_H_usn_Init_memory(int N)
+{
+	int totalTx = BS_M * BS_N * BS_P;
+	int totalRx = MS_M * MS_N * MS_P;
+
+	if (!H_usn_init_allocated) {
+		H_usn_init.resize(MAX_NUM_CLUSTERS);
+		for (int n = 0; n < MAX_NUM_CLUSTERS; n++) {
+			H_usn_init[n] = MatrixXcReal::Zero(totalRx, totalTx);
+		}
+		H_usn_LOS = MatrixXcReal::Zero(totalRx, totalTx);
+		H_usn_init_allocated = true;
+	} else {
+		// Zero-fill for reuse
+		for (int n = 0; n < N; n++) {
+			H_usn_init[n].setZero();
+		}
+		H_usn_LOS.setZero();
+	}
+}
+
+// ====================================================================
+// Pre-compute Doppler frequencies per cluster and LOS
+// ====================================================================
+void CHANNEL::PrecomputeDoppler(int bs_idx, int ms_idx)
+{
+	LOCATION3D v_rx;
+	Real moving_elevation = ms[ms_idx].moving_direction * (pi / 180.);
+	Real moving_azimuth = ms[ms_idx].moving_direction_azimuth * (pi / 180.);
+
+	v_rx.x = ms[ms_idx].speed * sin(moving_elevation) * cos(moving_azimuth);
+	v_rx.y = ms[ms_idx].speed * sin(moving_elevation) * sin(moving_azimuth);
+	v_rx.z = ms[ms_idx].speed * cos(moving_elevation);
+
+	// NLOS cluster Doppler (using cluster center AOA/ZOA)
+	for (int i = 0; i < NUM_PATH_for_channelcoeff; i++)
+	{
+		Real aoa_rad = AOA[i] * (pi / 180.);
+		Real zoa_rad = ZOA[i] * (pi / 180.);
+
+		LOCATION3D r_hat;
+		r_hat.x = sin(zoa_rad) * cos(aoa_rad);
+		r_hat.y = sin(zoa_rad) * sin(aoa_rad);
+		r_hat.z = cos(zoa_rad);
+
+		doppler_freq_per_cluster[i] = (r_hat.x * v_rx.x + r_hat.y * v_rx.y + r_hat.z * v_rx.z) / Wavelength;
+	}
+
+	// LOS Doppler
+	{
+		Real los_aoa_rad = LOS_AOA_GCS * (pi / 180.);
+		Real los_zoa_rad = LOS_ZOA_GCS * (pi / 180.);
+
+		LOCATION3D r_hat;
+		r_hat.x = sin(los_zoa_rad) * cos(los_aoa_rad);
+		r_hat.y = sin(los_zoa_rad) * sin(los_aoa_rad);
+		r_hat.z = cos(los_zoa_rad);
+
+		doppler_freq_LOS_val = (r_hat.x * v_rx.x + r_hat.y * v_rx.y + r_hat.z * v_rx.z) / Wavelength;
+	}
+}
+
+// ====================================================================
+// Element-level time-domain update with linear-phase Doppler
+// H_usn[n] = H_usn_init[n] * exp(j*2π*fd[n]*t)
+// H_usn[0] += H_usn_LOS * exp(j*2π*fd_LOS*t)
+// ====================================================================
+void CHANNEL::Update_H_usn_per_time(Real t_idx, int ms_idx, int sector_idx)
+{
+	complex<Real> jay(0, 1);
+
+	Real slot_duration = 1.0e-3 / pow(2.0, numerology);
+	Real time = t_idx * slot_duration;
+
+	int num_path = NUM_PATH_for_channelcoeff;
+	if (num_path <= 0) return;
+	if (!H_usn_init_allocated) return;
+
+	// Pre-compute Doppler phasors
+	complex<Real> doppler_phase[24];
+	for (int i = 0; i < num_path; i++)
+		doppler_phase[i] = exp(jay * (Real)2.0 * pi * doppler_freq_per_cluster[i] * time);
+
+	complex<Real> doppler_phase_LOS = exp(jay * (Real)2.0 * pi * doppler_freq_LOS_val * time);
+
+	// NLOS: H_usn[n] = H_usn_init[n] * doppler_phase[n]
+	for (int n = 0; n < num_path; n++) {
+		H_usn[n] = H_usn_init[n] * doppler_phase[n];
+	}
+
+	// LOS: add to cluster 0 with separate Doppler
+	if (Propagation == LOS_propagation) {
+		H_usn[0] += H_usn_LOS * doppler_phase_LOS;
 	}
 }

@@ -843,8 +843,8 @@ void Init_Singular_Value_Collection()
 		singular_value_ratio_samples[i].reserve(expected_samples);
 	}
 
-	cout << "Singular Value Collection: ENABLED (3GPP compliant, " << num_singular_values << " SVs, "
-	     << (num_singular_values - 1) << " ratio CDFs)" << endl;
+	//cout << "Singular Value Collection: ENABLED (3GPP compliant, " << num_singular_values << " SVs, "
+	//     << (num_singular_values - 1) << " ratio CDFs)" << endl;
 }
 
 void Collect_Singular_Values_All()
@@ -853,56 +853,6 @@ void Collect_Singular_Values_All()
 
 	// 3GPP: Collect only at t=0 (initial time)
 	if (t != 0) return;
-
-	// DEBUG: Print first UE's H_m matrix and singular values for diagnosis
-	static bool debug_printed = false;
-	if (!debug_printed && num_MS > 0 && ms[30].H_m != NULL) {
-		debug_printed = true;
-		cout << "\n=== DEBUG: Singular Value Diagnosis (UE 0, RB 0) ===" << endl;
-		MatrixXcReal H = ms[30].H_m[0][0];
-		cout << "H_m matrix size: " << H.rows() << " x " << H.cols() << endl;
-		cout << "H_m Frobenius norm: " << H.norm() << endl;
-		cout << "H_m matrix (first 4x4 block):" << endl;
-		int max_r = min((int)H.rows(), 4);
-		int max_c = min((int)H.cols(), 4);
-		for (int r = 0; r < max_r; r++) {
-			cout << "  ";
-			for (int c = 0; c < max_c; c++) {
-				cout << "(" << H(r,c).real() << "," << H(r,c).imag() << ") ";
-			}
-			cout << endl;
-		}
-
-		// Compute and print singular values
-		Eigen::JacobiSVD<MatrixXcReal> svd(H, Eigen::ComputeThinU | Eigen::ComputeThinV);
-		auto sv = svd.singularValues();
-		cout << "Singular values: ";
-		for (int i = 0; i < sv.size(); i++) {
-			cout << sv(i) << " ";
-		}
-		cout << endl;
-		cout << "Condition number (SV1/SVn): " << sv(0) / sv(sv.size()-1) << endl;
-
-		// Check multiple RBs
-		cout << "\nSV ratios across first 5 RBs:" << endl;
-		for (int rb = 0; rb < min(num_rb, num_rb); rb++) {
-			MatrixXcReal H_rb = ms[30].H_m[0][rb];
-			Eigen::JacobiSVD<MatrixXcReal> svd_rb(H_rb, Eigen::ComputeThinU | Eigen::ComputeThinV);
-			auto sv_rb = svd_rb.singularValues();
-			cout << "  RB " << rb << ": SV=[";
-			for (int i = 0; i < sv_rb.size(); i++) {
-				cout << sv_rb(i);
-				if (i < sv_rb.size()-1) cout << ", ";
-			}
-			cout << "], ratio_dB=[";
-			for (int i = 1; i < sv_rb.size(); i++) {
-				cout << 10.0*log10(sv_rb(i)/sv_rb(0));
-				if (i < sv_rb.size()-1) cout << ", ";
-			}
-			cout << "]" << endl;
-		}
-		cout << "================================================\n" << endl;
-	}
 
 	// Thread-local storage for each thread's collected singular values
 	// Each thread collects into its own vector to avoid contention
@@ -947,18 +897,6 @@ void Collect_Singular_Values_All()
 				// Using SVD directly: singular values are already sqrt(eigenvalues)
 				Eigen::JacobiSVD<MatrixXcReal> svd(H, Eigen::ComputeThinU | Eigen::ComputeThinV);
 				auto sv = svd.singularValues();
-
-				if(std::isnan(sv(0)) || sv(0) > 1000 || sv(0) < -1000 )
-				{
-					for (int r = 0; r < 2; r++) {
-						cout << "  ";
-						for (int c = 0; c < 2; c++) {
-							cout << "(" << H(r,c).real() << "," << H(r,c).imag() << ") ";
-						}
-						cout << endl;
-					}
-					cout << "---------------------------" << endl;
-				}
 
 				// Store each singular value in thread-local storage
 				int num_sv = min((int)sv.size(), num_singular_values);
@@ -1089,7 +1027,7 @@ void Init_Precoding_Metrics()
 	precoding_cl_sum = new Real[total_ues]();
 	precoding_sample_count = new int[total_ues]();
 
-	cout << "Precoding Metrics Collection: ENABLED (time-averaged per UE)" << endl;
+	//cout << "Precoding Metrics Collection: ENABLED (time-averaged per UE)" << endl;
 }
 
 // Called from Receive_DL_mTRP after SINR computation
@@ -1186,136 +1124,4 @@ void Precoding_Coupling_Loss_CDF()
 }
 
 
-// ====================================================================
-// Element-Level Singular Value Collection (ns-3 style)
-// ====================================================================
-// Collects SVD of H_m_elem[rb](totalRx, totalTx) — element-level
-// channel matrices without beamforming, for comparison with 3GPP
-// calibration results.
-// ====================================================================
-
-static vector<vector<Real>> elem_sv_samples;       // [sv_idx] -> samples
-static vector<vector<Real>> elem_sv_ratio_samples;  // [ratio_idx] -> samples (dB)
-static int elem_num_sv = 0;
-static bool elem_sv_initialized = false;
-
-void Collect_Singular_Values_ElementLevel()
-{
-	if (!g_collect_singular_values) return;
-
-	int totalTx = BS_M * BS_N * BS_P;
-	int totalRx = MS_M * MS_N * MS_P;
-	int min_dim = min(totalRx, totalTx);
-
-	// Initialize on first call
-	if (!elem_sv_initialized) {
-		elem_num_sv = min_dim;
-		elem_sv_samples.clear();
-		elem_sv_samples.resize(elem_num_sv);
-		elem_sv_ratio_samples.clear();
-		if (elem_num_sv > 1)
-			elem_sv_ratio_samples.resize(elem_num_sv - 1);
-
-		int expected = num_drop * num_MS * num_rb;
-		for (int i = 0; i < elem_num_sv; i++)
-			elem_sv_samples[i].reserve(expected);
-		for (int i = 0; i < elem_num_sv - 1; i++)
-			elem_sv_ratio_samples[i].reserve(expected);
-
-		elem_sv_initialized = true;
-
-		cout << "Element-Level SV Collection: ENABLED (" << elem_num_sv << " SVs, "
-		     << "totalRx=" << totalRx << ", totalTx=" << totalTx << ")" << endl;
-	}
-
-	// Collect from all UEs
-	for (int ue_idx = 0; ue_idx < num_MS; ue_idx++) {
-		if (ms[ue_idx].H_m_elem == NULL) continue;
-
-		for (int rb_idx = 0; rb_idx < num_rb; rb_idx++) {
-			MatrixXcReal& H = ms[ue_idx].H_m_elem[rb_idx];
-
-			if (H.rows() == 0 || H.cols() == 0) continue;
-
-			Eigen::JacobiSVD<MatrixXcReal> svd(H, Eigen::ComputeThinU | Eigen::ComputeThinV);
-			auto sv = svd.singularValues();
-
-			int num_sv_avail = min((int)sv.size(), elem_num_sv);
-			for (int i = 0; i < num_sv_avail; i++) {
-				// Standard: PRB singular values = eigenvalues of H^H·H = sigma^2
-				elem_sv_samples[i].push_back(sv(i) * sv(i));
-			}
-
-			// SV ratios in dB: 10*log10(lambda_1 / lambda_n)  (power domain)
-			if (num_sv_avail > 1 && sv(0) > 1e-10) {
-				Real lambda1 = sv(0) * sv(0);
-				for (int r = 0; r < num_sv_avail - 1; r++) {
-					Real lambda_n = sv(r + 1) * sv(r + 1);
-					Real ratio_dB = 10.0 * log10(lambda1 / lambda_n);
-					elem_sv_ratio_samples[r].push_back(ratio_dB);
-				}
-			}
-		}
-	}
-
-	// Debug: Print first UE info
-	if (ms[0].H_m_elem != NULL) {
-		MatrixXcReal& H0 = ms[0].H_m_elem[0];
-		cout << "  Element-level H_m size: " << H0.rows() << " x " << H0.cols()
-		     << ", Frobenius norm: " << H0.norm() << endl;
-
-		Eigen::JacobiSVD<MatrixXcReal> svd0(H0, Eigen::ComputeThinU | Eigen::ComputeThinV);
-		auto sv0 = svd0.singularValues();
-		cout << "  Element-level eigenvalues of H^H*H (UE0, RB0): ";
-		for (int i = 0; i < sv0.size(); i++) cout << sv0(i) * sv0(i) << " ";
-		cout << endl;
-	}
-}
-
-void Singular_Value_ElementLevel_CDF()
-{
-	if (!g_collect_singular_values || !elem_sv_initialized) return;
-
-	cout << "Computing Element-Level Singular Value CDFs..." << endl;
-
-	// Absolute SVs
-	for (int sv_idx = 0; sv_idx < elem_num_sv; sv_idx++) {
-		if (elem_sv_samples[sv_idx].empty()) {
-			cout << "  Elem_SV_" << (sv_idx + 1) << ": No samples" << endl;
-			continue;
-		}
-
-		char name[64];
-		sprintf(name, "Elem_SV_%d", sv_idx + 1);
-
-		STASTICS sv_stat;
-		sv_stat.setup(elem_sv_samples[sv_idx].data(),
-		              elem_sv_samples[sv_idx].size(), name);
-		sv_stat.get_cdf();
-		sv_stat.print_cdf();
-
-		cout << "  " << name << "_cdf.dat: " << elem_sv_samples[sv_idx].size()
-		     << " samples" << endl;
-	}
-
-	// SV ratios
-	if (elem_num_sv > 1) {
-		cout << "Computing Element-Level SV Ratio CDFs..." << endl;
-		for (int r = 0; r < elem_num_sv - 1; r++) {
-			if (elem_sv_ratio_samples[r].empty()) continue;
-
-			char name[64];
-			sprintf(name, "Elem_SV_Ratio_%d_1_dB", r + 2);
-
-			STASTICS ratio_stat;
-			ratio_stat.setup(elem_sv_ratio_samples[r].data(),
-			                 elem_sv_ratio_samples[r].size(), name);
-			ratio_stat.get_cdf();
-			ratio_stat.print_cdf();
-
-			cout << "  " << name << "_cdf.dat: " << elem_sv_ratio_samples[r].size()
-			     << " samples" << endl;
-		}
-	}
-}
 

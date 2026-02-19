@@ -2865,10 +2865,10 @@ Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int 
 		Real gamma = ms[ms_idx].gamma;
 		Real alpha_plus_pi = ms[ms_idx].alpha + pi;
 
-		// Polarization slant angle: cross-pol(P=2) ±45°, co-pol(P=1) 0°
+		// Polarization slant angle: 0°/90° (radian)
 		Real zeta_1, zeta_2;
-		if (MS_P == 2) { zeta_1 = pi / 4; zeta_2 = -pi / 4; }
-		else           { zeta_1 = 0;       zeta_2 = 90;        }
+		if (MS_P == 2) { zeta_1 = 0; zeta_2 = pi / 2; }
+		else           { zeta_1 = 0; zeta_2 = pi / 2;  }
 
 		Real F_theta_LCS_P1;
 		Real F_pi_LCS_P1;
@@ -2974,10 +2974,10 @@ Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int 
 		Real gamma = ms[ms_idx].gamma;
 		Real alpha_plus_pi = ms[ms_idx].alpha + pi;
 
-		// Polarization slant angle: cross-pol(P=2) ±45°, co-pol(P=1) 0°
+		// Polarization slant angle: 0°/90°
 		Real zeta_1, zeta_2;
-		if (MS_P == 2) { zeta_1 = pi / 4; zeta_2 = -pi / 4; }
-		else           { zeta_1 = 0;       zeta_2 = 0;        }
+		if (MS_P == 2) { zeta_1 = 0; zeta_2 = pi / 2; }
+		else           { zeta_1 = 0; zeta_2 = 0;        }
 
 		Real F_theta_LCS_P1;
 		Real F_pi_LCS_P1;
@@ -3781,7 +3781,7 @@ Real LINK::compute_rsrp(CHANNEL* ch, int sec_number, int sec_z_idx, int sec_a_id
 //
 // Optimized RSRP computation following TR 36.873 Eq. (8.1-1)~(8.1-5).
 //
-// Key insight: The RSRP formula computes |α_{n,m,u,p}|² per ray (incoherent sum),
+// Key insight: The RSRP formula computes |α_{n,m,u,p}|² per ray (INCOHERENT sum),
 // and there is NO RX spatial phase in the formula. Therefore:
 //
 //   |α_{n,m,u,p}|² = (P_n / (M_n · (K_R+1))) · |raysPreComp[u_p][n][m]|² · |AF(n,m,beam)|²
@@ -3789,6 +3789,10 @@ Real LINK::compute_rsrp(CHANNEL* ch, int sec_number, int sec_z_idx, int sec_a_id
 // where:
 //   raysPreComp = F_rx,u × PolarizationMatrix × F_tx,element   (beam-INDEPENDENT)
 //   AF(n,m,beam) = Σ_{k,l} w_{k,l}(beam) · exp(j·2π/λ · r̂_{n,m} · d_tx(k,l,0))  (beam-DEPENDENT)
+//
+// IMPORTANT: This INCOHERENT per-ray summation (Σ_m |h_m|²) differs from the
+// full channel coefficient formula (|Σ_m h_m|² — coherent). Using H_usn (which
+// stores coherent ray sums) would produce different RSRP values.
 //
 // This allows us to:
 //   Phase 1: Pre-compute antenna patterns and |raysPreComp|² for all rays ONCE
@@ -3804,7 +3808,7 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 
 	const int K = BS_M / BS_Mp;   // vertical elements per port 0
 	const int L = BS_N / BS_Np;   // horizontal elements per port 0
-	const int totalRx = MS_M * MS_N * MS_P;
+	const int totalRx = MS_M * MS_N * MS_P / (MS_Mp*MS_Np);
 	const Real deg2rad = pi / REAL(180.0);
 	const Real k_2pi = REAL(2.0) * pi / Wavelength;
 
@@ -3976,6 +3980,7 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 					Real sum_u_ray_power = 0.0;
 					for (int p = 0; p < MS_P; p++)
 						sum_u_ray_power += ray_power[p][n][m];
+					//sum_u_ray_power = ray_power[0][n][m];
 					sum_u_ray_power *= (Real)(MS_M * MS_N);
 
 					alpha += (P_n / (Real)M_n) * AF_sq * sum_u_ray_power;

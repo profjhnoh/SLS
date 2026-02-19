@@ -38,7 +38,8 @@ void MS::Channel_Update_MIMO(int ms_idx)
 	OUTPUT   : H_m, HI_m(interference channel)
 	===================================================================*/
 	//Fourier_Transform_of_Channel(self_idx);
-	Fourier_Transform_of_Channel_Optimized(self_idx);
+	//Fourier_Transform_of_Channel_Optimized(self_idx);
+	Fourier_Transform_WithBF(self_idx);
 
 	/*===================================================================
 	FUNCTION : Quantization_of_Ch()
@@ -726,15 +727,6 @@ void MS::Fourier_Transform_of_Channel_Optimized(int ms_idx)
 		int self_idx = ms_idx;
 		int _bs_idx = 0;
 
-		// Debug output for MS 0, t=0 to 10
-		static bool debug_output_done = false;
-		bool should_output = (ms_idx == 0 && t >= 0 && t <= 10 && !debug_output_done);
-		std::ofstream impulse_file, frequency_file;
-
-		if (should_output && t == 10) {
-			debug_output_done = true; // Only output once for all time steps
-		}
-
 		for (int coeff_idx = 0; coeff_idx < num_compute_coef; coeff_idx++)
 		{
 			if (TYPE == 11 && num_Indoor_TRxP == 1)
@@ -779,89 +771,16 @@ void MS::Fourier_Transform_of_Channel_Optimized(int ms_idx)
 					{
 						complex<Real> Hc(0.0, 0.0);
 
-						// 모든 path 기여도 합산
 						for (int path_idx = 0; path_idx < NUM_PATH; path_idx++)
 						{
 							const complex<Real>& gain = channel[_bs_idx][self_idx].CHIR[sec_idx][t_idx][r_idx][path_idx];
-							Hc += gain * phasor[path_idx];      // 복소곱 + 복소합
-							phasor[path_idx] *= step[path_idx]; // 다음 RB를 위한 누적 (복소곱 1회)
-
-							// NaN 검출: gain 또는 phasor에서 NaN 발생 시 즉시 출력
-							if (std::isnan(Hc.real()) || std::isnan(Hc.imag())) {
-								static int nan_count = 0;
-								if (nan_count < 5) {
-									nan_count++;
-									cout << "\n*** NaN DETECTED in Fourier Transform ***" << endl;
-									cout << "  ms_idx=" << ms_idx << " t=" << t
-									     << " coeff=" << coeff_idx << " rb=" << rbs_idx
-									     << " rx=" << r_idx << " tx=" << t_idx
-									     << " path=" << path_idx << endl;
-									cout << "  bs_idx=" << _bs_idx << " sec_idx=" << sec_idx
-									     << " Prop=" << channel[_bs_idx][self_idx].Propagation
-									     << " LOS=" << channel[_bs_idx][self_idx].LOS
-									     << " K=" << channel[_bs_idx][self_idx].K_linear << endl;
-									cout << "  gain=(" << gain.real() << "," << gain.imag() << ")"
-									     << " phasor=(" << phasor[path_idx].real() << "," << phasor[path_idx].imag() << ")"
-									     << " step=(" << step[path_idx].real() << "," << step[path_idx].imag() << ")" << endl;
-									cout << "  delay[" << path_idx << "]=" << channel[_bs_idx][self_idx].delay[path_idx]
-									     << " power[" << path_idx << "]=" << channel[_bs_idx][self_idx].power[path_idx] << endl;
-									cout << "  Hc so far=(" << Hc.real() << "," << Hc.imag() << ")" << endl;
-									// 전체 CHIR 덤프
-									for (int p = 0; p < NUM_PATH; p++) {
-										const complex<Real>& g = channel[_bs_idx][self_idx].CHIR[sec_idx][t_idx][r_idx][p];
-										cout << "    CHIR[" << p << "]=(" << g.real() << "," << g.imag()
-										     << ") delay=" << channel[_bs_idx][self_idx].delay[p]
-										     << " power=" << channel[_bs_idx][self_idx].power[p] << endl;
-									}
-								}
-								break; // 이 RB의 나머지 path 스킵
-							}
+							Hc += gain * phasor[path_idx];
+							phasor[path_idx] *= step[path_idx];
 						}
 
 						H_m[coeff_idx][rbs_idx](r_idx, t_idx) = Hc;
 					}
 
-					// Output impulse response and frequency response for debugging
-					/*
-					if (should_output && coeff_idx == 0 && r_idx == 0 && t_idx == 0)
-					{
-						// Open files on first call
-						char impulse_filename[256], frequency_filename[256];
-						sprintf(impulse_filename, "channel_impulse_response_t%d.txt", t);
-						sprintf(frequency_filename, "channel_frequency_response_t%d.txt", t);
-
-						impulse_file.open(impulse_filename);
-						frequency_file.open(frequency_filename);
-
-						// Write impulse response (CHIR)
-						impulse_file << "# Time: " << t << ", MS: " << ms_idx << ", RX: " << r_idx << ", TX: " << t_idx << "\n";
-						impulse_file << "# path_idx delay(s) real_gain imag_gain abs_gain phase(rad)\n";
-						for (int path_idx = 0; path_idx < NUM_PATH; path_idx++)
-						{
-							const Real tau = channel[_bs_idx][self_idx].delay[path_idx];
-							const complex<Real>& gain = channel[_bs_idx][self_idx].CHIR[sec_idx][t_idx][r_idx][path_idx];
-							impulse_file << path_idx << " "
-								<< std::scientific << std::setprecision(12) << tau << " "
-								<< gain.real() << " " << gain.imag() << " "
-								<< std::abs(gain) << " " << std::arg(gain) << "\n";
-						}
-						impulse_file.close();
-
-						// Write frequency response (H_m at RBs)
-						frequency_file << "# Time: " << t << ", MS: " << ms_idx << ", RX: " << r_idx << ", TX: " << t_idx << "\n";
-						frequency_file << "# rb_idx freq(Hz) real_H imag_H abs_H phase(rad)\n";
-						for (int rbs_idx = 0; rbs_idx < num_rb; rbs_idx++)
-						{
-							const unsigned long long freq = f0 + rbs_idx * dfrb;
-							const complex<Real>& Hf = H_m[coeff_idx][rbs_idx](r_idx, t_idx);
-							frequency_file << rbs_idx << " " << freq << " "
-								<< std::scientific << std::setprecision(12)
-								<< Hf.real() << " " << Hf.imag() << " "
-								<< std::abs(Hf) << " " << std::arg(Hf) << "\n";
-						}
-						frequency_file.close();
-					}
-					*/
 				}
 			}
 		}
@@ -938,14 +857,11 @@ VectorXcReal MS::PowerIteration_DominantEigenvector(const MatrixXcReal& M, int m
 
 
 // ====================================================================
-// Element-Level Fourier Transform (ns-3 style)
-// ====================================================================
-// Converts H_usn[cluster](totalRx, totalTx) in delay domain
-// to H_m_elem[rb](totalRx, totalTx) in frequency domain.
-// Uses the same recursive phasor technique as Fourier_Transform_of_Channel_Optimized.
+// H_usn Fourier Transform (no BF weights)
+// Converts H_usn[cluster](totalRx, totalTx) → H_m_elem[rb](totalRx, totalTx)
 // ====================================================================
 
-void MS::Fourier_Transform_ElementLevel(int ms_idx)
+void MS::Fourier_Transform_H_usn(int ms_idx)
 {
 	if (CH_CAL != 1) return;
 
@@ -1005,5 +921,142 @@ void MS::Fourier_Transform_ElementLevel(int ms_idx)
 
 	// Reset phasors for potential re-use
 	// (not strictly needed since this is called once per drop)
+}
+
+// ====================================================================
+// Element-Level DFT + Beamforming Weights → H_m (port-level)
+// ====================================================================
+// Data flow:
+//   H_usn[cluster](totalRx, totalTx) → DFT per RB → H_elem(totalRx, totalTx)
+//   H_m[coeff][rb] = W_rx^H × H_elem × W_tx   (NUM_RX_Port × NUM_TX_Port)
+//
+// W_tx: (totalTx × NUM_TX_Port) beamforming weight matrix
+// W_rx: (totalRx × NUM_RX_Port) beamforming weight matrix
+// ====================================================================
+void MS::Fourier_Transform_WithBF(int ms_idx)
+{
+	if (CH_CAL != 1) return;
+
+	int self_idx = ms_idx;
+	int totalTx = BS_M * BS_N * BS_P;
+	int totalRx = MS_M * MS_N * MS_P;
+	int K = BS_M / BS_Mp;
+	int L = BS_N / BS_Np;
+	int ue_K = MS_M / MS_Mp;
+	int ue_L = MS_N / MS_Np;
+
+	for (int coeff_idx = 0; coeff_idx < num_compute_coef; coeff_idx++)
+	{
+		int _bs_idx;
+		int adj_sector;
+		if (TYPE == 11 && num_Indoor_TRxP == 1) {
+			_bs_idx = (int)(links[self_idx].adj_sector[coeff_idx]);
+			adj_sector = _bs_idx;
+		} else {
+			_bs_idx = (int)(links[self_idx].adj_sector[coeff_idx] / 3);
+			adj_sector = links[self_idx].adj_sector[coeff_idx];
+		}
+
+		CHANNEL& ch = channel[_bs_idx][self_idx];
+		const int NUM_PATH = ch.NUM_PATH_for_channelcoeff;
+		if (NUM_PATH <= 0) continue;
+		if ((int)ch.H_usn.size() < NUM_PATH) continue;
+
+		// --- Build W_tx: (totalTx × NUM_TX_Port) ---
+		// TX port index: p*Mp*Np*Mg*Ng + mi*Np*Mg*Ng + ni*Mg*Ng + mg*Ng + ng
+		// TX element flat index: s_m*(BS_N*BS_P) + s_n*BS_P + s_p
+		// Within port (mi,ni,p,mg,ng): elements are (mi*K+k, ni*L+l, p, mg, ng) for k=0..K-1, l=0..L-1
+		MatrixXcReal W_tx = MatrixXcReal::Zero(totalTx, NUM_TX_Port);
+		{
+			int beam_z = links[self_idx].analog_beam_selection[adj_sector].sector_z;
+			int beam_a = links[self_idx].analog_beam_selection[adj_sector].sector_a;
+
+			for (int p = 0; p < BS_P; p++) {
+				for (int mi = 0; mi < BS_Mp; mi++) {
+					for (int ni = 0; ni < BS_Np; ni++) {
+						// Port flat index (Mg=1, Ng=1 for current configs)
+						int port_idx = p * BS_Mp * BS_Np + mi * BS_Np + ni;
+
+						for (int k = 0; k < K; k++) {
+							for (int l = 0; l < L; l++) {
+								int s_m = mi * K + k;
+								int s_n = ni * L + l;
+								// Element flat index
+								int elem_idx = s_m * (BS_N * BS_P) + s_n * BS_P + p;
+
+								W_tx(elem_idx, port_idx) = virtualization_weight_wv[beam_z][beam_a][k][l];
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// --- Build W_rx: (totalRx × NUM_RX_Port) ---
+		MatrixXcReal W_rx = MatrixXcReal::Zero(totalRx, NUM_RX_Port);
+		{
+			if (ue_antenna_element_gain == 0) {
+				// Omni UE: identity mapping (1 element per port)
+				int min_dim = std::min(totalRx, NUM_RX_Port);
+				for (int i = 0; i < min_dim; i++) {
+					W_rx(i, i) = ComplexReal(1.0, 0.0);
+				}
+			} else {
+				int beam_z = links[self_idx].analog_beam_selection[adj_sector].z;
+				int beam_a = links[self_idx].analog_beam_selection[adj_sector].a;
+
+				for (int p = 0; p < MS_P; p++) {
+					for (int mi = 0; mi < MS_Mp; mi++) {
+						for (int ni = 0; ni < MS_Np; ni++) {
+							int port_idx = p * MS_Mp * MS_Np + mi * MS_Np + ni;
+
+							for (int k = 0; k < ue_K; k++) {
+								for (int l = 0; l < ue_L; l++) {
+									int u_m = mi * ue_K + k;
+									int u_n = ni * ue_L + l;
+									int elem_idx = u_m * (MS_N * MS_P) + u_n * MS_P + p;
+
+									W_rx(elem_idx, port_idx) = ue_virtualization_weight_wv[beam_z][beam_a][k][l];
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// --- DFT + BF per RB ---
+		// FFT parameters (same as Fourier_Transform_of_Channel_Optimized)
+		int pointer = (int(fft_size) - (num_rb * num_freq_per_rbs)) / 2;
+		const unsigned long long f0 = (pointer + (num_freq_per_rbs / 2)) * subcarrier_spacing;
+		const Real df   = subcarrier_spacing;
+		const Real dfrb = num_freq_per_rbs * df;
+
+		// Initialize phasor and step per path
+		std::vector<complex<Real>> phasor(NUM_PATH);
+		std::vector<complex<Real>> step_val(NUM_PATH);
+
+		for (int path_idx = 0; path_idx < NUM_PATH; path_idx++) {
+			const Real tau = ch.delay[path_idx];
+			phasor[path_idx] = exp(complex<Real>(0.0, -2.0 * pi * f0 * tau));
+			step_val[path_idx] = exp(complex<Real>(0.0, -2.0 * pi * dfrb * tau));
+		}
+
+		// Pre-compute W_rx^H (adjoint)
+		MatrixXcReal W_rx_H = W_rx.adjoint();  // NUM_RX_Port × totalRx
+
+		for (int rbs_idx = 0; rbs_idx < num_rb; rbs_idx++)
+		{
+			// DFT: H_elem = Σ_path H_usn[path] * phasor[path]
+			MatrixXcReal H_elem = MatrixXcReal::Zero(totalRx, totalTx);
+			for (int path_idx = 0; path_idx < NUM_PATH; path_idx++) {
+				H_elem += ch.H_usn[path_idx] * phasor[path_idx];
+				phasor[path_idx] *= step_val[path_idx];
+			}
+
+			// BF: H_m[coeff][rb] = W_rx^H × H_elem × W_tx
+			H_m[coeff_idx][rbs_idx] = W_rx_H * H_elem * W_tx;
+		}
+	}
 }
 

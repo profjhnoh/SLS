@@ -17,13 +17,6 @@
 
 //#include "indicators.hpp"
 
-// Global variable definition for ray-level Doppler precision mode
-int USE_RAY_LEVEL_DOPPLER = 0;  // Default: use cluster-average Doppler (fast)
-
-// Global variable definitions for precoding-based SINR calculation
-int USE_PRECODING_BASED_SINR = 0;  // Default: use feedback CQI
-Real INTERCELL_INTERFERENCE_MARGIN_DB = 0.0;  // Default: 0 dB margin (assumes perfect inter-cell interference knowledge)
-
 void Set_simul_param(int argc, char *argv[]);
 void Set_Parameter(int scenario);
 void StandardInitialization();
@@ -77,15 +70,8 @@ void Finalize_Precoding_Metrics();  // Compute time-averaged values before CDF
 void Precoding_SINR_CDF();
 void Precoding_Coupling_Loss_CDF();
 
-// Element-level SVD collection (ns-3 style, no beamforming)
-void Collect_Singular_Values_ElementLevel();
-void Singular_Value_ElementLevel_CDF();
-
-int main(int argc, char *argv[])
+void Initialize(int argc, char *argv[])
 {
-    clock_t start, finish;
-    Real duration;
-
 	// Enable nested parallelism for OpenMP
 	// This allows parallel regions inside parallel regions
 	// Outer level: sector-level parallelism
@@ -97,7 +83,7 @@ int main(int argc, char *argv[])
 	Set_simul_param(argc, argv);
 	Set_Parameter(scenario);
 	StandardInitialization(); // Table Setting
-	InitializeSystem(); 
+	InitializeSystem();
 	Set_fastfading_param();   // Correlatio matrix setting for LSP
 	Allocate_memory();
 
@@ -106,151 +92,127 @@ int main(int argc, char *argv[])
 
 	// Initialize precoding metrics collection
 	Init_Precoding_Metrics();
+}
 
-	for (drop_idx = 0; drop_idx < num_drop; drop_idx++)
+void RunDrop(int drop_idx)
+{
+	clock_t start, finish;
+	Real duration;
+
+	cout << "Drop # " << drop_idx+1 << "/" << num_drop << " ing... " << endl;
+	cout << "  " << endl;
+
+	Initialdrop();
+	Initialize_CHANNEL();
+	Generate_LSP();
+	Generate_SSP();
+	Print_Location(drop_idx);
+	start = clock();
+	Link_configuration();
+	finish = clock();
+
+	duration = (Real)(finish - start) / CLOCKS_PER_SEC;
+	cout << duration << "초" << endl;
+
+	if (Calibration_mode == 0)  // normal simulation
 	{
-		cout << "Drop # " << drop_idx+1 << "/" << num_drop << " ing... " << endl;
-		cout << "  " << endl;
-		
-		Initialdrop();
-		Initialize_CHANNEL();
-		Generate_LSP();
-		Generate_SSP();
-		Print_Location(drop_idx);
-		start = clock();
-		Link_configuration();
-		finish = clock();
+		ClearMAPs2StartADrop();
+	}
 
-		duration = (Real)(finish - start) / CLOCKS_PER_SEC;
-    	cout << duration << "초" << endl;
+	Get_CouplingLoss();
+	Collect_LSP_from_ServingCell();
 
-		if (Calibration_mode == 0)  // normal simulation
+	if (Calibration_mode == 0)  // normal simulation
+	{
+		Parameter_initialization();
+		Compute_Channel_Coef();
+
+#ifdef ENABLE_PROGRESSBAR
+		ResetProgressbar( drop_idx );
+#endif
+		for (t = 0; t < run_times + SCHEDULE_DELAY; t++) // N_pf +
 		{
-			ClearMAPs2StartADrop();
+#ifdef ENABLE_PROGRESSBAR
+			Progressbar( t );
+#endif
+			Update_Channel_Coef();
+
+			// Channel Update with progress indicator
+			int processed_ms = 0;
+			#if ENABLE_MULTITHREADING
+			#pragma omp parallel num_threads(num_of_threads)
+			{
+				#pragma omp for
+			#endif
+				for (int idx = 0; idx < num_MS; idx++)
+				{
+					ms[idx].Channel_Update_MIMO(idx);
+				}
+			#if ENABLE_MULTITHREADING
+			}
+			#endif
+
+			// Print debug info at t=0 (H_m available for SV computation)
+			if (t == 0) {
+				Print_Calib_Debug_Info();
+			}
+
+			if (t > SCHEDULE_DELAY-1)
+			{
+				Scheduling();
+				scheduling_statistics();
+			}
+
+
+			if (t >= SCHEDULE_DELAY-1)
+			{
+				Measure();
+				measure_statistics();
+				// Note: Precoding metrics are collected inside Receive_DL_mTRP()
+				// to avoid redundant SINR computation
+			}
+			// Collect singular values from channel matrices (multithreaded)
+			Collect_Singular_Values_All();
 		}
-
-		Get_CouplingLoss();
-		Collect_LSP_from_ServingCell();
-
-		int old_time_percent = -1;
-		if (Calibration_mode == 0)  // normal simulation
-		{
+		PerDropStatistics(drop_idx);
+		ClearDrop();
+		cout << "DROP finish.. " << endl;
+	}
+	else  // calibration mode -> only coupling loss, geometry
+	{
+		if (g_collect_singular_values) {
+			// Need H_m = NULL so Declare_ch_matrix() allocates properly
 			Parameter_initialization();
+
+			// Step 1: Compute channel impulse response (CHIR)
 			Compute_Channel_Coef();
 
-#ifdef ENABLE_PROGRESSBAR
-			ResetProgressbar( drop_idx );
-#endif
-			for (t = 0; t < run_times + SCHEDULE_DELAY; t++) // N_pf +
+			// Step 2: Update CHIR with Doppler phase at t=0
+			t = 0;
+			Update_Channel_Coef();
+
+			// Step 3: FFT -> H_m (frequency-domain channel matrix) for each UE
+			#if ENABLE_MULTITHREADING
+			#pragma omp parallel num_threads(num_of_threads)
 			{
-#ifdef ENABLE_PROGRESSBAR
-				Progressbar( t );
-#endif
-				Update_Channel_Coef();
-
-				// Channel Update with progress indicator
-				int processed_ms = 0;
-				#if ENABLE_MULTITHREADING
-				#pragma omp parallel num_threads(num_of_threads)
-				{
-					#pragma omp for
-				#endif
-					for (int idx = 0; idx < num_MS; idx++)
-					{
-						ms[idx].Channel_Update_MIMO(idx);
-					}
-				#if ENABLE_MULTITHREADING
+				#pragma omp for
+			#endif
+				for (int idx = 0; idx < num_MS; idx++) {
+					ms[idx].Channel_Update_MIMO(idx);
 				}
-				#endif
-
-				// Print debug info at t=0 (H_m available for SV computation)
-				if (t == 0) {
-					Print_Calib_Debug_Info();
-				}
-
-				if (t > SCHEDULE_DELAY-1)
-				{
-					Scheduling();
-					scheduling_statistics();
-				}
-
-
-				if (t >= SCHEDULE_DELAY-1)
-				{
-					Measure();
-					measure_statistics();
-					// Note: Precoding metrics are collected inside Receive_DL_mTRP()
-					// to avoid redundant SINR computation
-				}
-				// Collect singular values from channel matrices (multithreaded)
-				Collect_Singular_Values_All();
+			#if ENABLE_MULTITHREADING
 			}
-			PerDropStatistics(drop_idx);
-			ClearDrop();
-			cout << "DROP finish.. " << endl;
+			#endif
+
+			// Step 4: Collect SVD of H_m per RB
+			Collect_Singular_Values_All();
 		}
-		else  // calibration mode -> only coupling loss, geometry
-		{
-			if (g_collect_singular_values) {
-				// Need H_m = NULL so Declare_ch_matrix() allocates properly
-				Parameter_initialization();
-
-				// Step 1: Compute channel impulse response (CHIR)
-				Compute_Channel_Coef();
-
-				// Step 2: Update CHIR with Doppler phase at t=0
-				t = 0;
-				Update_Channel_Coef();
-
-				// Step 3: FFT -> H_m (frequency-domain channel matrix) for each UE
-				#if ENABLE_MULTITHREADING
-				#pragma omp parallel num_threads(num_of_threads)
-				{
-					#pragma omp for
-				#endif
-					for (int idx = 0; idx < num_MS; idx++) {
-						ms[idx].Channel_Update_MIMO(idx);
-					}
-				#if ENABLE_MULTITHREADING
-				}
-				#endif
-
-				// Step 4: Collect SVD of H_m per RB
-				Collect_Singular_Values_All();
-
-				// ====================================================================
-				// Element-Level Channel Generation (ns-3 style)
-				// ====================================================================
-				// Generate element-level channel H_usn without beamforming,
-				// transform to frequency domain, and collect SVD.
-				// This runs AFTER the normal port-level flow so both can be compared.
-				// ====================================================================
-				{
-					cout << "  Element-level channel generation (ns-3 style)..." << endl;
-
-					// Step E1: Generate element-level H_usn for all BS-MS-sector links
-					for (int ms_i = 0; ms_i < num_MS; ms_i++) {
-						int bs_i = (int)(links[ms_i].adj_sector[0] / 3);
-						int sec_i = (int)(links[ms_i].adj_sector[0] % 3);
-						if (TYPE == 11 && num_Indoor_TRxP == 1)
-							bs_i = links[ms_i].adj_sector[0];
-						channel[bs_i][ms_i].GetNewChannel_ElementLevel(bs_i, ms_i, sec_i);
-					}
-
-					// Step E2: Element-level FFT -> H_m_elem
-					for (int idx = 0; idx < num_MS; idx++) {
-						ms[idx].Fourier_Transform_ElementLevel(idx);
-					}
-
-					// Step E3: Collect element-level SVD
-					Collect_Singular_Values_ElementLevel();
-
-					cout << "  Element-level channel generation done." << endl;
-				}
-			}
-			Print_Calib_Debug_Info();
-		}
+		Print_Calib_Debug_Info();
 	}
+}
+
+void OutputResults()
+{
 	Geometry_CDF();
 	Wideband_SIR_CDF();
 	Coupling_Loss_CDF();
@@ -260,16 +222,23 @@ int main(int argc, char *argv[])
 	LSP_ZSD_CDF();
 	LSP_ZSA_CDF();
 	Singular_Value_CDF();
-	Singular_Value_ElementLevel_CDF();
 
 	// Output precoding-based CDFs (TX+RX digital beamforming, time-averaged per UE)
 	Finalize_Precoding_Metrics();  // Compute time-averaged values
 	Precoding_SINR_CDF();
 	Precoding_Coupling_Loss_CDF();
+}
+
+int main(int argc, char *argv[])
+{
+	Initialize(argc, argv);
+
+	for (drop_idx = 0; drop_idx < num_drop; drop_idx++)
+	{
+		RunDrop(drop_idx);
+	}
+
+	OutputResults();
 
 	return 0;
 }
-
-
-
-
