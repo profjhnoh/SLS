@@ -12,7 +12,7 @@ Real dot(LOCATION3D a, LOCATION3D b);
 Real Transform_angle_minus_180_to_plus_180(Real x);
 Real Transform_angle_0_to_plus_180(Real x);
 
-Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int sector_index, Real &F_theta_GCS_P1, Real &F_pi_GCS_P1, Real &F_theta_GCS_P2, Real &F_pi_GCS_P2);
+Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int sector_index, Real &F_theta_GCS_P1, Real &F_pi_GCS_P1, Real &F_theta_GCS_P2, Real &F_pi_GCS_P2, int port_idx = -1);
 
 void CHANNEL::Reset2Default(void)
 {
@@ -296,6 +296,7 @@ void CHANNEL::Set_SmallScaleParameter(int _bs_idx, int _ue_idx)
 
 	Precompute_ray_angles();          // per-ray angles (after subcluster split)
 	Set_circular_angle_spread();      // 3GPP TR 25.996 Annex A (per-ray level)
+	Set_RMS_delay_spread();           // power-weighted RMS delay spread (cluster + sub-cluster level)
 
 	Sampling_DelaySpread();
 }
@@ -1022,13 +1023,6 @@ void CHANNEL::Set_PATHLOSS()
 
 		// ms_height_in = 3 * (n - 1) + 1.5;
 		int lc_Urban_env_Config_Type = Configuration_Type;
-		if ( g_mTRP_mode == 1 || g_mTRP_mode == 2)
-		{
-			if ( self_bs_idx < simple_num_BS )
-				lc_Urban_env_Config_Type = 1;
-			else
-				lc_Urban_env_Config_Type = 3;
-		}
 
 
 		Real ms_height_in_channel = 0;
@@ -1087,7 +1081,7 @@ void CHANNEL::Set_PATHLOSS()
 				//////////////////////////////// LOS
 				if (LOS == 1)
 				{
-					if (carrier_freq <= 6 * pow(10, 9)) ///// 0.5GHz <= fc <= 6GHz
+					if (carrier_freq <= 7 * pow(10, 9)) ///// 0.5GHz <= fc <= 6GHz
 					{
 						if (distance <= d_BP)
 						{
@@ -1117,7 +1111,7 @@ void CHANNEL::Set_PATHLOSS()
 				/////////////////////////////// NLOS
 				else if (LOS == 0)
 				{
-					if (carrier_freq <= 6 * pow(10, 9)) ///// 0.5GHz <= fc <= 6GHz
+					if (carrier_freq <= 7 * pow(10, 9)) ///// 0.5GHz <= fc <= 6GHz
 					{
 						if (distance <= d_BP)
 						{
@@ -1319,43 +1313,21 @@ void CHANNEL::Set_PATHLOSS()
 									  -  9. * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
 					}
 				}
-				// NLOS
+				// NLOS — TR 38.901 V19.1.0 (replaces M.2135 sub-6 formula)
 				else if (LOS == 0)
 				{
-					if (carrier_freq <= 6000000000.) // 0.5GHz <= fc <= 6GHz
+					sigma_SF = 6.;
+					if (distance <= d_BP)
 					{
-						if (distance <= d_BP)
-						{
-							sigma_SF = 6.;
-							pathloss = 28. + 22. * log10(distance_3d) + 20. * log10(carrier_freq / 1000000000.);
-						}
-						else if (d_BP < distance)
-						{
-							sigma_SF = 6.;
-							pathloss = 40. * log10(distance_3d) + 28 + 20. * log10(carrier_freq / 1000000000.) - 9 * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
-						}
-
-						pathloss_2 = 161.04 - 7.1 * log10(20) + 7.5 * log10(20) - (24.37 - 3.7 * (20 / _bs_height) * (20 / _bs_height)) * log10(_bs_height) + (43.42 - 3.1 * log10(_bs_height)) * (log10(distance_3d) - 3) + 20 * log10(carrier_freq / 1000000000.) - (3.2 * (pow(log10(17.625), 2)) - 4.97) - 0.6 * (ms_height_in_channel - 1.5);
-
-						pathloss = MAX(pathloss, pathloss_2);
+						pathloss = 28. + 22. * log10(distance_3d) + 20. * log10(carrier_freq / 1000000000.);
 					}
-					else // 6GHz < fc <= 100 GHz
+					else if (d_BP < distance)
 					{
-						if (distance <= d_BP)
-						{
-							sigma_SF = 6;
-							pathloss = 28. + 22. * log10(distance_3d) + 20. * log10(carrier_freq / 1000000000.);
-						}
-						else if (d_BP < distance)
-						{
-							sigma_SF = 6;
-							pathloss = 40. * log10(distance_3d) + 28 + 20. * log10(carrier_freq / 1000000000.) - 9 * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
-						}
-
-						pathloss_2 = 13.54 + 39.08 * log10(distance_3d) + 20 * log10(carrier_freq / 1000000000.) - 0.6 * (ms_height_in_channel - 1.5);
-
-						pathloss = MAX(pathloss, pathloss_2);
+						pathloss = 40. * log10(distance_3d) + 28 + 20. * log10(carrier_freq / 1000000000.) - 9 * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
 					}
+
+					pathloss_2 = 13.54 + 39.08 * log10(distance_3d) + 20 * log10(carrier_freq / 1000000000.) - 0.6 * (ms_height_in_channel - 1.5);
+					pathloss = MAX(pathloss, pathloss_2);
 				}
 
 				if (Propagation == OUT2IN_propagation)
@@ -1363,34 +1335,32 @@ void CHANNEL::Set_PATHLOSS()
 					sigma_SF = 7;
 				}
 			}
-			// Channel Model B
+			// Channel Model B — TR 38.901 V19.1.0 (same as Model A)
 			else if (Channel_Model_Type == 1)
 			{
 				// LOS
 				if (LOS == 1)
 				{
+					sigma_SF = 4.;
 					if (distance <= d_BP)
 					{
-						sigma_SF = 4.;
 						pathloss = 28. + 22. * log10(distance_3d) + 20. * log10(carrier_freq / 1000000000.);
 					}
 					else if (d_BP < distance)
 					{
-						sigma_SF = 4.;
 						pathloss = 40. * log10(distance_3d) + 28 + 20. * log10(carrier_freq / 1000000000.) - 9 * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
 					}
 				}
 				// NLOS
 				else if (LOS == 0)
 				{
+					sigma_SF = 6.;
 					if (distance <= d_BP)
 					{
-						sigma_SF = 6.;
 						pathloss = 28. + 22. * log10(distance_3d) + 20. * log10(carrier_freq / 1000000000.);
 					}
 					else if (d_BP < distance)
 					{
-						sigma_SF = 6.;
 						pathloss = 40. * log10(distance_3d) + 28 + 20. * log10(carrier_freq / 1000000000.) - 9 * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
 					}
 					pathloss_2 = 13.54 + 39.08 * log10(distance_3d) + 20 * log10(carrier_freq / 1000000000.) - 0.6 * (ms_height_in_channel - 1.5);
@@ -2007,13 +1977,6 @@ void CHANNEL::Set_Channel_Parameters()
 	else if (TYPE == 12)
 	{
 		int lc_Urban_env_Config_Type = Configuration_Type;
-		if ( g_mTRP_mode == 1 || g_mTRP_mode == 2)
-		{
-			if ( self_bs_idx < simple_num_BS )
-				lc_Urban_env_Config_Type = 1;
-			else
-				lc_Urban_env_Config_Type = 3;
-		}
 
 		////////////////////////////////////////////////////////////////////////////
 		//////////////////////////////////////////////////////////////////////////// UMi
@@ -2503,6 +2466,12 @@ void CHANNEL::Set_Channel_Parameters()
 			{
 				if (carrier_freq >= 500000000 && carrier_freq <= 6000000000) //// 0.5GHz <= fc <= 6GHz
 				{
+					// ===== TR 38.901 V19.1.0 Table 7.5-6 Part 1: UMa (sub-6 GHz) =====
+					// (Replaces M.2412 Channel Model A sub-6 parameters)
+					Real fc = (carrier_freq / 1000000000.);  // fc [GHz]
+					// Note: Table 7.5-7 ZSD/ZOD uses fc=6 for fc<6 GHz
+					Real fc_zsd = MAX(6.0, fc);
+
 					XPR_mean[LOS_propagation] = 8;
 					XPR_mean[NLOS_propagation] = 7;
 					XPR_mean[OUT2IN_propagation] = 9;
@@ -2513,22 +2482,20 @@ void CHANNEL::Set_Channel_Parameters()
 
 					if (Propagation == 1) // LOS
 					{
-						num_path = 12; // Number of clusters
+						num_path = 12;
 						r_tau = 2.5;
 
-						// K_factor = normal(9, 3.5);
 						mu_K_factor = 9.;
 						sigma_K_factor = 3.5;
-						K_factor = pow(10, normal(mu_K_factor, sigma_K_factor) / 10); //
+						K_factor = pow(10, normal(mu_K_factor, sigma_K_factor) / 10);
 
-						mu_DS = -7.03;
-						sigma_DS = 0.66;
-						DS = pow(10, normal(mu_DS, sigma_DS)); // = sigma_tau in M.2135
+						mu_DS = -7.067 - 0.0794 * log10(fc);       // M.2412: -7.03
+						sigma_DS = 0.57 + 0.026 * log10(fc);       // M.2412: 0.66
 
-						mu_ASD = 1.15;
-						sigma_ASD = 0.28;
-						mu_ASA = 1.81;
-						sigma_ASA = 0.2;
+						mu_ASD = 0.92;                              // M.2412: 1.15
+						sigma_ASD = 0.31;                           // M.2412: 0.28
+						mu_ASA = 1.76;                              // M.2412: 1.81
+						sigma_ASA = 0.19;                           // M.2412: 0.2
 
 						mu_ZSA = 0.96;
 						sigma_ZSA = 0.15;
@@ -2536,8 +2503,22 @@ void CHANNEL::Set_Channel_Parameters()
 						sigma_ZSD = 0.4;
 						mu_offset_ZOD = 0;
 
-						cluster_DS = -1; /// N/A
-						cluster_ASD = 5;
+						// Legacy: old TR 38.901 Table 7.5-6 (pre-V19)
+						if (channel_param_legacy) {
+							mu_DS = -6.955 - 0.0963 * log10(fc);
+							sigma_DS = 0.66;
+							mu_ASD = 1.06 + 0.1114 * log10(fc);
+							sigma_ASD = 0.28;
+							mu_ASA = 1.81;
+							sigma_ASA = 0.2;
+							mu_ZSA = 0.95;
+							sigma_ZSA = 0.16;
+						}
+
+						DS = pow(10, normal(mu_DS, sigma_DS));
+
+						cluster_DS = MAX(0.25, -3.4084 * log10(fc) + 6.5622); // M.2412: N/A
+						cluster_ASD = channel_param_legacy ? 5.0 : 3.58;
 						cluster_ASA = 11;
 						cluster_ZSA = 7;
 
@@ -2546,34 +2527,43 @@ void CHANNEL::Set_Channel_Parameters()
 					}
 					else if (Propagation == 0) //// NLOS
 					{
-						num_path = 20; // Number of clusters
+						num_path = 20;
 						r_tau = 2.3;
 
-						K_factor = -1; // N/A
+						K_factor = -1;
 						mu_K_factor = -1;
 						sigma_K_factor = -1;
 
-						mu_DS = -6.44;
+						mu_DS = -6.47 - 0.134 * log10(fc);         // M.2412: -6.44
 						sigma_DS = 0.39;
-						DS = pow(10, normal(mu_DS, sigma_DS)); // = sigma_tau in M.2135
 
-						mu_ASD = 1.41;
-						sigma_ASD = 0.28;
-						mu_ASA = 1.87;
-						sigma_ASA = 0.11;
+						mu_ASD = 1.09;                              // M.2412: 1.41
+						sigma_ASD = 0.44;                           // M.2412: 0.28
+						mu_ASA = 2.04 - 0.25 * log10(fc);          // M.2412: 1.87
+						sigma_ASA = 0.17 - 0.03 * log10(fc);       // M.2412: 0.11
 
-						//mu_ZSA = 1.26;
-						//sigma_ZSA = 0.16;
-						mu_ZSA = -0.2856*log10(carrier_freq / 1000000000.) + 1.445;
+						mu_ZSA = -0.2856 * log10(fc) + 1.445;
 						sigma_ZSA = 0.17;
-
 
 						mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.9);
 						sigma_ZSD = 0.49;
-						mu_offset_ZOD = -1 * pow(10, -0.62 * log10(MAX(10, distance)) + 1.93 - 0.07 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5));
+						mu_offset_ZOD = 7.66 * log10(fc_zsd) - 5.96 - pow(10, (0.208 * log10(fc_zsd) - 0.782) * log10(MAX(25, distance)) - 0.13 * log10(fc_zsd) + 2.03 - 0.07 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5));
 
-						cluster_DS = -1; /// N/A
-						cluster_ASD = 2;
+						// Legacy: old TR 38.901 Table 7.5-6 (pre-V19)
+						if (channel_param_legacy) {
+							mu_DS = -6.28 - 0.204 * log10(fc);
+							mu_ASD = 1.5 - 0.1144 * log10(fc);
+							sigma_ASD = 0.28;
+							mu_ASA = 2.08 - 0.27 * log10(fc);
+							sigma_ASA = 0.11;
+							mu_ZSA = -0.3236 * log10(fc) + 1.512;
+							sigma_ZSA = 0.16;
+						}
+
+						DS = pow(10, normal(mu_DS, sigma_DS));
+
+						cluster_DS = MAX(0.25, -3.4084 * log10(fc) + 6.5622);
+						cluster_ASD = channel_param_legacy ? 2.0 : 1.8;
 						cluster_ASA = 15;
 						cluster_ZSA = 7;
 
@@ -2582,26 +2572,23 @@ void CHANNEL::Set_Channel_Parameters()
 					}
 					else if (Propagation == 2) ///// OUT2IN
 					{
-						num_path = 12; // Number of clusters
+						num_path = 12;
 						r_tau = 2.2;
 
-						K_factor = -1; // N/A
+						K_factor = -1;
 						mu_K_factor = -1;
 						sigma_K_factor = -1;
 
 						mu_DS = -6.62;
 						sigma_DS = 0.32;
-						DS = pow(10, normal(mu_DS, sigma_DS)); // = sigma_tau in M.2135
 
-						mu_ASD = 1.25;
-						sigma_ASD = 0.42;
+						mu_ASD = channel_param_legacy ? 1.25 : 0.58;
+						sigma_ASD = channel_param_legacy ? 0.42 : 0.7;
 						mu_ASA = 1.76;
 						sigma_ASA = 0.16;
 
 						mu_ZSA = 1.01;
 						sigma_ZSA = 0.43;
-						//mu_ZSA = -0.2856*log10(carrier_freq / 1000000000.) + 1.445;
-						//sigma_ZSA = 0.17;						
 
 						if (LOS == 1)
 						{
@@ -2613,13 +2600,13 @@ void CHANNEL::Set_Channel_Parameters()
 						{
 							mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.9);
 							sigma_ZSD = 0.49;
-							mu_offset_ZOD = -1 * pow(10, -0.62 * log10(MAX(10, distance)) + 1.93 - 0.07 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5));
-
-							///// -10���� -�� ������ ����. -10���� �Ǿ������� mu_offset_ZOD���� -1#IND�� ������ ��찡 �־...
+							mu_offset_ZOD = 7.66 * log10(fc_zsd) - 5.96 - pow(10, (0.208 * log10(fc_zsd) - 0.782) * log10(MAX(25, distance)) - 0.13 * log10(fc_zsd) + 2.03 - 0.07 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5));
 						}
 
-						cluster_DS = -1; /// N/A
-						cluster_ASD = 5;
+						DS = pow(10, normal(mu_DS, sigma_DS));
+
+						cluster_DS = 11;
+						cluster_ASD = channel_param_legacy ? 5.0 : 1.8;
 						cluster_ASA = 8;
 						cluster_ZSA = 3;
 
@@ -2628,145 +2615,10 @@ void CHANNEL::Set_Channel_Parameters()
 					}
 				}
 				else if (carrier_freq > 6000000000) /// 6GHz < fc <= 100GHz
-				// else if (carrier_freq > 6000000000 && carrier_freq <= 100000000000) /// 6GHz < fc <= 100GHz
 				{
-					XPR_mean[LOS_propagation] = 8;
-					XPR_mean[NLOS_propagation] = 7;
-					XPR_mean[OUT2IN_propagation] = 9;
-
-					XPR_std[LOS_propagation] = 4;
-					XPR_std[NLOS_propagation] = 3;
-					XPR_std[OUT2IN_propagation] = 5;
-
-					if (Propagation == 1) // LOS
-					{
-						num_path = 12; // Number of clusters
-						r_tau = 2.5;
-
-						// K_factor = normal(9, 3.5);
-						mu_K_factor = 9.;
-						sigma_K_factor = 3.5;
-						K_factor = pow(10, normal(mu_K_factor, sigma_K_factor) / 10); //
-
-						mu_DS = -6.955 - 0.0963 * log10(carrier_freq / 1000000000);
-						sigma_DS = 0.66;
-						DS = pow(10, normal(mu_DS, sigma_DS)); // = sigma_tau in M.2135
-
-						mu_ASD = 1.06 + 0.1114 * log10(carrier_freq / 1000000000);
-						sigma_ASD = 0.28;
-						mu_ASA = 1.81;
-						sigma_ASA = 0.2;
-
-						mu_ZSA = 0.95;
-						sigma_ZSA = 0.16;
-						mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.75);
-						sigma_ZSD = 0.4;
-						mu_offset_ZOD = 0;
-
-						cluster_DS = MAX(0.25, -3.4084 * log10(carrier_freq / 1000000000) + 6.5622);
-						cluster_ASD = 5;
-						cluster_ASA = 11;
-						cluster_ZSA = 7;
-
-						XPR = normal(8, 4);
-						cluster_shadowing = 3;
-					}
-					else if (Propagation == 0) //// NLOS
-					{
-						num_path = 20; // Number of clusters
-						r_tau = 2.3;
-
-						K_factor = -1; // N/A
-						mu_K_factor = -1;
-						sigma_K_factor = -1;
-
-						mu_DS = -6.28 - 0.204 * log10(carrier_freq / 1000000000);
-						sigma_DS = 0.39;
-						DS = pow(10, normal(mu_DS, sigma_DS)); // = sigma_tau in M.2135
-
-						mu_ASD = 1.5 - 0.1144 * log10(carrier_freq / 1000000000);
-						sigma_ASD = 0.28;
-						mu_ASA = 2.08 - 0.27 * log10(carrier_freq / 1000000000);
-						sigma_ASA = 0.11;
-
-						mu_ZSA = -0.3236 * log10(carrier_freq / 1000000000) + 1.512;
-						sigma_ZSA = 0.16;
-						mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.9);
-						sigma_ZSD = 0.49;
-						mu_offset_ZOD = 7.66 * log10(carrier_freq / 1000000000) - 5.96 - pow(10, (0.208 * log10(carrier_freq / 1000000000) - 0.782) * log10(MAX(25, distance)) - 0.13 * log10(carrier_freq / 1000000000) + 2.03);
-
-						cluster_DS = MAX(0.25, -3.4084 * log10(carrier_freq / 1000000000) + 6.5622);
-						cluster_ASD = 2;
-						cluster_ASA = 15;
-						cluster_ZSA = 7;
-
-						XPR = normal(7, 3);
-						cluster_shadowing = 3;
-					}
-					else if (Propagation == 2) ///// OUT2IN
-					{
-						num_path = 12; // Number of clusters
-						r_tau = 2.2;
-
-						K_factor = -1; // N/A
-						mu_K_factor = -1;
-						sigma_K_factor = -1;
-
-						mu_DS = -6.63;
-						sigma_DS = 0.32;
-						DS = pow(10, normal(mu_DS, sigma_DS)); // = sigma_tau in M.2135
-
-						mu_ASD = 1.25;
-						sigma_ASD = 0.42;
-						mu_ASA = 1.76;
-						sigma_ASA = 0.16;
-
-						mu_ZSA = 1.01;
-						sigma_ZSA = 0.43;
-						if (LOS == 1)
-						{
-							mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.75);
-							sigma_ZSD = 0.4;
-							mu_offset_ZOD = 0;
-						}
-						else
-						{
-							mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.9);
-							sigma_ZSD = 0.49;
-							mu_offset_ZOD = 7.66 * log10(carrier_freq / 1000000000) - 5.96 - pow(10, (0.208 * log10(carrier_freq / 1000000000) - 0.782) * log10(MAX(25, distance)) - 0.13 * log10(carrier_freq / 1000000000) + 2.03);
-						}
-
-						cluster_DS = 11;
-						cluster_ASD = 5;
-						cluster_ASA = 8;
-						cluster_ZSA = 3;
-
-						XPR = normal(9, 5);
-						cluster_shadowing = 4;
-					}
-				}
-				else
-				{
-					cout << "carrier_freq ERROR! - Set channel parameter" << endl;
-				}
-			}
-			////////////////////////////////////////////////////////// Channel Model B
-			else if (Channel_Model_Type == 1)
-			{
-
-				if (carrier_freq > 500000000) /// 0.5GHz < fc <= 100GHz
-				// if (carrier_freq > 500000000 && carrier_freq <= 100000000000) /// 0.5GHz < fc <= 100GHz
-				{
-					Real fc;
-
-					if (carrier_freq < 6000000000) // below 6GHz
-					{
-						fc = 6;
-					}
-					else
-					{
-						fc = (carrier_freq / 1000000000);
-					}
+					// ===== TR 38.901 V19.1.0 Table 7.5-6 Part 1: UMa (above-6 GHz) =====
+					// (Replaces M.2412 Channel Model A above-6 parameters)
+					Real fc = (carrier_freq / 1000000000.);  // fc [GHz]
 
 					XPR_mean[LOS_propagation] = 8;
 					XPR_mean[NLOS_propagation] = 7;
@@ -2778,31 +2630,43 @@ void CHANNEL::Set_Channel_Parameters()
 
 					if (Propagation == 1) // LOS
 					{
-						num_path = 12; // Number of clusters
+						num_path = 12;
 						r_tau = 2.5;
 
-						// K_factor = normal(9, 3.5);
 						mu_K_factor = 9.;
 						sigma_K_factor = 3.5;
-						K_factor = pow(10, normal(mu_K_factor, sigma_K_factor) / 10); //
+						K_factor = pow(10, normal(mu_K_factor, sigma_K_factor) / 10);
 
-						mu_DS = -6.955 - 0.0963 * log10(fc);
-						sigma_DS = 0.66;
-						DS = pow(10, normal(mu_DS, sigma_DS)); // = sigma_tau in M.2135
+						mu_DS = -7.067 - 0.0794 * log10(fc);       // M.2412: -6.955 - 0.0963*log10(fc)
+						sigma_DS = 0.57 + 0.026 * log10(fc);       // M.2412: 0.66
 
-						mu_ASD = 1.06 + 0.1114 * log10(fc);
-						sigma_ASD = 0.28;
-						mu_ASA = 1.81;
-						sigma_ASA = 0.2;
+						mu_ASD = 0.92;                              // M.2412: 1.06 + 0.1114*log10(fc)
+						sigma_ASD = 0.31;                           // M.2412: 0.28
+						mu_ASA = 1.76;                              // M.2412: 1.81
+						sigma_ASA = 0.19;                           // M.2412: 0.2
 
-						mu_ZSA = 0.95;
-						sigma_ZSA = 0.16;
+						mu_ZSA = 0.96;                              // M.2412: 0.95
+						sigma_ZSA = 0.15;                           // M.2412: 0.16
 						mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.75);
 						sigma_ZSD = 0.4;
 						mu_offset_ZOD = 0;
+
+						// Legacy: old TR 38.901 Table 7.5-6 (pre-V19)
+						if (channel_param_legacy) {
+							mu_DS = -6.955 - 0.0963 * log10(fc);
+							sigma_DS = 0.66;
+							mu_ASD = 1.06 + 0.1114 * log10(fc);
+							sigma_ASD = 0.28;
+							mu_ASA = 1.81;
+							sigma_ASA = 0.2;
+							mu_ZSA = 0.95;
+							sigma_ZSA = 0.16;
+						}
+
+						DS = pow(10, normal(mu_DS, sigma_DS));
 
 						cluster_DS = MAX(0.25, -3.4084 * log10(fc) + 6.5622);
-						cluster_ASD = 5;
+						cluster_ASD = channel_param_legacy ? 5.0 : 3.58;
 						cluster_ASA = 11;
 						cluster_ZSA = 7;
 
@@ -2811,30 +2675,42 @@ void CHANNEL::Set_Channel_Parameters()
 					}
 					else if (Propagation == 0) //// NLOS
 					{
-						num_path = 20; // Number of clusters
+						num_path = 20;
 						r_tau = 2.3;
 
-						K_factor = -1; // N/A
+						K_factor = -1;
 						mu_K_factor = -1;
 						sigma_K_factor = -1;
 
-						mu_DS = -6.28 - 0.204 * log10(fc);
+						mu_DS = -6.47 - 0.134 * log10(fc);         // M.2412: -6.28 - 0.204*log10(fc)
 						sigma_DS = 0.39;
-						DS = pow(10, normal(mu_DS, sigma_DS)); // = sigma_tau in M.2135
 
-						mu_ASD = 1.5 - 0.1144 * log10(fc);
-						sigma_ASD = 0.28;
-						mu_ASA = 2.08 - 0.27 * log10(fc);
-						sigma_ASA = 0.11;
+						mu_ASD = 1.09;                              // M.2412: 1.5 - 0.1144*log10(fc)
+						sigma_ASD = 0.44;                           // M.2412: 0.28
+						mu_ASA = 2.04 - 0.25 * log10(fc);          // M.2412: 2.08 - 0.27*log10(fc)
+						sigma_ASA = 0.17 - 0.03 * log10(fc);       // M.2412: 0.11
 
-						mu_ZSA = -0.3236 * log10(fc) + 1.512;
-						sigma_ZSA = 0.16;
+						mu_ZSA = -0.2856 * log10(fc) + 1.445;      // M.2412: -0.3236*log10(fc) + 1.512
+						sigma_ZSA = 0.17;                           // M.2412: 0.16
 						mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.9);
 						sigma_ZSD = 0.49;
 						mu_offset_ZOD = 7.66 * log10(fc) - 5.96 - pow(10, (0.208 * log10(fc) - 0.782) * log10(MAX(25, distance)) - 0.13 * log10(fc) + 2.03 - 0.07 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5));
 
+						// Legacy: old TR 38.901 Table 7.5-6 (pre-V19)
+						if (channel_param_legacy) {
+							mu_DS = -6.28 - 0.204 * log10(fc);
+							mu_ASD = 1.5 - 0.1144 * log10(fc);
+							sigma_ASD = 0.28;
+							mu_ASA = 2.08 - 0.27 * log10(fc);
+							sigma_ASA = 0.11;
+							mu_ZSA = -0.3236 * log10(fc) + 1.512;
+							sigma_ZSA = 0.16;
+						}
+
+						DS = pow(10, normal(mu_DS, sigma_DS));
+
 						cluster_DS = MAX(0.25, -3.4084 * log10(fc) + 6.5622);
-						cluster_ASD = 2;
+						cluster_ASD = channel_param_legacy ? 2.0 : 1.8;
 						cluster_ASA = 15;
 						cluster_ZSA = 7;
 
@@ -2843,19 +2719,18 @@ void CHANNEL::Set_Channel_Parameters()
 					}
 					else if (Propagation == 2) ///// OUT2IN
 					{
-						num_path = 12; // Number of clusters
+						num_path = 12;
 						r_tau = 2.2;
 
-						K_factor = -1; // N/A
+						K_factor = -1;
 						mu_K_factor = -1;
 						sigma_K_factor = -1;
 
-						mu_DS = -6.62;
+						mu_DS = -6.62;                              // M.2412: -6.63
 						sigma_DS = 0.32;
-						DS = pow(10, normal(mu_DS, sigma_DS)); // = sigma_tau in M.2135
 
-						mu_ASD = 1.25;
-						sigma_ASD = 0.42;
+						mu_ASD = channel_param_legacy ? 1.25 : 0.58;
+						sigma_ASD = channel_param_legacy ? 0.42 : 0.7;
 						mu_ASA = 1.76;
 						sigma_ASA = 0.16;
 
@@ -2874,8 +2749,166 @@ void CHANNEL::Set_Channel_Parameters()
 							mu_offset_ZOD = 7.66 * log10(fc) - 5.96 - pow(10, (0.208 * log10(fc) - 0.782) * log10(MAX(25, distance)) - 0.13 * log10(fc) + 2.03 - 0.07 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5));
 						}
 
+						DS = pow(10, normal(mu_DS, sigma_DS));
+
 						cluster_DS = 11;
-						cluster_ASD = 5;
+						cluster_ASD = channel_param_legacy ? 5.0 : 1.8;
+						cluster_ASA = 8;
+						cluster_ZSA = 3;
+
+						XPR = normal(9, 5);
+						cluster_shadowing = 4;
+					}
+				}
+				else
+				{
+					cout << "carrier_freq ERROR! - Set channel parameter" << endl;
+				}
+			}
+			////////////////////////////////////////////////////////// Channel Model B
+			else if (Channel_Model_Type == 1)
+			{
+
+				if (carrier_freq > 500000000) /// 0.5GHz < fc <= 100GHz
+				{
+					// ===== TR 38.901 V19.1.0 Table 7.5-6 Part 1: UMa =====
+					// (Replaces M.2412 Channel Model B parameters)
+					Real fc = (carrier_freq / 1000000000);  // V19: use actual fc [GHz]
+					// M.2412 used: fc = max(6, carrier_freq_GHz)
+
+					XPR_mean[LOS_propagation] = 8;
+					XPR_mean[NLOS_propagation] = 7;
+					XPR_mean[OUT2IN_propagation] = 9;
+
+					XPR_std[LOS_propagation] = 4;
+					XPR_std[NLOS_propagation] = 3;
+					XPR_std[OUT2IN_propagation] = 5;
+
+					if (Propagation == 1) // LOS
+					{
+						num_path = 12;
+						r_tau = 2.5;
+
+						mu_K_factor = 9.;
+						sigma_K_factor = 3.5;
+						K_factor = pow(10, normal(mu_K_factor, sigma_K_factor) / 10);
+
+						mu_DS = -7.067 - 0.0794 * log10(fc);       // M.2412: -6.955 - 0.0963*log10(fc)
+						sigma_DS = 0.57 + 0.026 * log10(fc);       // M.2412: 0.66
+
+						mu_ASD = 0.92;                              // M.2412: 1.06 + 0.1114*log10(fc)
+						sigma_ASD = 0.31;                           // M.2412: 0.28
+						mu_ASA = 1.76;                              // M.2412: 1.81
+						sigma_ASA = 0.19;                           // M.2412: 0.2
+
+						mu_ZSA = 0.96;                              // M.2412: 0.95
+						sigma_ZSA = 0.15;                           // M.2412: 0.16
+						mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.75);
+						sigma_ZSD = 0.4;
+						mu_offset_ZOD = 0;
+
+						// Legacy: old TR 38.901 Table 7.5-6 (pre-V19)
+						if (channel_param_legacy) {
+							mu_DS = -6.955 - 0.0963 * log10(fc);
+							sigma_DS = 0.66;
+							mu_ASD = 1.06 + 0.1114 * log10(fc);
+							sigma_ASD = 0.28;
+							mu_ASA = 1.81;
+							sigma_ASA = 0.2;
+							mu_ZSA = 0.95;
+							sigma_ZSA = 0.16;
+						}
+
+						DS = pow(10, normal(mu_DS, sigma_DS));
+
+						cluster_DS = MAX(0.25, -3.4084 * log10(fc) + 6.5622);
+						cluster_ASD = channel_param_legacy ? 5.0 : 3.58;
+						cluster_ASA = 11;
+						cluster_ZSA = 7;
+
+						XPR = normal(8, 4);
+						cluster_shadowing = 3;
+					}
+					else if (Propagation == 0) //// NLOS
+					{
+						num_path = 20;
+						r_tau = 2.3;
+
+						K_factor = -1;
+						mu_K_factor = -1;
+						sigma_K_factor = -1;
+
+						mu_DS = -6.47 - 0.134 * log10(fc);         // M.2412: -6.28 - 0.204*log10(fc)
+						sigma_DS = 0.39;
+
+						mu_ASD = 1.09;                              // M.2412: 1.5 - 0.1144*log10(fc)
+						sigma_ASD = 0.44;                           // M.2412: 0.28
+						mu_ASA = 2.04 - 0.25 * log10(fc);          // M.2412: 2.08 - 0.27*log10(fc)
+						sigma_ASA = 0.17 - 0.03 * log10(fc);       // M.2412: 0.11
+
+						mu_ZSA = -0.2856 * log10(fc) + 1.445;      // M.2412: -0.3236*log10(fc) + 1.512
+						sigma_ZSA = 0.17;                           // M.2412: 0.16
+						mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.9);
+						sigma_ZSD = 0.49;
+						mu_offset_ZOD = 7.66 * log10(fc) - 5.96 - pow(10, (0.208 * log10(fc) - 0.782) * log10(MAX(25, distance)) - 0.13 * log10(fc) + 2.03 - 0.07 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5));
+
+						// Legacy: old TR 38.901 Table 7.5-6 (pre-V19)
+						if (channel_param_legacy) {
+							mu_DS = -6.28 - 0.204 * log10(fc);
+							mu_ASD = 1.5 - 0.1144 * log10(fc);
+							sigma_ASD = 0.28;
+							mu_ASA = 2.08 - 0.27 * log10(fc);
+							sigma_ASA = 0.11;
+							mu_ZSA = -0.3236 * log10(fc) + 1.512;
+							sigma_ZSA = 0.16;
+						}
+
+						DS = pow(10, normal(mu_DS, sigma_DS));
+
+						cluster_DS = MAX(0.25, -3.4084 * log10(fc) + 6.5622);
+						cluster_ASD = channel_param_legacy ? 2.0 : 1.8;
+						cluster_ASA = 15;
+						cluster_ZSA = 7;
+
+						XPR = normal(7, 3);
+						cluster_shadowing = 3;
+					}
+					else if (Propagation == 2) ///// OUT2IN
+					{
+						num_path = 12;
+						r_tau = 2.2;
+
+						K_factor = -1;
+						mu_K_factor = -1;
+						sigma_K_factor = -1;
+
+						mu_DS = -6.62;
+						sigma_DS = 0.32;
+
+						mu_ASD = channel_param_legacy ? 1.25 : 0.58;
+						sigma_ASD = channel_param_legacy ? 0.42 : 0.7;
+						mu_ASA = 1.76;
+						sigma_ASA = 0.16;
+
+						mu_ZSA = 1.01;
+						sigma_ZSA = 0.43;
+						if (LOS == 1)
+						{
+							mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.75);
+							sigma_ZSD = 0.4;
+							mu_offset_ZOD = 0;
+						}
+						else
+						{
+							mu_ZSD = MAX(-0.5, -2.1 * (distance / 1000) - 0.01 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5) + 0.9);
+							sigma_ZSD = 0.49;
+							mu_offset_ZOD = 7.66 * log10(fc) - 5.96 - pow(10, (0.208 * log10(fc) - 0.782) * log10(MAX(25, distance)) - 0.13 * log10(fc) + 2.03 - 0.07 * (ms[self_ms_idx].MS_HEIGHT_FINAL - 1.5));
+						}
+
+						DS = pow(10, normal(mu_DS, sigma_DS));
+
+						cluster_DS = 11;
+						cluster_ASD = channel_param_legacy ? 5.0 : 1.8;
 						cluster_ASA = 8;
 						cluster_ZSA = 3;
 
@@ -3331,14 +3364,7 @@ void CHANNEL::Set_AOAAOD(int _bs_idx, int _ue_idx)
 	//////////////////////////////////////////////////////////////// Dense_Urban
 	else if (TYPE == 12)
 	{
-		int lc_Urban_env_Config_Type = Configuration_Type;
-		if ( g_mTRP_mode == 1 || g_mTRP_mode == 2)
-		{
-			if ( self_bs_idx < simple_num_BS )
-				lc_Urban_env_Config_Type = 1;
-			else
-				lc_Urban_env_Config_Type = 3;
-		}		
+		int lc_Urban_env_Config_Type = Configuration_Type;		
 		////////////////////////////////////////////// UMi
 		if (lc_Urban_env_Config_Type == 3)
 		{
@@ -3727,13 +3753,6 @@ void CHANNEL::Set_ZOAZOD(int _bs_idx, int _ue_idx)
 	else if (TYPE == 12) // Dense_Urban
 	{
 		int lc_Urban_env_Config_Type = Configuration_Type;
-		if ( g_mTRP_mode == 1 || g_mTRP_mode == 2)
-		{
-			if ( self_bs_idx < simple_num_BS )
-				lc_Urban_env_Config_Type = 1;
-			else
-				lc_Urban_env_Config_Type = 3;
-		}
 		///////////////////////////////////////////// UMi
 		if (lc_Urban_env_Config_Type == 3)
 		{
@@ -4334,90 +4353,31 @@ void CHANNEL::Precompute_ray_angles()
 
 void CHANNEL::Set_RMS_delay_spread()
 {
-	if (LOS == 0) // NLOS
+	// Power-weighted RMS delay spread from all clusters + sub-clusters
+	// Note: delay[i] already contains LOS-scaled delays for LOS case (line 3193)
+	// NUM_PATH_for_channelcoeff = num_path + 4 (includes sub-cluster splits)
+	int N = NUM_PATH_for_channelcoeff;
+	if (N <= 0) { RMS_delay_spread = 0.0; return; }
+
+	// Power-weighted mean delay
+	Real power_sum = 0.0;
+	Real delay_mean = 0.0;
+	for (int i = 0; i < N; i++)
 	{
-		// delay_power   = new Real[MAX_NUM_CLUSTERS];
-		// power_ray_sum = new Real[MAX_NUM_CLUSTERS];
-
-		for (int i = 0; i < num_path; i++)
-		{
-			// delay_power[i] = num_ray * delay[i] * power[i];
-			// power_ray_sum[i] = num_ray * power[i];
-
-			delay_power[i] = delay[i] * power[i];
-			power_ray_sum[i] = power[i];
-		}
-
-		Real avg_delay;
-		Real delay_power_sum = 0;
-		Real power_sum = 0;
-
-		for (int i = 0; i < num_path; i++)
-		{
-			delay_power_sum += delay_power[i];
-			power_sum += power_ray_sum[i];
-		}
-
-		avg_delay = delay_power_sum / power_sum;
-		for (int i = 0; i < num_path; i++)
-		{
-			RMS_delay_power[i] = (delay[i] - avg_delay) * (delay[i] - avg_delay) * power[i];
-		}
-
-		// Real RMS_delay_spread = 0;
-		Real RMS_delay_power_sum = 0;
-
-		for (int i = 0; i < num_path; i++)
-		{
-			RMS_delay_power_sum += RMS_delay_power[i];
-		}
-
-		RMS_delay_spread = sqrt(RMS_delay_power_sum / power_sum);
+		delay_mean += delay[i] * power[i];
+		power_sum += power[i];
 	}
+	if (power_sum <= 0.0) { RMS_delay_spread = 0.0; return; }
+	delay_mean /= power_sum;
 
-	else if (LOS == 1) // LOS
+	// Power-weighted RMS
+	Real rms_sum = 0.0;
+	for (int i = 0; i < N; i++)
 	{
-		// delay_power   = new Real[MAX_NUM_CLUSTERS];
-		// power_ray_sum = new Real[MAX_NUM_CLUSTERS];
-
-		for (int i = 0; i < num_path; i++)
-		{
-			// delay_power[i] = num_ray * delay[i] * power[i];
-			// power_ray_sum[i] = num_ray * power[i];
-
-			delay_power[i] = delay_LOS[i] * power[i];
-			power_ray_sum[i] = power[i];
-		}
-
-		Real avg_delay;
-		Real delay_power_sum = 0;
-		Real power_sum = 0;
-
-		for (int i = 0; i < num_path; i++)
-		{
-			delay_power_sum += delay_power[i];
-			power_sum += power_ray_sum[i];
-		}
-
-		avg_delay = delay_power_sum / power_sum;
-
-		// RMS_delay_power = new Real[MAX_NUM_CLUSTERS];
-
-		for (int i = 0; i < num_path; i++)
-		{
-			RMS_delay_power[i] = (delay_LOS[i] - avg_delay) * (delay_LOS[i] - avg_delay) * power[i];
-		}
-
-		// Real RMS_delay_spread = 0;
-		Real RMS_delay_power_sum = 0;
-
-		for (int i = 0; i < num_path; i++)
-		{
-			RMS_delay_power_sum += RMS_delay_power[i];
-		}
-
-		RMS_delay_spread = sqrt(RMS_delay_power_sum / power_sum);
+		Real diff = delay[i] - delay_mean;
+		rms_sum += diff * diff * power[i];
 	}
+	RMS_delay_spread = sqrt(rms_sum / power_sum);
 }
 
 // Static helper: 3GPP TR 25.996 Annex A circular angular spread with Delta optimization
@@ -5621,10 +5581,10 @@ Real Get_sin_psi(Real alpha, Real beta, Real gamma, Real GCS_theta, Real GCS_pi)
 
 
 // ====================================================================
-// Element-Level Channel Matrix Generation (ns-3 GetNewChannel style)
+// Element-Level Channel Matrix Generation (ns-3 GetChannelImpulseResponse style)
 // ====================================================================
 // Generates H_usn[cluster](rxElement, txElement) without beamforming weights.
-// This is equivalent to ns-3's ThreeGppChannelModel::GetNewChannel().
+// This is equivalent to ns-3's ThreeGppChannelModel::GetChannelImpulseResponse().
 // ====================================================================
 
 void CHANNEL::Allocate_H_usn_memory(int N)
@@ -5714,7 +5674,7 @@ void CHANNEL::Reset_H_usn_memory()
 	}
 }
 
-void CHANNEL::GetNewChannel(int bs_idx, int ms_idx, int sector_idx)
+void CHANNEL::GetChannelImpulseResponse(int bs_idx, int ms_idx, int sector_idx)
 {
 	// ====================================================================
 	// ns-3 style element-level channel coefficient generation
@@ -5760,6 +5720,12 @@ void CHANNEL::GetNewChannel(int bs_idx, int ms_idx, int sector_idx)
 	Real tx_F_theta_GCS[2], tx_F_pi_GCS[2];
 	Real rx_F_theta_GCS[2], rx_F_pi_GCS[2];
 
+	// For handheld: store TX × polarization intermediate per ray
+	// raysPreComp = rx_Ft · txPol_theta_col + rx_Fp · txPol_phi_col
+	// (RX pattern computed per-port in Phase D)
+	ComplexReal txPol_theta_col[2][MAX_NUM_CLUSTERS][MAX_NUM_RAYS];
+	ComplexReal txPol_phi_col[2][MAX_NUM_CLUSTERS][MAX_NUM_RAYS];
+
 	for (int n = 0; n < N; n++) {
 		int M = (int)NUM_RAY_per_ClusterNUM[n];
 		for (int m = 0; m < M; m++) {
@@ -5777,41 +5743,48 @@ void CHANNEL::GetNewChannel(int bs_idx, int ms_idx, int sector_idx)
 			Get_BS_antenna_pattern(zod_rad, aod_rad, bs_idx, sector_idx,
 				tx_F_theta_GCS[0], tx_F_pi_GCS[0], tx_F_theta_GCS[1], tx_F_pi_GCS[1]);
 
-			// RX antenna pattern (UE) — returns both polarization patterns
-			Real aoa_rad = ray_AOA[n][m][0] * deg2rad;
-			Real zoa_rad = ray_AOA[n][m][1] * deg2rad;
-			if (ue_antenna_element_gain == 0) {
-				// Isotropic UE: use identity polarization in GCS (no LCS→GCS rotation)
-				// Matches find_best_tx_beam behavior: polRx=0 → (θ=1,φ=0), polRx=1 → (θ=0,φ=1)
-				rx_F_theta_GCS[0] = REAL(1.0); rx_F_pi_GCS[0] = REAL(0.0);
-				rx_F_theta_GCS[1] = REAL(0.0); rx_F_pi_GCS[1] = REAL(1.0);
-			} else {
-				Get_UE_antenna_pattern(0, zoa_rad, aoa_rad, ms_idx, 0,
-					rx_F_theta_GCS[0], rx_F_pi_GCS[0], rx_F_theta_GCS[1], rx_F_pi_GCS[1]);
-			}
-
 			// Pre-compute exp(j*phase)
 			ComplexReal exp_vv = exp(jay * phase_vv);
 			ComplexReal exp_vh = exp(jay * phase_vh);
 			ComplexReal exp_hv = exp(jay * phase_hv);
 			ComplexReal exp_hh = exp(jay * phase_hh);
 
-			for (int polTx = 0; polTx < BS_P; polTx++) {
-				Real tx_Ft = tx_F_theta_GCS[polTx];
-				Real tx_Fp = tx_F_pi_GCS[polTx];
+			if (handheld_mode) {
+				// Handheld: store TX × polarization matrix intermediate
+				// Per-port RX field will be combined in Phase D
+				for (int polTx = 0; polTx < BS_P; polTx++) {
+					Real tx_Ft = tx_F_theta_GCS[polTx];
+					Real tx_Fp = tx_F_pi_GCS[polTx];
+					// θ-row: [e^jΦ_θθ, √(1/κ)·e^jΦ_θφ] · [F_tx_θ; F_tx_φ]
+					txPol_theta_col[polTx][n][m] = exp_vv * tx_Ft + inv_sqrt_kappa * exp_vh * tx_Fp;
+					// φ-row: [√(1/κ)·e^jΦ_φθ, e^jΦ_φφ] · [F_tx_θ; F_tx_φ]
+					txPol_phi_col[polTx][n][m] = inv_sqrt_kappa * exp_hv * tx_Ft + exp_hh * tx_Fp;
+				}
+			} else {
+				// Non-handheld: pre-compute full raysPreComp (RX pattern same for all ports)
+				Real aoa_rad = ray_AOA[n][m][0] * deg2rad;
+				Real zoa_rad = ray_AOA[n][m][1] * deg2rad;
+				if (ue_antenna_element_gain == 0) {
+					rx_F_theta_GCS[0] = REAL(1.0); rx_F_pi_GCS[0] = REAL(0.0);
+					rx_F_theta_GCS[1] = REAL(0.0); rx_F_pi_GCS[1] = REAL(1.0);
+				} else {
+					Get_UE_antenna_pattern(0, zoa_rad, aoa_rad, ms_idx, 0,
+						rx_F_theta_GCS[0], rx_F_pi_GCS[0], rx_F_theta_GCS[1], rx_F_pi_GCS[1]);
+				}
 
-				for (int polRx = 0; polRx < MS_P; polRx++) {
-					Real rx_Ft = rx_F_theta_GCS[polRx];
-					Real rx_Fp = rx_F_pi_GCS[polRx];
-
-					// Eq. 7.5-22 polarization matrix
-					// [F_rx_θ, F_rx_φ] · [[e^jΦ_θθ, √(1/κ)·e^jΦ_θφ],
-					//                      [√(1/κ)·e^jΦ_φθ, e^jΦ_φφ]] · [F_tx_θ; F_tx_φ]
-					elem_raysPreComp[polTx][polRx][n][m] =
-						rx_Ft * exp_vv * tx_Ft +
-						rx_Ft * inv_sqrt_kappa * exp_vh * tx_Fp +
-						rx_Fp * inv_sqrt_kappa * exp_hv * tx_Ft +
-						rx_Fp * exp_hh * tx_Fp;
+				for (int polTx = 0; polTx < BS_P; polTx++) {
+					Real tx_Ft = tx_F_theta_GCS[polTx];
+					Real tx_Fp = tx_F_pi_GCS[polTx];
+					for (int polRx = 0; polRx < MS_P; polRx++) {
+						Real rx_Ft = rx_F_theta_GCS[polRx];
+						Real rx_Fp = rx_F_pi_GCS[polRx];
+						// Eq. 7.5-22 polarization matrix
+						elem_raysPreComp[polTx][polRx][n][m] =
+							rx_Ft * exp_vv * tx_Ft +
+							rx_Ft * inv_sqrt_kappa * exp_vh * tx_Fp +
+							rx_Fp * inv_sqrt_kappa * exp_hv * tx_Ft +
+							rx_Fp * exp_hh * tx_Fp;
+					}
 				}
 			}
 		}
@@ -5829,6 +5802,18 @@ void CHANNEL::GetNewChannel(int bs_idx, int ms_idx, int sector_idx)
 			int u_n = (u / MS_P) % MS_N;
 			int u_m = u / (MS_N * MS_P);
 			LOCATION3D rxLoc = ms[ms_idx].d_rx[u_m][u_n][u_p][0][0];
+
+			// Handheld: pre-compute per-port RX field pattern for all rays in this cluster
+			Real port_rx_Ft[MAX_NUM_RAYS], port_rx_Fp[MAX_NUM_RAYS];
+			if (handheld_mode) {
+				for (int m = 0; m < M; m++) {
+					Real aoa_rad = ray_AOA[n][m][0] * deg2rad;
+					Real zoa_rad = ray_AOA[n][m][1] * deg2rad;
+					Real dummy1, dummy2;
+					Get_UE_antenna_pattern(0, zoa_rad, aoa_rad, ms_idx, 0,
+						port_rx_Ft[m], port_rx_Fp[m], dummy1, dummy2, u_m);
+				}
+			}
 
 			for (int s = 0; s < totalTx; s++) {
 				// TX element decomposition: s = s_m*(BS_N*BS_P) + s_n*BS_P + s_p
@@ -5851,7 +5836,17 @@ void CHANNEL::GetNewChannel(int bs_idx, int ms_idx, int sector_idx)
 						elem_sinZoD_sinAoD[n][m] * txLoc.y +
 						elem_cosZoD[n][m]        * txLoc.z);
 
-					h_val += elem_raysPreComp[s_p][u_p][n][m] *
+					// Handheld: combine per-port RX field with TX+polarization intermediate
+					// Non-handheld: use pre-computed raysPreComp
+					ComplexReal rayComp;
+					if (handheld_mode) {
+						rayComp = port_rx_Ft[m] * txPol_theta_col[s_p][n][m] +
+						          port_rx_Fp[m] * txPol_phi_col[s_p][n][m];
+					} else {
+						rayComp = elem_raysPreComp[s_p][u_p][n][m];
+					}
+
+					h_val += rayComp *
 						ComplexReal(cos(rxPhase), sin(rxPhase)) *
 						ComplexReal(cos(txPhase), sin(txPhase));
 				}
@@ -5879,18 +5874,20 @@ void CHANNEL::GetNewChannel(int bs_idx, int ms_idx, int sector_idx)
 		Real los_init_phase_rad = random_phase_vv_LOS * deg2rad;
 		ComplexReal losInitPhase = exp(jay * los_init_phase_rad);
 
-		// LOS antenna patterns
+		// LOS antenna patterns (TX)
 		Real los_tx_Ft[2], los_tx_Fp[2];
 		Real los_rx_Ft[2], los_rx_Fp[2];
 		Get_BS_antenna_pattern(los_zod_rad, los_aod_rad, bs_idx, sector_idx,
 			los_tx_Ft[0], los_tx_Fp[0], los_tx_Ft[1], los_tx_Fp[1]);
-		if (ue_antenna_element_gain == 0) {
-			// Isotropic UE: identity polarization in GCS
-			los_rx_Ft[0] = REAL(1.0); los_rx_Fp[0] = REAL(0.0);
-			los_rx_Ft[1] = REAL(0.0); los_rx_Fp[1] = REAL(1.0);
-		} else {
-			Get_UE_antenna_pattern(0, los_zoa_rad, los_aoa_rad, ms_idx, 0,
-				los_rx_Ft[0], los_rx_Fp[0], los_rx_Ft[1], los_rx_Fp[1]);
+		// RX pattern: for handheld, computed per-port in the u loop below
+		if (!handheld_mode) {
+			if (ue_antenna_element_gain == 0) {
+				los_rx_Ft[0] = REAL(1.0); los_rx_Fp[0] = REAL(0.0);
+				los_rx_Ft[1] = REAL(0.0); los_rx_Fp[1] = REAL(1.0);
+			} else {
+				Get_UE_antenna_pattern(0, los_zoa_rad, los_aoa_rad, ms_idx, 0,
+					los_rx_Ft[0], los_rx_Fp[0], los_rx_Ft[1], los_rx_Fp[1]);
+			}
 		}
 
 		// LOS unit vectors
@@ -5912,6 +5909,17 @@ void CHANNEL::GetNewChannel(int bs_idx, int ms_idx, int sector_idx)
 			int u_m = u / (MS_N * MS_P);
 			LOCATION3D rxLoc = ms[ms_idx].d_rx[u_m][u_n][u_p][0][0];
 
+			// Handheld: compute per-port LOS RX field pattern
+			Real port_los_rx_Ft, port_los_rx_Fp;
+			if (handheld_mode) {
+				Real dummy1, dummy2;
+				Get_UE_antenna_pattern(0, los_zoa_rad, los_aoa_rad, ms_idx, 0,
+					port_los_rx_Ft, port_los_rx_Fp, dummy1, dummy2, u_m);
+			} else {
+				port_los_rx_Ft = los_rx_Ft[u_p];
+				port_los_rx_Fp = los_rx_Fp[u_p];
+			}
+
 			Real rxLosPhase = k_2pi * (
 				los_sinZoA_cosAoA * rxLoc.x +
 				los_sinZoA_sinAoA * rxLoc.y +
@@ -5930,7 +5938,7 @@ void CHANNEL::GetNewChannel(int bs_idx, int ms_idx, int sector_idx)
 
 				// LOS polarization (Eq. 7.5-29): [F_rx_θ·F_tx_θ − F_rx_φ·F_tx_φ]
 				ComplexReal losRay =
-					(los_rx_Ft[u_p] * los_tx_Ft[s_p] - los_rx_Fp[u_p] * los_tx_Fp[s_p]) *
+					(port_los_rx_Ft * los_tx_Ft[s_p] - port_los_rx_Fp * los_tx_Fp[s_p]) *
 					losInitPhase * losPhase *
 					ComplexReal(cos(rxLosPhase), sin(rxLosPhase)) *
 					ComplexReal(cos(txLosPhase), sin(txLosPhase));

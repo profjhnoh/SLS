@@ -493,26 +493,6 @@ void MS::CQI_Update(void)
 						C = (linear_interference + noise) * (u * u.adjoint()).norm();
 
 						temp_sinr = A / C;
-						if ( comp_mode[self_idx] == 1)
-						{
-							Real comp_sector_static_gain = dBm2linear(links[self_idx].comp_interf_strength[1]);						
-							int comp_sector_idx  = links[self_idx].comp_sector_idx;
-							int com_bs_idx = (int) (comp_sector_idx/3);
-							if ( comp_sector_idx < num_SECTORS)
-								linear_interference -= dBm2linear(links[self_idx].intf_w_rnd_RSRP[comp_sector_idx]);
-							else
-							{
-								linear_interference -= dBm2linear(links[self_idx].intf_w_rnd_RSRP[3*com_bs_idx]);
-								linear_interference -= dBm2linear(links[self_idx].intf_w_rnd_RSRP[3*com_bs_idx+1]);
-								linear_interference -= dBm2linear(links[self_idx].intf_w_rnd_RSRP[3*com_bs_idx+2]);
-							}
-							linear_interference += comp_sector_static_gain;
-							u = H_bar.adjoint() * (H_bar * H_bar.adjoint() + (linear_interference + noise) * Identity).inverse();
-							A = (u * H_bar * H_bar.adjoint() * u.adjoint()).norm();
-							C = (linear_interference + noise) * (u * u.adjoint()).norm();
-
-							CQI_comp[coeff_idx][rb_idx][abs(t) % cqi_history_length] = A/C;
-						}
 					}
 					else if (coeff_idx == 1)
 					{
@@ -590,27 +570,6 @@ void MS::CQI_Update_CJT(void)
 
 		CQI[0][rb_idx][abs(t) % cqi_history_length] = A/(B+C);
 
-		// jhnoh 220901
-		if ( comp_mode[self_idx] == 1 && g_comp_mode )
-		{
-			Real linear_signal       = dBm2linear(links[self_idx].str_signal); 
-			Real linear_interference = dBm2linear(links[self_idx].interference);
-			linear_interference       -= dBm2linear(links[self_idx].intf_w_rnd_RSRP[comp_sector_idx]);
-
-			H_bar1 = sqrt(linear_signal) * (H_m[0][rb_idx]) * PMI_vector[0][rb_idx][t % cqi_history_length];
-
-			Real comp_sector_static_gain = dBm2linear(links[self_idx].static_gain[1].first); 
-			H_bar2 = sqrt(comp_sector_static_gain) * H_m[1][rb_idx] * PMI_vector[1][rb_idx][t % cqi_history_length];
-			H_bar = H_bar1 + H_bar2;
-
-			u = H_bar.adjoint() * (H_bar * H_bar.adjoint() + (linear_interference + noise) * Identity).inverse();
-			A = (u * H_bar * H_bar.adjoint() * u.adjoint()).norm();
-			B = 0;
-			C = (linear_interference + noise) * (u * u.adjoint()).norm();
-
-			CQI[1][rb_idx][abs(t) % cqi_history_length] = A/(B+C);
-			CQI_comp[0][rb_idx][abs(t) % cqi_history_length] = A/(B+C);
-		}		
 	}
 }
 

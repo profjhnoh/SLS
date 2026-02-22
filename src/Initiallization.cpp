@@ -521,33 +521,41 @@ void Set_Parameter(int scenario)
 	MS_dgV = MS_dgV * Wavelength;
 
 	// Override with cfg values if provided
+	bool bs_tx_overridden = false;
+	bool ut_nf_overridden = false;
 	if (cfg_BS_Tx_Power > -9998) {
 		Total_BS_Tx_power = cfg_BS_Tx_Power;
 		bs_maxpower = cfg_BS_Tx_Power;
-		cout << "** BS Tx Power overridden by cfg: " << cfg_BS_Tx_Power << " dBm **" << endl;
+		bs_tx_overridden = true;
 	}
 	if (cfg_UT_Noise_Figure > -9998) {
 		MS_noisefig = cfg_UT_Noise_Figure;
 		noise = dBm2linear(thermal_noise + (10. * log10(bandwidth)) + MS_noisefig);
-		cout << "** UT Noise Figure overridden by cfg: " << cfg_UT_Noise_Figure << " dB **" << endl;
+		ut_nf_overridden = true;
 	}
 
-	cout << " " << endl;
-	cout << "carrier_freq              : " << carrier_freq << endl;
-	cout << "inter_site_distance       : " << inter_site_distance << endl;
-	cout << "secter_to_ue_min_distance : " << min_distance << endl;
-	cout << "indoor_ue_speed           : " << user_speed << endl;
-	cout << "h_BS                      : " << bs_height << endl;
-	cout << "bs_noise_figure           : " << BS_noisefig << endl;
-	cout << "ue_noise_figure           : " << MS_noisefig << endl;
-	cout << "bs_antenna_element_gain   : " << max_antgain << endl;
-	cout << "ue_antenna_element_gain   : " << ue_antenna_element_gain << endl;
-	cout << "thermal_nosie_level       : " << thermal_noise << endl;
-	cout << "simulation_bandwidth      : " << bandwidth << endl;
+	// Handheld mode: force directional UE antenna path (actual gain is hardcoded in Get_UE_antenna_pattern)
+	if (handheld_mode) {
+		ue_antenna_element_gain = 5;  // non-zero flag to trigger BF code paths
+	}
+
+	cout << "carrier_freq            : " << carrier_freq << endl;
+	cout << "inter_site_distance     : " << inter_site_distance << endl;
+	cout << "sector_to_ue_min_dist   : " << min_distance << endl;
+	cout << "indoor_ue_speed         : " << user_speed << endl;
+	cout << "h_BS                    : " << bs_height << endl;
+	cout << "bs_tx_power             : " << bs_maxpower << " dBm" << (bs_tx_overridden ? " (overridden by cfg)" : "") << endl;
+	cout << "bs_noise_figure         : " << BS_noisefig << " dB" << endl;
+	cout << "ue_noise_figure         : " << MS_noisefig << " dB" << (ut_nf_overridden ? " (overridden by cfg)" : "") << endl;
+	cout << "bs_antenna_element_gain : " << max_antgain << " dBi" << endl;
+	cout << "ue_antenna_element_gain : " << ue_antenna_element_gain << " dBi" << endl;
+	if (handheld_mode)
+		cout << "  └─ handheld mode      : forced to " << ue_antenna_element_gain << endl;
+	cout << "thermal_noise_level     : " << thermal_noise << " dBm/Hz" << endl;
+	cout << "simulation_bandwidth    : " << bandwidth << " Hz" << endl;
 
 	//getchar();
-	if( g_mTRP_mode == 0)
-		num_mTRP = 0;
+	num_mTRP = 0;
 
 	// 230616 mTRP
 	bs = new BS[num_BS + num_mTRP];
@@ -564,9 +572,7 @@ void Set_Parameter(int scenario)
 		sector[sec_idx].self_idx = sec_idx;
 
 	// 230615 jhnoh
-	int num_channel;
-	if ( g_mTRP_mode == 0 ) num_channel = num_BS;
-	else num_channel = num_BS + num_mTRP;
+	int num_channel = num_BS;
 
 	channel = new CHANNEL*[num_channel];
 	for (int bs_idx = 0; bs_idx < num_channel; bs_idx++)
@@ -624,100 +630,6 @@ void Set_BS_Location()
 		bs[11].loc.x = 50;
 		bs[11].loc.y = 15;
 
-		if( g_mTRP_mode == 1 ) {
-			mTRP[0].loc.x = -40;
-			mTRP[0].loc.y = 25;
-
-			mTRP[1].loc.x = -20;
-			mTRP[1].loc.y = 25;
-
-			mTRP[2].loc.x = 0;
-			mTRP[2].loc.y = 25;
-
-			mTRP[3].loc.x = 20;
-			mTRP[3].loc.y = 25;							
-
-			mTRP[4].loc.x = 40;
-			mTRP[4].loc.y = 25;
-		}
-
-
-		if( g_mTRP_mode == 2 ) {
-			/*--------------- 1st row ----------------*/
-			bs[0].loc.x = -52.5;
-			bs[0].loc.y = 40;
-
-			bs[1].loc.x = -37.5;   
-			bs[1].loc.y = 40;
-
-			bs[2].loc.x = -22.5;
-			bs[2].loc.y = 40;
-
-			bs[3].loc.x = -7.5;
-			bs[3].loc.y = 40;
-
-			bs[4].loc.x = 7.5;
-			bs[4].loc.y = 40;
-
-			bs[5].loc.x = 22.5;
-			bs[5].loc.y = 40;
-
-			bs[6].loc.x = 37.5;
-			bs[6].loc.y = 40;
-
-			bs[7].loc.x = 52.5;
-			bs[7].loc.y = 40;
-
-			/*--------------- 2nd row ----------------*/
-			bs[8].loc.x = -52.5;
-			bs[8].loc.y = 25;
-
-			bs[9].loc.x = -37.5;   
-			bs[9].loc.y = 25;
-
-			bs[10].loc.x = -22.5;
-			bs[10].loc.y = 25;
-
-			bs[11].loc.x = -7.5;
-			bs[11].loc.y = 25;
-
-			bs[12].loc.x = 7.5;
-			bs[12].loc.y = 25;
-
-			bs[13].loc.x = 22.5;
-			bs[13].loc.y = 25;
-
-			bs[14].loc.x = 37.5;
-			bs[14].loc.y = 25;
-
-			bs[15].loc.x = 52.5;
-			bs[15].loc.y = 25;
-
-			/*--------------- 3rd row ----------------*/
-			bs[16].loc.x = -52.5;
-			bs[16].loc.y = 10;
-
-			bs[17].loc.x = -37.5;   
-			bs[17].loc.y = 10;
-
-			bs[18].loc.x = -22.5;
-			bs[18].loc.y = 10;
-
-			bs[19].loc.x = -7.5;
-			bs[19].loc.y = 10;
-
-			bs[20].loc.x = 7.5;
-			bs[20].loc.y = 10;
-
-			bs[21].loc.x = 22.5;
-			bs[21].loc.y = 10;
-
-			bs[22].loc.x = 37.5;
-			bs[22].loc.y = 10;
-
-			bs[23].loc.x = 52.5;
-			bs[23].loc.y = 10;
-		}
 	}
 	else  //// hexagonal scenario
 	{
@@ -794,76 +706,6 @@ void Set_BS_Location()
 			bs[18].loc.y = inter_site_distance * (1.5);
 		}
 
-		if( g_mTRP_mode == 1 ) {
-			Real dist_macro_btw_micro = inter_site_distance/3;
-			Real mTRP_x[3];
-			Real mTRP_y[3];
-
-			mTRP_x[0] = dist_macro_btw_micro*cos(30*pi/180);
-			mTRP_y[0] = dist_macro_btw_micro*sin(30*pi/180);
-			mTRP_x[1] = dist_macro_btw_micro*cos(150*pi/180);
-			mTRP_y[1] = dist_macro_btw_micro*sin(150*pi/180);
-			mTRP_x[2] = dist_macro_btw_micro*cos(270*pi/180);
-			mTRP_y[2] = dist_macro_btw_micro*sin(270*pi/180);
-
-			for(int bs_idx = 0; bs_idx <  num_BS; bs_idx++) {
-				for(int sec_idx = 0; sec_idx < 3; sec_idx++) {
-					sector[bs_idx*3+sec_idx].mTRP_in_control.push_back(bs_idx*3+sec_idx);
-
-					mTRP  [bs_idx*3+sec_idx].loc.x = bs[bs_idx].loc.x + mTRP_x[sec_idx];
-					mTRP  [bs_idx*3+sec_idx].loc.y = bs[bs_idx].loc.y + mTRP_y[sec_idx];
-				}
-			}
-		} else if ( g_mTRP_mode == 2 )
-		{
-			Real dist_macro_btw_sector_center = inter_site_distance/3;
-			Real center_of_sector_x = dist_macro_btw_sector_center*cos(30*pi/180);
-			Real center_of_sector_y = dist_macro_btw_sector_center*sin(30*pi/180);
-
-			Real dist_micro_wrt_center_of_sector = (inter_site_distance/3)*sqrt(3)/3;
-			Real mic_TRP_pos_ceterview_x[9]; 
-			Real mic_TRP_pos_ceterview_y[9];
-
-			mic_TRP_pos_ceterview_x[0] = center_of_sector_x + dist_micro_wrt_center_of_sector*cos(60*pi/180);
-            mic_TRP_pos_ceterview_y[0] = center_of_sector_y + dist_micro_wrt_center_of_sector*sin(60*pi/180);
-
-            mic_TRP_pos_ceterview_x[1] = center_of_sector_x + dist_micro_wrt_center_of_sector*cos(180*pi/180);
-            mic_TRP_pos_ceterview_y[1] = center_of_sector_y + dist_micro_wrt_center_of_sector*sin(180*pi/180);
-
-            mic_TRP_pos_ceterview_x[2] = center_of_sector_x + dist_micro_wrt_center_of_sector*cos(-60*pi/180);
-            mic_TRP_pos_ceterview_y[2] = center_of_sector_y + dist_micro_wrt_center_of_sector*sin(-60*pi/180);
-
-			mic_TRP_pos_ceterview_x[3] = mic_TRP_pos_ceterview_x[0]*cos(120*pi/180) - mic_TRP_pos_ceterview_y[0]*sin(120*pi/180);
-            mic_TRP_pos_ceterview_y[3] = mic_TRP_pos_ceterview_x[0]*sin(120*pi/180) + mic_TRP_pos_ceterview_y[0]*cos(120*pi/180);
-
-			mic_TRP_pos_ceterview_x[4] = mic_TRP_pos_ceterview_x[1]*cos(120*pi/180) - mic_TRP_pos_ceterview_y[1]*sin(120*pi/180);
-            mic_TRP_pos_ceterview_y[4] = mic_TRP_pos_ceterview_x[1]*sin(120*pi/180) + mic_TRP_pos_ceterview_y[1]*cos(120*pi/180);
-
-			mic_TRP_pos_ceterview_x[5] = mic_TRP_pos_ceterview_x[2]*cos(120*pi/180) - mic_TRP_pos_ceterview_y[2]*sin(120*pi/180);
-            mic_TRP_pos_ceterview_y[5] = mic_TRP_pos_ceterview_x[2]*sin(120*pi/180) + mic_TRP_pos_ceterview_y[2]*cos(120*pi/180);
-
-			mic_TRP_pos_ceterview_x[6] = mic_TRP_pos_ceterview_x[0]*cos(240*pi/180) - mic_TRP_pos_ceterview_y[0]*sin(240*pi/180);
-            mic_TRP_pos_ceterview_y[6] = mic_TRP_pos_ceterview_x[0]*sin(240*pi/180) + mic_TRP_pos_ceterview_y[0]*cos(240*pi/180);
-
-			mic_TRP_pos_ceterview_x[7] = mic_TRP_pos_ceterview_x[1]*cos(240*pi/180) - mic_TRP_pos_ceterview_y[1]*sin(240*pi/180);
-            mic_TRP_pos_ceterview_y[7] = mic_TRP_pos_ceterview_x[1]*sin(240*pi/180) + mic_TRP_pos_ceterview_y[1]*cos(240*pi/180);
-
-			mic_TRP_pos_ceterview_x[8] = mic_TRP_pos_ceterview_x[2]*cos(240*pi/180) - mic_TRP_pos_ceterview_y[2]*sin(240*pi/180);
-            mic_TRP_pos_ceterview_y[8] = mic_TRP_pos_ceterview_x[2]*sin(240*pi/180) + mic_TRP_pos_ceterview_y[2]*cos(240*pi/180);
-
-			for(int bs_idx = 0; bs_idx <  num_BS; bs_idx++) 
-			{
-				for(int sec_idx = 0; sec_idx < 3; sec_idx++) 
-				{
-					for(int mic_idx = 0; mic_idx < 3; mic_idx++) 
-					{
-						sector[bs_idx*3+sec_idx].mTRP_in_control.push_back(bs_idx*9+sec_idx*3+mic_idx);
-						mTRP[bs_idx*9+sec_idx*3+mic_idx].loc.x = bs[bs_idx].loc.x + mic_TRP_pos_ceterview_x[sec_idx*3+mic_idx];
-						mTRP[bs_idx*9+sec_idx*3+mic_idx].loc.y = bs[bs_idx].loc.y + mic_TRP_pos_ceterview_y[sec_idx*3+mic_idx];
-					}
-				}
-			}
-		}
 	}
 }
 
@@ -873,7 +715,6 @@ void ClearDrop()
 	{
 		ms[ms_idx].Reset2Default();
 		links[ms_idx].Reset2Default();
-		comp_mode[ms_idx] = 0;
 	}
 
 	for(int sec_idx = 0; sec_idx < num_SECTORS + num_mTRP_SECTORS; sec_idx++)
@@ -901,55 +742,33 @@ void Initialdrop()
 	///////////////////////////////////////////////////////////////// 5G InH
 	if (TYPE == 11)          
 	{
-		if ( g_mTRP_mode < 2)
+		// In single_cell_mode, only create users for center BS (BS 0)
+		int num_bs_with_users = (single_cell_mode == 1) ? 1 : num_BS;
+
+		for (int bs_idx = 0; bs_idx < num_bs_with_users; bs_idx++) /// 12
 		{
-			// In single_cell_mode, only create users for center BS (BS 0)
-			int num_bs_with_users = (single_cell_mode == 1) ? 1 : num_BS;
-
-			for (int bs_idx = 0; bs_idx < num_bs_with_users; bs_idx++) /// 12
+			for (int ms_idx = 0; ms_idx < num_Indoor_TRxP * num_MS_persector; ms_idx++)  /// 10 or 30
 			{
-				for (int ms_idx = 0; ms_idx < num_Indoor_TRxP * num_MS_persector; ms_idx++)  /// 10 or 30
+				ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].nearest_bs_idx = bs_idx;   // ms 0~9 -> bs 0, ms 10~19 -> bs 1 ///// or ms 0~29 -> bs 0, ms 30~59 -> bs 1
+				do
 				{
-					ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].nearest_bs_idx = bs_idx;   // ms 0~9 -> bs 0, ms 10~19 -> bs 1 ///// or ms 0~29 -> bs 0, ms 30~59 -> bs 1 
-					do
+					ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].loc.x = (bs[bs_idx].loc.x - 10) + 20. * randnum.u();
+
+					if (bs_idx < 6)   /// 6 BS  on Top line  (0 ~ 5)
 					{
-						ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].loc.x = (bs[bs_idx].loc.x - 10) + 20. * randnum.u();
-
-						if (bs_idx < 6)   /// 6 BS  on Top line  (0 ~ 5)
-						{
-							ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].loc.y = (bs[bs_idx].loc.y - 10) + 25. * randnum.u();
-						}
-						else  /// 6 BS on Bottom line (6 ~ 11)
-						{
-							ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].loc.y = (bs[bs_idx].loc.y - 15) + 25. * randnum.u();
-						}
-
-						ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].moving_direction = 2 * 180 * randnum.u() - 180;
-						ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].speed = user_speed * 1000 / 3600;
-						ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].Indoor = true;
-
-					} while (Get_distance(ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].loc, bs[bs_idx].loc) < min_distance);
-
-				}
-			}
-		} else if ( g_mTRP_mode == 2 )
-		{
-			for (int ms_idx = 0; ms_idx < num_BS * num_Indoor_TRxP * num_MS_persector; ms_idx++)
-			{
-				ms[ms_idx].loc.x = 120*randnum.u() - 60;
-				ms[ms_idx].loc.y = 50*randnum.u();
-
-				Real min_dist = 1000000;
-				for (int bs_idx = 0; bs_idx < num_BS + num_mTRP; bs_idx++)
-				{
-					Real dist = sqrt( (bs[bs_idx].loc.x - ms[ms_idx].loc.x)*(bs[bs_idx].loc.x - ms[ms_idx].loc.x) + 
-								        (bs[bs_idx].loc.y - ms[ms_idx].loc.y)*(bs[bs_idx].loc.y - ms[ms_idx].loc.y) );
-					if ( dist < min_dist )
-					{
-						ms[ms_idx].nearest_bs_idx = bs_idx;
-						min_dist = dist;
+						ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].loc.y = (bs[bs_idx].loc.y - 10) + 25. * randnum.u();
 					}
-				}
+					else  /// 6 BS on Bottom line (6 ~ 11)
+					{
+						ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].loc.y = (bs[bs_idx].loc.y - 15) + 25. * randnum.u();
+					}
+
+					ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].moving_direction = 2 * 180 * randnum.u() - 180;
+					ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].speed = user_speed * 1000 / 3600;
+					ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].Indoor = true;
+
+				} while (Get_distance(ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].loc, bs[bs_idx].loc) < min_distance);
+
 			}
 		}
 
@@ -1095,32 +914,6 @@ void Initialize_CHANNEL()
 					channel[bs_idx][ms_idx].self_ms.y = ms[ms_idx].loc.y;
 
 					channel[bs_idx][ms_idx].Set_channel(distance, ms[ms_idx].Indoor, bs_idx, ms_idx, channel[bs_idx][ms_idx].self_bs, channel[bs_idx][ms_idx].self_ms);
-
-					if (g_mTRP_mode == 1 || g_mTRP_mode == 2)
-					{
-						for(int sec_idx = 0; sec_idx < 3; sec_idx++) 
-						{
-							LOCATION rtv_mTRP_pos_in_center_view;
-							int mTRP_idx;
-							for (int mTRP_idx = 0; mTRP_idx < sector[bs_idx*3+sec_idx].mTRP_in_control.size(); mTRP_idx++ ) 
-							{
-								int mTRP_num = sector[bs_idx*3+sec_idx].mTRP_in_control[mTRP_idx];
-								rtv_mTRP_pos_in_center_view.x = mTRP[mTRP_num].loc.x - bs[bs_idx].loc.x + bs[wrap_bs_idx].loc.x;
-								rtv_mTRP_pos_in_center_view.y = mTRP[mTRP_num].loc.y - bs[bs_idx].loc.y + bs[wrap_bs_idx].loc.y;
-
-								distance = Get_distance(center_cell_view, rtv_mTRP_pos_in_center_view);
-
-								int mTRP_ch_idx = simple_num_BS + mTRP_num;
-
-								channel[mTRP_ch_idx][ms_idx].self_bs.x = rtv_mTRP_pos_in_center_view.x + bs[ms_to_bs_wrap_idx].loc.x;
-								channel[mTRP_ch_idx][ms_idx].self_bs.y = rtv_mTRP_pos_in_center_view.y + bs[ms_to_bs_wrap_idx].loc.y;
-								channel[mTRP_ch_idx][ms_idx].self_ms.x = ms[ms_idx].loc.x;
-								channel[mTRP_ch_idx][ms_idx].self_ms.y = ms[ms_idx].loc.y;
-
-								channel[mTRP_ch_idx][ms_idx].Set_channel(distance, ms[ms_idx].Indoor, mTRP_ch_idx, ms_idx, channel[mTRP_ch_idx][ms_idx].self_bs, channel[mTRP_ch_idx][ms_idx].self_ms);
-							}
-						}
-					}
 				}
 
 
@@ -1146,69 +939,34 @@ void Link_configuration()
 		// 220808 jhnoh 
 		if (drop_idx == 0) {
 
-			// 230616 mTRP
-			if ( g_mTRP_mode == 1 || g_mTRP_mode == 2) { 
-				links[ms_idx].LS_gain               = new Real          [num_SECTORS + num_mTRP_SECTORS];    
-				links[ms_idx].adj_sector            = new int             [num_SECTORS + num_mTRP_SECTORS];
-				links[ms_idx].static_gain           = new Real_int_pair [num_SECTORS + num_mTRP_SECTORS];	
-				links[ms_idx].analog_beam_selection = new beam_selection  [num_SECTORS + num_mTRP_SECTORS]; 
-				links[ms_idx].intf_w_rnd_RSRP	    = new Real          [num_SECTORS + num_mTRP_SECTORS]; 
+			links[ms_idx].LS_gain               = new Real          [num_SECTORS];
+			links[ms_idx].adj_sector            = new int             [num_SECTORS];
+			links[ms_idx].static_gain           = new Real_int_pair [num_SECTORS];
+			links[ms_idx].analog_beam_selection = new beam_selection  [num_SECTORS];
+			links[ms_idx].intf_w_rnd_RSRP	    = new Real          [num_SECTORS];
 
-				links[ms_idx].rand_sec_a            = new int             [num_SECTORS + num_mTRP_SECTORS]; 
-				links[ms_idx].rand_sec_z            = new int             [num_SECTORS + num_mTRP_SECTORS];
-			} else
-			{
-				links[ms_idx].LS_gain               = new Real          [num_SECTORS];    
-				links[ms_idx].adj_sector            = new int             [num_SECTORS];
-				links[ms_idx].static_gain           = new Real_int_pair [num_SECTORS];	
-				links[ms_idx].analog_beam_selection = new beam_selection  [num_SECTORS]; 
-				links[ms_idx].intf_w_rnd_RSRP	    = new Real          [num_SECTORS]; 
-
-				links[ms_idx].rand_sec_a            = new int             [num_SECTORS]; 
-				links[ms_idx].rand_sec_z            = new int             [num_SECTORS];
-			}
+			links[ms_idx].rand_sec_a            = new int             [num_SECTORS];
+			links[ms_idx].rand_sec_z            = new int             [num_SECTORS];
 		}
 		else
 		{
-			if ( g_mTRP_mode == 1 || g_mTRP_mode == 2) {
-				// For the hexagonal grid, sector means antenna pannel.
-				for (int sec_idx = 0; sec_idx < num_SECTORS + num_mTRP_SECTORS; sec_idx++ )
-				{
-					links[ms_idx].LS_gain              [sec_idx] = 0;
-					links[ms_idx].adj_sector           [sec_idx] = 0;
+			for (int sec_idx = 0; sec_idx < num_SECTORS; sec_idx++ )
+			{
+				links[ms_idx].LS_gain              [sec_idx] = 0;
+				links[ms_idx].adj_sector           [sec_idx] = 0;
 
-					links[ms_idx].static_gain          [sec_idx].first  = 0;
-					links[ms_idx].static_gain          [sec_idx].second = 0;
-					
-					links[ms_idx].analog_beam_selection[sec_idx].a = 0;
-					links[ms_idx].analog_beam_selection[sec_idx].z = 0;
-					links[ms_idx].analog_beam_selection[sec_idx].p = 0;
-					links[ms_idx].analog_beam_selection[sec_idx].sector_a = 0;
-					links[ms_idx].analog_beam_selection[sec_idx].sector_z = 0;
+				links[ms_idx].static_gain          [sec_idx].first  = 0;
+				links[ms_idx].static_gain          [sec_idx].second = 0;
 
-					links[ms_idx].intf_w_rnd_RSRP	   [sec_idx] = 0;
-					links[ms_idx].rand_sec_a           [sec_idx] = 0;
-					links[ms_idx].rand_sec_z           [sec_idx] = 0;				
-				}
-			} else {
-				for (int sec_idx = 0; sec_idx < num_SECTORS; sec_idx++ )
-				{
-					links[ms_idx].LS_gain              [sec_idx] = 0;
-					links[ms_idx].adj_sector           [sec_idx] = 0;
+				links[ms_idx].analog_beam_selection[sec_idx].a = 0;
+				links[ms_idx].analog_beam_selection[sec_idx].z = 0;
+				links[ms_idx].analog_beam_selection[sec_idx].p = 0;
+				links[ms_idx].analog_beam_selection[sec_idx].sector_a = 0;
+				links[ms_idx].analog_beam_selection[sec_idx].sector_z = 0;
 
-					links[ms_idx].static_gain          [sec_idx].first  = 0;
-					links[ms_idx].static_gain          [sec_idx].second = 0;
-					
-					links[ms_idx].analog_beam_selection[sec_idx].a = 0;
-					links[ms_idx].analog_beam_selection[sec_idx].z = 0;
-					links[ms_idx].analog_beam_selection[sec_idx].p = 0;
-					links[ms_idx].analog_beam_selection[sec_idx].sector_a = 0;
-					links[ms_idx].analog_beam_selection[sec_idx].sector_z = 0;
-
-					links[ms_idx].intf_w_rnd_RSRP	   [sec_idx] = 0;
-					links[ms_idx].rand_sec_a           [sec_idx] = 0;
-					links[ms_idx].rand_sec_z           [sec_idx] = 0;				
-				}
+				links[ms_idx].intf_w_rnd_RSRP	   [sec_idx] = 0;
+				links[ms_idx].rand_sec_a           [sec_idx] = 0;
+				links[ms_idx].rand_sec_z           [sec_idx] = 0;
 			}
 		}
 	}
@@ -1219,11 +977,11 @@ void Link_configuration()
 	///////////////////////////////////////////////////////////////////////////////////////////////////
 	cout << "num_threads = " << num_of_threads << endl;
 	cout << "Get RSRP.........................."<<std::flush;
-	//#if ENABLE_MULTITHREADING
-	//#pragma omp parallel num_threads(num_of_threads)
-	//{
-	//	#pragma omp for
-	//#endif
+	#if ENABLE_MULTITHREADING
+	#pragma omp parallel num_threads(num_of_threads)
+	{
+		#pragma omp for
+	#endif
 		for (int ms_idx = 0; ms_idx < num_MS; ms_idx++)
 		{
 			//cout << '\r'<< endl;
@@ -1232,9 +990,9 @@ void Link_configuration()
 			sector[links[ms_idx]._sector_in_control].ue_in_control.push_back(ms_idx);
 			//sector[links[ms_idx].comp_sector_idx].ue_in_comp.push_back(ms_idx);
 		}
-	//#if ENABLE_MULTITHREADING
-	//}
-	//#endif
+	#if ENABLE_MULTITHREADING
+	}
+	#endif
 	cout << "DONE"<<endl;    
 	cout << "delete link memory................"<<std::flush;
 	for (int ms_idx = 0; ms_idx < num_MS; ms_idx++)
@@ -1653,51 +1411,6 @@ void Get_CouplingLoss()
 				}
 			}
 
-			if ( g_mTRP_mode == 1 || g_mTRP_mode == 2) 
-			{
-				for (int mTRP_idx = num_BS; mTRP_idx < num_BS + num_mTRP; mTRP_idx++)
-				{
-					for (int sec_idx = 0; sec_idx < sector_parameter; sec_idx++)  ///
-					{
-						if ( (mTRP_idx == links[ue_idx].self_bs_idx    ) ||
-							  isinf(-links[ue_idx].intf_w_rnd_RSRP[3*mTRP_idx+sec_idx]) )
-						{
-							// no interference
-						}
-						else
-						{
-							int aa = links[ue_idx].rand_sec_a[3*mTRP_idx+sec_idx]; //int aa = (int)((Real)tilt_azimuth_angle_LCS_size * randnum.u());
-							int zz = links[ue_idx].rand_sec_z[3*mTRP_idx+sec_idx]; //int zz = (int)((Real)tilt_zenith_angle_LCS_size * randnum.u());
-							Real RSRP;
-
-							if ( !(-1 < aa && aa < tilt_azimuth_angle_LCS_size) )
-								cout << "Something wrong with aziumth" << endl;
-
-							if ( !(-1 < zz && zz < tilt_zenith_angle_LCS_size) )
-								cout << "Something wrong with aziumth" << endl;									
-
-							if (ue_antenna_element_gain == 0)
-							{
-								RSRP = linear2dB(channel[mTRP_idx][ue_idx].signal_RSRP_gain[sec_idx][zz][aa][0][0][0]);
-							}
-							else
-							{
-								RSRP = linear2dB(channel[mTRP_idx][ue_idx].signal_RSRP_gain[sec_idx][zz][aa]
-								[links[ue_idx].zenith_angle_idx_selected_for_interference]
-								[links[ue_idx].azimuth_angle_idx_selected_for_interference]
-								[links[ue_idx].panel_idx_selected_for_interference]);
-							}
-							Real interf = RSRP - channel[mTRP_idx][ue_idx].pathloss_final;
-							Real _intf_w_rnd_RSRP = bs_maxpower + RSRP - channel[mTRP_idx][ue_idx].pathloss_final;
-
-							//if ( _intf_w_rnd_RSRP != links[ue_idx].intf_w_rnd_RSRP[3*mTRP_idx+sec_idx])
-							//	cout << "Someting wrong with rnd RSRP" << endl;
-
-							new_interference += pow(10., (interf) / 10.);
-						}
-					}
-				}
-			}
 			Real new_interference_2 = linear2dBm(new_interference * new_bspower);
 
 			//if( new_interference_2 != links[ue_idx].interference)
@@ -1729,7 +1442,9 @@ void Print_Calib_Debug_Info( void )
 		Calibration_Debug_info
 		<< "drop_idx" <<","
 		<< "ue_idx" <<","
-		<< "bs_idx" <<","
+		<< "sector_idx" <<","
+		<< "bs_x" << ","
+		<< "bs_y" << ","
 		<< "x-coordinate"<<","
 		<< "y-coordinate"<<","
 		<< "height"<<","
@@ -1741,6 +1456,10 @@ void Print_Calib_Debug_Info( void )
 		<< "indoor"<< ","
 		<< "los"<< ","
 		<< "high_loss_flag" << ","
+		<< "LOS_AOD" << ","
+		<< "LOS_AOA" << ","
+		<< "LOS_ZOD" << ","
+		<< "LOS_ZOA" << ","
 		<< "ASD" << ","
 		<< "ASA" << ","
 		<< "ZSD" << ","
@@ -1755,10 +1474,15 @@ void Print_Calib_Debug_Info( void )
 
 	for(int ue_idx = 0; ue_idx < num_MS; ue_idx++)
 	{
+		int serving_bs = links[ue_idx].self_bs_idx;
+		CHANNEL* ch_serving = &channel[serving_bs][ue_idx];
+
 		Calibration_Debug_info
 		<< drop_idx << ","
 		<< ue_idx << ","
-		<< links[ue_idx].self_bs_idx << ","
+		<< links[ue_idx]._sector_in_control << ","
+		<< bs[serving_bs].loc.x << ","
+		<< bs[serving_bs].loc.y << ","
 		<< ms[ue_idx].loc.x << ","
 		<< ms[ue_idx].loc.y << ","
 		<< ms[ue_idx].MS_HEIGHT_FINAL << ","
@@ -1770,10 +1494,14 @@ void Print_Calib_Debug_Info( void )
 		<< links[ue_idx].link_indoor << ","
 		<< links[ue_idx].link_los << ","
 		<< links[ue_idx].high_loss_flag << ","
-		<< channel[links[ue_idx].self_bs_idx][ue_idx].ASD << ","
-		<< channel[links[ue_idx].self_bs_idx][ue_idx].ASA << ","
-		<< channel[links[ue_idx].self_bs_idx][ue_idx].ZSD << ","
-		<< channel[links[ue_idx].self_bs_idx][ue_idx].ZSA << ",";
+		<< ch_serving->LOS_AOD_GCS << ","
+		<< ch_serving->LOS_AOA_GCS << ","
+		<< ch_serving->LOS_ZOD_GCS << ","
+		<< ch_serving->LOS_ZOA_GCS << ","
+		<< ch_serving->ASD << ","
+		<< ch_serving->ASA << ","
+		<< ch_serving->ZSD << ","
+		<< ch_serving->ZSA << ",";
 
 		// Per-UE singular value statistics (max, min, avg across RBs)
 		if (ms[ue_idx].H_m != NULL && num_rb > 0) {
@@ -1818,6 +1546,57 @@ void Print_Calib_Debug_Info( void )
 		Calibration_Debug_info.close();
 	}
 
+	// Cluster parameter CSV dump
+	if (g_dump_cluster_params)
+	{
+		static ofstream cluster_csv;
+
+		if (drop_idx == 0)
+		{
+			char cluster_file_name[100];
+			sprintf(cluster_file_name, "./%s/Cluster_Params_drop.csv", folder_name);
+			cluster_csv.open(cluster_file_name, ios::out);
+			cluster_csv << "drop_idx,ue_idx,sector_idx,indoor,los,num_clusters,cluster_idx,power_dB,delay_ns,AOD,AOA,ZOD,ZOA" << endl;
+		}
+
+		for (int ue_idx = 0; ue_idx < num_MS; ue_idx++)
+		{
+			int serving_bs = links[ue_idx].self_bs_idx;
+			CHANNEL* ch = &channel[serving_bs][ue_idx];
+			int idx1 = ch->strongest_power_idx;
+			int idx2 = ch->strongest_power_idx2;
+
+			for (int n = 0; n < ch->num_path; n++)
+			{
+				// Use powerForAngles which includes LOS K-factor for cluster 0
+				// Restore pre-subcluster power: strongest 2 clusters were split 10/6/4
+				// so current power is 10/20 of original → multiply by 20/10 = 2
+				Real pwr = ch->powerForAngles[n];
+				if (n == idx1 || n == idx2)
+					pwr *= 2.0;
+
+				cluster_csv
+					<< drop_idx << ","
+					<< ue_idx << ","
+					<< links[ue_idx]._sector_in_control << ","
+					<< links[ue_idx].link_indoor << ","
+					<< links[ue_idx].link_los << ","
+					<< ch->num_path << ","
+					<< n << ","
+					<< 10.0 * log10(pwr) << ","
+					<< ch->delay[n] * 1e9 << ","
+					<< ch->AOD[n] << ","
+					<< ch->AOA[n] << ","
+					<< ch->ZOD[n] << ","
+					<< ch->ZOA[n] << endl;
+			}
+		}
+
+		if (drop_idx == num_drop - 1)
+		{
+			cluster_csv.close();
+		}
+	}
 }
 
 
@@ -1881,17 +1660,24 @@ void Set_antenna_location_vector()
 	/////////////////////  array antenna rotate angle //////////////////////////////////////////////////
 	for (int ms_idx = 0; ms_idx < num_MS; ms_idx++)
 	{
-		if (ue_antenna_element_gain == 0)
+		if (handheld_mode)
+		{
+			ms[ms_idx].alpha = 360 * randnum.u() * (pi / 180.);
+			ms[ms_idx].beta  = handheld_beta_deg * (pi / 180.);
+			ms[ms_idx].gamma = 0.;
+		}
+		else if (ue_antenna_element_gain == 0)
 		{
 			ms[ms_idx].alpha = 0.;
+			ms[ms_idx].beta  = 0.;
+			ms[ms_idx].gamma = 0.;
 		}
 		else
 		{
 			ms[ms_idx].alpha = 360 * randnum.u() * (pi / 180.);
+			ms[ms_idx].beta  = 0.;
+			ms[ms_idx].gamma = 0.;
 		}
-		
-		ms[ms_idx].beta  = 0.;
-		ms[ms_idx].gamma = 0.;
 	}
 
 	for (int bs_idx = 0; bs_idx < num_BS + num_mTRP; bs_idx++)
@@ -1962,8 +1748,37 @@ void Set_antenna_location_vector()
 	}
 
 	///////////////////////////////////////////////////////////////////////////////////////////////////
+	// Handheld UT: 8 candidate antenna positions on 15cm×7cm rectangular device (TR 38.901 Table 7.8-2A)
+	const Real HH_L = 0.15;  // device length (m)
+	const Real HH_W = 0.07;  // device width (m)
+	const LOCATION3D handheld_positions[8] = {
+		{-HH_L/2, -HH_W/2, 0},  // position 1: bottom-left corner
+		{      0, -HH_W/2, 0},  // position 2: bottom-center
+		{ HH_L/2, -HH_W/2, 0},  // position 3: bottom-right corner
+		{ HH_L/2,       0, 0},  // position 4: right-center
+		{ HH_L/2,  HH_W/2, 0},  // position 5: top-right corner
+		{      0,  HH_W/2, 0},  // position 6: top-center
+		{-HH_L/2,  HH_W/2, 0},  // position 7: top-left corner
+		{-HH_L/2,       0, 0},  // position 8: left-center
+	};
+
 	for (int ue_idx = 0; ue_idx < num_MS; ue_idx++)
 	{
+		if (handheld_mode)
+		{
+			// Handheld: place antenna elements at physical device positions
+			// MS_M = handheld_num_ports, MS_N=1, MS_P=1
+			for (int port = 0; port < handheld_num_ports; port++)
+			{
+				int ant_idx = handheld_port_indices[port] - 1;  // 1-based to 0-based
+				LOCATION3D pos = handheld_positions[ant_idx];
+				// Transform from device LCS to GCS using UE orientation
+				ms[ue_idx].d_rx[port][0][0][0][0] = Transpose_LCS_to_GCS_location(
+					ms[ue_idx].alpha, ms[ue_idx].beta, ms[ue_idx].gamma, pos);
+			}
+		}
+		else
+		{
 		for (int mg = 0; mg < MS_Mg; mg++)
 		{
 			for (int ng = 0; ng < MS_Ng; ng++)
@@ -1977,7 +1792,7 @@ void Set_antenna_location_vector()
 							ms[ue_idx].d_rx[m][n][p][mg][ng].x = 0;
 							ms[ue_idx].d_rx[m][n][p][mg][ng].y = n * MS_dH + ng * MS_dgH;
 							ms[ue_idx].d_rx[m][n][p][mg][ng].z = m * MS_dV + mg * MS_dgV;
-							
+
 
 							if (MS_Ng == 1)
 							{
@@ -1999,6 +1814,7 @@ void Set_antenna_location_vector()
 				}
 			}
 		}
+		} // else (non-handheld)
 	}
 
 	for (int bs_idx = 0; bs_idx < num_BS + num_mTRP; bs_idx++)
@@ -2270,6 +2086,15 @@ void Generate_bs_2D_DFT_beam_precoder()
 			ue_tilt_azimuth_angle_LCS_size = 4;
 			ue_tilt_zenith_angle_LCS_size  = 2;
 		}
+	}
+
+	// Handheld mode: single UE beam direction (no UE beam search needed)
+	// Handheld per-port pattern is computed in Get_UE_antenna_pattern, not through BF weights
+	if (handheld_mode) {
+		ue_tilt_azimuth_angle_LCS[0] = 0.;
+		ue_tilt_zenith_angle_LCS[0]  = pi / 2.;  // 90° broadside (placeholder, not used by handheld)
+		ue_tilt_azimuth_angle_LCS_size = 1;
+		ue_tilt_zenith_angle_LCS_size  = 1;
 	}
 
 	// ====================================================================

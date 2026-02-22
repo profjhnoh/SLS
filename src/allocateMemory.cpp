@@ -53,7 +53,6 @@ void Allocate_memory(void)
 		}
 	}
 
-	comp_mode = new int [num_MS];
 
 }
 
@@ -112,6 +111,4 @@ void Delete_memory(void)
 	}
 	delete[] RX_NLOS_gain_theta;
 	delete[] RX_NLOS_gain_pi;
-
-	delete[] comp_mode;
 }

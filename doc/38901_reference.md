@@ -1001,15 +1001,244 @@ F_{\varphi''}
 \end{bmatrix} \tag{7.3-3}
 $$
 
-### UT 안테나 (Handheld)
+### UT 안테나 모델 (Handheld) — Section 7.3
 
-Directional 패턴 (Table 7.3-2):
+#### 디바이스 형상 및 안테나 배치
+
+Handheld UT는 평면 직사각형 디바이스로 모델링한다:
 
 $$
-\theta_{3dB} = 90°, \quad SLA_V = 25 \text{ dB}, \quad \varphi_{3dB} = 90°, \quad A_{\max} = 25 \text{ dB}, \quad G_{E,\max} = 5 \text{ dBi}
+\text{Device dimensions} = (X, Y, Z) = (15 \text{ cm},\; 7 \text{ cm},\; 0 \text{ cm}) \quad \text{(depth, width, height)}
 $$
 
-**Note:** Full calibration (Table 7.8-2)에서는 UT 안테나 패턴 = **Isotropic** ($G_{E,\max} = 0$ dBi)
+**8개 안테나 후보 위치** (Figure 7.3-2): 4개 꼭짓점 + 4개 변 중앙점. 디바이스 중심이 원점이며, 기준 방향($\Omega_{UT}=0°$)에서 긴 변(15cm)이 $x'$축, 짧은 변(7cm)이 $y'$축, 법선이 $z'$축이다.
+
+| 위치 | 좌표 $(x', y')$ [cm] | 중심→안테나 방위각 $\phi_c$ |
+|:---:|:---:|:---:|
+| (1) | $(-7.5,\; +3.5)$ | $\text{atan2}(3.5, -7.5) \approx 155°$ |
+| (2) | $(0,\; +3.5)$ | $90°$ |
+| (3) | $(+7.5,\; +3.5)$ | $\text{atan2}(3.5, 7.5) \approx 25°$ |
+| (4) | $(+7.5,\; 0)$ | $0°$ |
+| (5) | $(+7.5,\; -3.5)$ | $\text{atan2}(-3.5, 7.5) \approx -25°$ |
+| (6) | $(0,\; -3.5)$ | $-90°$ |
+| (7) | $(-7.5,\; -3.5)$ | $\text{atan2}(-3.5, -7.5) \approx -155°$ |
+| (8) | $(-7.5,\; 0)$ | $180°$ |
+
+> **Note:** 번호 배치는 Figure 7.3-2 원본 참조. CPE(9개 위치)와 달리 handheld는 중심 위치 없이 8개이다.
+
+#### 기준 방향 (Reference Orientation)
+
+기준 방향에서 GCS와 UT LCS가 일치한다 (Figure 7.3-3):
+
+$$
+\Omega_{UT,\alpha} = 0°, \quad \Omega_{UT,\beta} = 0°, \quad \Omega_{UT,\gamma} = 0°
+$$
+
+디바이스가 수평으로 놓인 상태에서 법선벡터($z'$축)가 천정을 가리킨다.
+
+#### 단일 엘리먼트 방사 패턴 (Table 7.3-2)
+
+Table 7.3-2에서 안테나는 $\hat{\theta}''$, $\hat{\varphi}''$ 방향으로 oriented되어 있으며, boresight는 $\theta'' = 90°$, $\varphi'' = 0°$ 방향($x'$축, broadside)이다.
+
+**수직 컷** (vertical cut of the radiation power pattern):
+
+$$
+A''_{E,V}(\theta'') = -\min\!\left\{ 12 \left(\frac{\theta'' - 90°}{\theta_{3dB}}\right)^2,\; SLA_V \right\} \text{ [dB]}
+$$
+
+$$
+\theta_{3dB} = 125°, \quad SLA_V = 22.5 \text{ dB}
+$$
+
+**수평 컷** (horizontal cut of the radiation power pattern):
+
+$$
+A''_{E,H}(\varphi'') = -\min\!\left\{ 12 \left(\frac{\varphi''}{\varphi_{3dB}}\right)^2,\; A_{\max} \right\} \text{ [dB]}
+$$
+
+$$
+\varphi_{3dB} = 125°, \quad A_{\max} = 22.5 \text{ dB}
+$$
+
+**3D 방사 패턴:**
+
+$$
+A''_{E}(\theta'', \varphi'') = -\min\!\left\{ -\left(A''_{E,V}(\theta'') + A''_{E,H}(\varphi'')\right),\; A_{\max} \right\} \text{ [dB]}
+$$
+
+**최대 지향성 이득:**
+
+$$
+G_{E,\max} = 5.3 \text{ dBi}
+$$
+
+**최종 엘리먼트 패턴 (linear scale):**
+
+$$
+A'(\theta'', \varphi'') = G_{E,\max} + A''_E(\theta'', \varphi'') \text{ [dB]}
+$$
+
+> **Table 7.3-1 (BS)과의 비교:**
+>
+> | 파라미터 | Table 7.3-2 (Handheld UT) | Table 7.3-1 (BS) |
+> |:---:|:---:|:---:|
+> | $\theta_{3dB}$ | $125°$ | $65°$ |
+> | $\varphi_{3dB}$ | $125°$ | $65°$ |
+> | $SLA_V$ | $22.5$ dB | $30$ dB |
+> | $A_{\max}$ | $22.5$ dB | $30$ dB |
+> | $G_{E,\max}$ | $5.3$ dBi | $8$ dBi |
+>
+> Handheld UT는 BS 대비 빔폭이 약 2배 넓고 (125° vs 65°), 최대 감쇄가 낮으며 (22.5 vs 30 dB), 이득이 작다 (5.3 vs 8 dBi). 핸드폰 안테나의 넓은 방사 특성을 반영한다.
+
+#### 편파 모델링 (Polarized Antenna Modelling for Handheld UT)
+
+##### 기준 방사 패턴 (Reference Radiation Pattern)
+
+**Single polarization** (1개 안테나 패턴, 주로 FR1에서 사용):
+
+$$
+F'_{\theta}(\theta'', \varphi'') = \sqrt{10^{A'(\theta'',\varphi'')/10}}, \quad F'_{\varphi}(\theta'', \varphi'') = 0
+$$
+
+기준 편파 방향은 $\hat{\theta}''$ 방향 (수직 편파)이다.
+
+**Dual polarization** (2개 안테나 패턴, FR2 전용):
+
+- 첫 번째 패턴: $F'_{\theta} = \sqrt{10^{A'/10}}$, $F'_{\varphi} = 0$
+- 두 번째 패턴: $F'_{\theta} = 0$, $F'_{\varphi} = \sqrt{10^{A'/10}}$
+
+##### 안테나 위치별 편파 방향 (Figure 7.3-7)
+
+각 안테나의 실제 편파 방향은 **디바이스 평면에 평행**하고, **중심→안테나 방향 벡터에 수직**이다.
+
+중심→안테나 방향 벡터 $\vec{d}_u = (dx_u, dy_u)$에 대해, single-pol 편파 방향 벡터:
+
+$$
+\vec{p}_u = \frac{(-dy_u,\; dx_u,\; 0)}{|(-dy_u,\; dx_u)|}
+$$
+
+| 위치 | 중심→안테나 $(dx, dy)$ | 편파 방향 $\vec{p}_u$ |
+|:---:|:---:|:---:|
+| (1) | $(-7.5, +3.5)$ | $(-3.5, -7.5, 0)/8.28$ |
+| (2) | $(0, +3.5)$ | $(-1, 0, 0)$ |
+| (3) | $(+7.5, +3.5)$ | $(-3.5, +7.5, 0)/8.28$ |
+| (4) | $(+7.5, 0)$ | $(0, +1, 0)$ |
+| (5) | $(+7.5, -3.5)$ | $(+3.5, +7.5, 0)/8.28$ |
+| (6) | $(0, -3.5)$ | $(+1, 0, 0)$ |
+| (7) | $(-7.5, -3.5)$ | $(+3.5, -7.5, 0)/8.28$ |
+| (8) | $(-7.5, 0)$ | $(0, -1, 0)$ |
+
+**Dual polarization** (FR2, Figure 7.3-8):
+
+- 첫 번째 패턴: single-pol 방향에서 중심→안테나 축을 기준으로 $+45°$ 회전
+- 두 번째 패턴: 첫 번째에 수직이고, 중심→안테나 방향에도 수직
+
+##### 안테나별 회전 각도 $(\alpha_u, \beta_u, \gamma_u)$
+
+기준 패턴의 $\hat{\theta}''$ 편파(수직)를 각 안테나의 실제 편파 방향으로 변환하기 위한 3D 회전 각도:
+
+$$
+\beta_u = 90° \quad \text{(}\hat{z}\text{ 방향 편파를 디바이스 평면으로 눕힘)}
+$$
+
+$$
+\alpha_u = \text{atan2}(p_{u,y},\; p_{u,x}) \quad \text{(편파 방향의 방위각)}
+$$
+
+$$
+\gamma_u = 0° \quad \text{(single polarization의 경우 추가 슬랜트 없음)}
+$$
+
+#### 2단계 좌표 회전 (Field Pattern Rotation)
+
+Handheld UT의 안테나 field pattern을 GCS로 변환하는 과정은 **2단계 회전**이다:
+
+**Stage 1 — 안테나 개별 회전** (Eq. 7.3-6, 7.3-7, 7.3-8):
+
+기준 패턴 $(F'_{\theta}, F'_{\varphi})$를 각 안테나 $u$의 방향으로 회전:
+
+$$
+\begin{bmatrix}
+F''_{\theta,u}(\theta'_u, \varphi'_u) \\
+F''_{\varphi,u}(\theta'_u, \varphi'_u)
+\end{bmatrix}
+=
+\begin{bmatrix}
+\cos\psi_u & -\sin\psi_u \\
+\sin\psi_u & \cos\psi_u
+\end{bmatrix}
+\begin{bmatrix}
+F'_{\theta}(\theta'', \varphi'') \\
+F'_{\varphi}(\theta'', \varphi'')
+\end{bmatrix} \tag{7.3-6, 7.3-7}
+$$
+
+여기서:
+
+- $(\theta'', \varphi'') \to (\theta'_u, \varphi'_u)$: Eq. 7.1-7, 7.1-8을 $(\alpha_u, \beta_u, \gamma_u)$로 적용
+- $\psi_u$: Eq. 7.1-15를 $(\alpha_u, \beta_u, \gamma_u)$로 계산:
+
+$$
+\psi_u = \text{atan2}\!\left(
+\sin\beta_u \sin\gamma_u \cos(\varphi-\alpha_u) + \cos\beta_u \sin\gamma_u \sin\theta - \sin\beta_u \cos\gamma_u \cos\theta,\;
+\cos\beta_u \cos\gamma_u - \sin\beta_u \sin\gamma_u \cos(\varphi-\alpha_u) \sin\theta
+\right) \tag{7.1-15}
+$$
+
+**Stage 2 — UT 전체 GCS 회전** (Eq. 7.1-11):
+
+Stage 1 결과를 UT의 GCS 방향 $(\Omega_{UT,\alpha}, \Omega_{UT,\beta}, \Omega_{UT,\gamma})$으로 최종 회전:
+
+$$
+\begin{bmatrix}
+F_{\theta}(\theta, \varphi) \\
+F_{\varphi}(\theta, \varphi)
+\end{bmatrix}
+=
+\begin{bmatrix}
+\cos\psi_{UT} & -\sin\psi_{UT} \\
+\sin\psi_{UT} & \cos\psi_{UT}
+\end{bmatrix}
+\begin{bmatrix}
+F''_{\theta,u}(\theta'_u, \varphi'_u) \\
+F''_{\varphi,u}(\theta'_u, \varphi'_u)
+\end{bmatrix} \tag{7.1-11}
+$$
+
+여기서 $\psi_{UT}$는 $(\Omega_{UT,\alpha}, \Omega_{UT,\beta}, \Omega_{UT,\gamma})$와 GCS 각도 $(\theta, \varphi)$로 Eq. 7.1-15 적용.
+
+> **현재 코드와의 차이:** 현재 `Get_UE_antenna_pattern()`은 1단계 회전(UT 전체 방향)만 수행한다. Handheld 모델에서는 안테나별 개별 회전(Stage 1)이 추가되어 **총 2단계 회전**이 필요하다.
+
+#### UT Calibration 방향
+
+| 시나리오 | $\Omega_{UT,\alpha}$ | $\Omega_{UT,\beta}$ | $\Omega_{UT,\gamma}$ |
+|:---:|:---:|:---:|:---:|
+| One-hand blockage (SNS) | $\text{uniform}[0°, 360°]$ | $45°$ | $0°$ |
+| Dual-hand blockage (SNS) | $\text{uniform}[0°, 360°]$ | $0°$ | $45°$ |
+| Hand + head blockage (SNS) | $\text{uniform}[0°, 360°]$ | $90°$ | $0°$ |
+| All other cases (default) | $\text{uniform}[0°, 360°]$ | $45°$ | $0°$ |
+
+#### Spatial Non-Stationarity (SNS) at UT Side — Section 7.6.14.2
+
+UT의 **90%**에 SNS를 적용한다. 각 usage scenario(Table 7.6.14.2-1)에 따라 안테나 위치별 power attenuation $\Gamma_{RX,u}$ (또는 $\Gamma_{TX,u}$)를 Table 7.6.14.2-2에서 결정한다.
+
+채널 계수 적용 (Step 11):
+
+$$
+H'_{u,s,\text{NLOS}} = \sqrt{\Gamma_{RX,u}} \cdot H_{u,s,\text{NLOS}} \quad \text{(Eq. 7.5-28에서 적용)} \tag{7.6.14.2}
+$$
+
+$$
+H'_{u,s,\text{LOS}} = \sqrt{\Gamma_{RX,u}} \cdot H_{u,s,\text{LOS}} \quad \text{(Eq. 7.5-29에서 적용)}
+$$
+
+> $\Gamma$는 power 비율이므로 amplitude에는 $\sqrt{\Gamma}$를 곱한다.
+
+#### Optional: Antenna Imbalance
+
+Handheld UT에서 선택적으로 안테나 port별 랜덤 loss를 적용할 수 있다. UL/DL 방향에 독립적으로 적용 가능하며, **기본값은 imbalance 없음**이다.
+
+**Note:** Full calibration (Table 7.8-2)에서는 UT 안테나 패턴 = **Isotropic** ($G_{E,\max} = 0$ dBi). Handheld 모델은 추가 calibration (Table 7.8-2A)에서 적용한다.
 
 ---
 
@@ -1408,6 +1637,66 @@ $$
 | UT antenna pattern | Isotropic |
 | Polarization | $P=2$ → BS: X-pol ($\pm 45°$), UT: X-pol ($0°/+90°$) |
 | Metrics | 1) Coupling loss, 2) Wideband SIR, 3) DS/AS CDFs, 4) PRB SVD CDFs |
+
+### Table 7.8-2A: Additional Full Calibration (Simulation assumptions for full calibration)
+
+> Table 7.8-2에서 명시되지 않은 파라미터는 Table 7.8-2의 값을 따른다.
+> UMa 및 UMi-Street Canyon의 6 GHz 캐리어에 대해 Table 7.8-2의 simulation assumption과 updated channel modeling을 사용한 calibration도 추가 calibration의 일부이다.
+> 6 GHz calibration 추가 가정: SCS 15 kHz, UT attachment은 RSRP (formula) from BS port 0, BS antenna config 1/2 모두 적용, UT antenna config/pattern/polarization modeling은 **UT antenna config A**로 표기.
+
+| Parameter | Values |
+|---|---|
+| **Scenarios** | UMa, UMi-Street Canyon, **SMa** |
+| **Carrier Frequency** | 7 GHz, (optional) 15 GHz |
+| **BS antenna downtilting** | SMa (ISD=1299m): mechanical downtilt $95°$ |
+| | SMa (ISD=1732m): mechanical downtilt $92°$ |
+| | UMa, UMi-Street Canyon: electrical downtilt as in Table 7.8-1 |
+| **BS antenna configurations** | **Config 3** (UMi, UMa, SMa @ 7 GHz): $M_g=N_g=1$, $M=8$, $N=16$, $P=2$, $d_H=d_V=0.5\lambda$ → metrics 1), 2), 3), 4) |
+| | **(optional) Config 4** (UMa @ 7 & 15 GHz): $M_g=N_g=1$, $M=64$, $N=16$, $P=2$, $d_H=d_V=0.5\lambda$ → metrics 1), 2), 3), 4) |
+| **BS Polarized antenna modelling** | Model-2 in Clause 7.3.2 |
+| **BS port mapping** | Config 3 (UMi, UMa, SMa @ 7 GHz): $M_p=8$, $N_p=16$, each antenna element → 1 port |
+| | (optional) Config 4 (UMa @ 7 & 15 GHz): $M_p=16$, $N_p=16$ |
+| | $M_p$, $N_p$: panel 내 vertical, horizontal TXRU 수 (per polarization) |
+| **BS Tx power** | 49 dBm for SMa |
+| **Bandwidth** | 20 MHz (7 GHz), (optional) 200 MHz (7 & 15 GHz) |
+| **UT attachment** | RSRP (formula) from BS port 0 |
+| **UT distribution** | SMa: 20% outdoor, 80% indoor |
+| | Indoor 중 90% residential buildings, 10% commercial buildings |
+| | Indoor UT는 건물 유형별 모든 층에 균일 분포 |
+| **UT array orientation** | **Config B, C**: $\Omega_{UT,\alpha} \sim U[0°,360°]$, $\Omega_{UT,\beta}=45°$, $\Omega_{UT,\gamma}=0°$ |
+| | **Config D**: $\Omega_{UT,\alpha}=0°$, $\Omega_{UT,\beta}=0°$, $\Omega_{UT,\gamma}=0°$ |
+| **UT antenna configurations** | **Config B** (7 GHz): **4 antenna port**, single polarization, handheld device antenna model, 후보 위치 **(1, 7, 3, 5)** (Clause 7.3) |
+| | **(optional) Config C** (15 GHz): **16 antenna port**, dual polarization, handheld device antenna model, 후보 위치 **(1,2,3,4,5,6,7,8)** (Clause 7.3) |
+| | **(metric 5 전용) Config D**: **8 antenna port**, single polarization, handheld device antenna model, 후보 위치 **(1,2,3,4,5,6,7,8)** (Clause 7.3) |
+| **UT antenna pattern** | Config B, C, D: **Directional antenna** for handheld UT (Clause 7.3, Table 7.3-2) |
+| **UT Polarized antenna modelling** | Config B, C, D: **Directional antenna** for handheld UT (Clause 7.3) |
+| **O2I penetration loss** | SMa: **low-loss A model** |
+| **SCS assumption** | 30 kHz |
+| **Additional metrics** | 5) UT LCS에서의 handheld UT 안테나 field pattern $F'_{u,\theta'}$, $F'_{u,\varphi'}$ (UT antenna Config D 사용) |
+
+#### UT Antenna Config 요약
+
+| Config | 주파수 | 포트 수 | Polarization | 후보 위치 | 용도 |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| **A** | 6 GHz | Table 7.8-2와 동일 | Table 7.8-2와 동일 | — | 6 GHz 추가 calibration |
+| **B** | 7 GHz | 4 | Single | (1, 7, 3, 5) | Metrics 1~4 |
+| **C** | 15 GHz | 16 | Dual | (1,2,3,4,5,6,7,8) | Metrics 1~4 (optional) |
+| **D** | — | 8 | Single | (1,2,3,4,5,6,7,8) | Metric 5 (field pattern) |
+
+> **핵심 차이점 (Table 7.8-2 vs 7.8-2A):**
+> - Table 7.8-2: UT antenna pattern = **Isotropic**, P=2 X-pol
+> - Table 7.8-2A: UT antenna pattern = **Directional (handheld, Table 7.3-2)**, Clause 7.3의 handheld device antenna model 적용
+> - Table 7.8-2A는 **SMa** 시나리오가 추가됨
+> - Table 7.8-2A의 BS 안테나는 Config 3/4로 **대규모 어레이** ($M \times N$ = $8 \times 16$ 또는 $64 \times 16$)
+
+#### BS Antenna Config 요약
+
+| Config | 시나리오 | $M$ | $N$ | $P$ | $M_g$ | $N_g$ | 포트 매핑 |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **1** (Table 7.8-2) | UMa, UMi, InH | 4 | 4 | 2 | 1 | 2 | 16 elem/pol/panel → 1 CRS port |
+| **2** (Table 7.8-2) | UMa, UMi, InH | 2 | 2 | 1 | 1 | 1 | Each element → 1 port |
+| **3** (Table 7.8-2A) | UMi, UMa, SMa @ 7G | 8 | 16 | 2 | 1 | 1 | Each element → 1 port ($M_p=8, N_p=16$) |
+| **4** (Table 7.8-2A, opt) | UMa @ 7G/15G | 64 | 16 | 2 | 1 | 1 | $M_p=16, N_p=16$ |
 
 ---
 

@@ -16,6 +16,7 @@ cfg_FullCal/
 FullCal_UMa_Config1_6GHz/
 FullCal_UMa_Config2_6GHz/
 doc/R1-165975
+doc/R1-2506406
 *.py
 
 v2/
@@ -23,3 +24,18 @@ ns3_reference/
 reference_code/
 *.pdf
 *.json
+5g-lena/
+
+*.pptx
+*.mlx
+*.ipynb
+*.png
+*.pdf
+*.m
+*.csv
+*.doc
+*.docx
+*.asv
+*.txt
+
+FullCal_UMa_Config3_7GHz/

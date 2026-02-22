@@ -594,17 +594,6 @@ void MS::Compute_RBs_SINR( void )
 			rbs_rx.push_back(rx_sinr);
 		}
 
-		if(Scheduling_Type == 2 && comp_mode[self_idx] == 1)
-		{
-			//rx_sinr = Compute_Tone_SINR_NCJT( links[self_idx].adj_sector[1], freq_idx);
-			rx_sinr = Compute_Tone_SINR_NCJT( links[self_idx].comp_sector_idx, freq_idx);
-			if (rx_sinr)
-			{
-				rbs_rx.push_back(rx_sinr);
-				if (links[self_idx].ACK == 1)
-					comp_mode_rx_flag =  1;
-			}
-		}	
 	}
 
 	if (links[self_idx].ACK == 1) // Previously successed or initial transmission case
@@ -758,15 +747,7 @@ void MS::Compute_Num_Bin_Symbol(void)
 				rbs_rx.push_back(rx_sinr);
 			}
 
-			if(Scheduling_Type == 2 && comp_mode[self_idx] == 1)
-			{
-				//rx_sinr = Compute_Tone_SINR_NCJT( links[self_idx].adj_sector[1], freq_idx);
-				rx_sinr = Compute_Tone_SINR_NCJT( links[self_idx].comp_sector_idx, freq_idx);
-				if (rx_sinr)
-					rbs_rx.push_back(rx_sinr);
-			}			
-
-		}
+			}
 		_num_traffic = (int)(num_freq_per_rbs * num_ofdm_symbols_per_subband_per_1ms * rbs_rx.size() * (1. - overhead) * _mod_type);
 	}
 	else // Previously successed or initial transmission case
@@ -795,17 +776,7 @@ void MS::Compute_Num_Bin_Symbol(void)
 				rbs_rx.push_back(rx_sinr);
 			}
 
-			if(Scheduling_Type == 2 && comp_mode[self_idx] == 1)
-			{
-				//rx_sinr = Compute_Tone_SINR_NCJT( links[self_idx].adj_sector[1], freq_idx);
-				rx_sinr = Compute_Tone_SINR_NCJT( links[self_idx].comp_sector_idx, freq_idx);
-				if (rx_sinr)
-				{
-					rbs_rx.push_back(rx_sinr);
-					comp_mode_rx_flag =  1;
-				}
-			}	
-		}
+			}
 
 		if (_mcs_idx <= 4)       { _mod_type = QPSK; }
 		else if (_mcs_idx <= 10) { _mod_type = QAM16; }
@@ -1162,47 +1133,20 @@ Real MS::Compute_Tone_SINR_CJT(int sec_idx, int rb_idx)
 	Real noise = dBm2linear(thermal_noise + (10. * log10(bandwidth)) + MS_noisefig);
 
 	int comp_sector_idx = links[self_idx].adj_sector[1];
-	int comp_bs_idx = (int)comp_sector_idx / 3.;
 
-		// jhnoh 220901
-	if ( comp_mode[self_idx] == 1 && 
-		 g_comp_mode && 
-		 sector[comp_sector_idx].ppschedulewrite[0][0].ue_selected == self_idx )
-	{
-		Real linear_signal       = dBm2linear(links[self_idx].str_signal); // dBm2linear(bs_maxpower - channel[bs_idx][self_idx].pathloss_final);
-		Real linear_interference = dBm2linear(links[self_idx].interference);
-		linear_interference       -= dBm2linear(links[self_idx].intf_w_rnd_RSRP[comp_sector_idx]);
+	Real linear_signal       = dBm2linear(links[self_idx].str_signal); // dBm2linear(bs_maxpower - channel[bs_idx][self_idx].pathloss_final);
+	Real linear_interference = dBm2linear(links[self_idx].interference);
+	linear_interference       -= dBm2linear(links[self_idx].intf_w_rnd_RSRP[comp_sector_idx]);
 
-		H_bar1 = sqrt(linear_signal) * (H_m[0][rb_idx]) * PMI_vector[0][rb_idx][t % cqi_history_length];
+	H_bar = sqrt(linear_signal) * (H_m[0][rb_idx]) * PMI_vector[0][rb_idx][t % cqi_history_length];
 
-		Real comp_sector_static_gain = dBm2linear(links[self_idx].static_gain[1].first); // dBm2linear(bs_maxpower - channel[comp_bs_idx][self_idx].pathloss_final);
-		H_bar2 = sqrt(comp_sector_static_gain) * H_m[1][rb_idx] * PMI_vector[1][rb_idx][t % cqi_history_length];
-		H_bar = H_bar1 + H_bar2;
+	Real comp_sector_static_gain = dBm2linear(links[self_idx].intf_w_rnd_RSRP[comp_sector_idx]); //dBm2linear(links[self_idx].static_gain[1].first); // dBm2linear(bs_maxpower - channel[comp_bs_idx][self_idx].pathloss_final);
+	H_inf = sqrt(comp_sector_static_gain) * H_m[1][rb_idx] * PMI_vector[1][rb_idx][t % cqi_history_length];
 
-		u = H_bar.adjoint() * (H_bar * H_bar.adjoint() + (linear_interference + noise) * Identity).inverse();
-		A = (u * H_bar * H_bar.adjoint() * u.adjoint()).norm();
-		B = 0;
-		C = (linear_interference + noise) * (u * u.adjoint()).norm();
-	}
-	else
-	{
-		Real linear_signal       = dBm2linear(links[self_idx].str_signal); // dBm2linear(bs_maxpower - channel[bs_idx][self_idx].pathloss_final);
-		Real linear_interference = dBm2linear(links[self_idx].interference);
-		linear_interference       -= dBm2linear(links[self_idx].intf_w_rnd_RSRP[comp_sector_idx]);
-
-		H_bar = sqrt(linear_signal) * (H_m[0][rb_idx]) * PMI_vector[0][rb_idx][t % cqi_history_length];
-
-		int comp_sector_idx = links[self_idx].adj_sector[1];
-		int comp_bs_idx = (int)comp_sector_idx / 3.;
-
-		Real comp_sector_static_gain = dBm2linear(links[self_idx].intf_w_rnd_RSRP[comp_sector_idx]); //dBm2linear(links[self_idx].static_gain[1].first); // dBm2linear(bs_maxpower - channel[comp_bs_idx][self_idx].pathloss_final);
-		H_inf = sqrt(comp_sector_static_gain) * H_m[1][rb_idx] * PMI_vector[1][rb_idx][t % cqi_history_length];
-
-		u = H_bar.adjoint() * (H_bar * H_bar.adjoint() + H_inf * H_inf.adjoint() + (linear_interference + noise) * Identity).inverse();
-		A = (u * H_bar * H_bar.adjoint() * u.adjoint()).norm();
-		B = (u * H_inf * H_inf.adjoint() * u.adjoint()).norm();
-		C = (linear_interference + noise) * (u * u.adjoint()).norm();			
-	}
+	u = H_bar.adjoint() * (H_bar * H_bar.adjoint() + H_inf * H_inf.adjoint() + (linear_interference + noise) * Identity).inverse();
+	A = (u * H_bar * H_bar.adjoint() * u.adjoint()).norm();
+	B = (u * H_inf * H_inf.adjoint() * u.adjoint()).norm();
+	C = (linear_interference + noise) * (u * u.adjoint()).norm();			
 	Received_SINR = A/(B+C);
 	return Received_SINR;
 }
@@ -1221,10 +1165,7 @@ Real MS::Compute_Tone_SINR_NCJT(int sec_idx, int rb_idx)
 	{
 		if ( ppSchedulerRead[rb_idx][0].ue_selected == self_idx )
 		{
-			if ( comp_mode[self_idx] && t > 1000 )
-				test111 = 12;
-
-			num_rx_rb++;
+				num_rx_rb++;
 
 			int    bs_idx              = (int) sec_idx/3.;
 			Real noise               = dBm2linear(thermal_noise + (10. * log10(bandwidth)) + MS_noisefig);

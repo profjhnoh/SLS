@@ -256,10 +256,6 @@ extern Sector* mTRP_sector;
 
 
 extern int num_of_threads;
-extern int * comp_mode;
-extern int g_comp_mode;
-extern int comp_ue_pct;
-extern int g_static_gain_ratio_comp;
 
 // SINR aggregation mode: 0 = average (default), 1 = minimum (conservative)
 extern int g_use_min_sinr_for_mcs;
@@ -282,7 +278,17 @@ extern Real g_chordal_alpha;                // Weight factor for Chordal Distanc
 // Singular Value CDF Collection
 extern int g_collect_singular_values;  // 0 = disable, 1 = enable
 
-extern int g_mTRP_mode;
+// Cluster parameter CSV dump
+extern int g_dump_cluster_params;  // 0 = disable, 1 = enable
+
+// Channel parameter version: 0=V19 (default), 1=old TR 38.901 (pre-V19)
+extern int channel_param_legacy;
+
+// Handheld UT antenna model (TR 38.901 Table 7.8-2A)
+extern int handheld_mode;            // 0=off, 1=handheld
+extern int handheld_num_ports;       // active ports (e.g., 4 for Config B)
+extern int handheld_port_indices[8]; // 1-based antenna position indices
+extern Real handheld_beta_deg;       // UT β angle (degrees)
 
 extern ofstream  Calibration_Debug_info;
 

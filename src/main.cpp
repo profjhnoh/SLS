@@ -112,7 +112,7 @@ void RunDrop(int drop_idx)
 	finish = clock();
 
 	duration = (Real)(finish - start) / CLOCKS_PER_SEC;
-	cout << duration << "초" << endl;
+	cout << duration << "sec" << endl;
 
 	if (Calibration_mode == 0)  // normal simulation
 	{

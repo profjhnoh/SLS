@@ -52,7 +52,7 @@ void Set_simul_param(int argc, char *argv[])
 		num_drop                 = int(Get_parameter(infile, "num_drops", 10000));
 		run_times                = int(Get_parameter(infile, "run_times", 1000));
 		num_MS_persector         = int(Get_parameter(infile, "num_user_per_sector", 10));
-		num_Indoor_TRxP          = int(Get_parameter(infile, "Indoor_TRxP", 1));
+		num_Indoor_TRxP          = 3;   // hardcoded: 3 sectors per BS
 		simple_num_BS            = int(Get_parameter(infile, "simple_num_BS", 19));
 		num_rb                   = int(Get_parameter(infile, "num_rb", 50));
 		fft_size                 = int(Get_parameter(infile, "fft_size", 1024));
@@ -101,9 +101,6 @@ void Set_simul_param(int argc, char *argv[])
 		N_pf                     = double(Get_parameter(infile, "N_pf", 50.));
 		SCHEDULE_DELAY           = int(Get_parameter(infile, "SCHEDULE_DELAY", 6));
 		num_of_threads           = int(Get_parameter(infile, "num_threads", 32));
-		g_comp_mode              = int(Get_parameter(infile, "g_comp_mode", 0));
-		comp_ue_pct              = int(Get_parameter(infile, "comp_ue_pct", 5));
-		g_static_gain_ratio_comp = int(Get_parameter(infile, "g_static_gain_ratio_comp", 5));
 		g_use_min_sinr_for_mcs   = int(Get_parameter(infile, "use_min_sinr_for_mcs", 0));
 
 		// OLLA (Outer Loop Link Adaptation) parameters
@@ -124,7 +121,20 @@ void Set_simul_param(int argc, char *argv[])
 		// Singular Value CDF Collection
 		g_collect_singular_values = int(Get_parameter(infile, "collect_singular_values", 0));
 
-		g_mTRP_mode              = int(Get_parameter(infile, "g_mTRP_mode", 1));
+		// Cluster parameter CSV dump
+		g_dump_cluster_params = int(Get_parameter(infile, "dump_cluster_params", 0));
+
+		// Channel parameter version: 0=V19 (default), 1=old TR 38.901 (pre-V19)
+		channel_param_legacy     = int(Get_parameter(infile, "channel_param_legacy", 0));
+
+		// Handheld UT antenna model
+		handheld_mode            = int(Get_parameter(infile, "handheld_mode", 0));
+		handheld_beta_deg        = Real(Get_parameter(infile, "handheld_beta", 45.0));
+		handheld_num_ports       = int(Get_parameter(infile, "handheld_num_ports", 4));
+		handheld_port_indices[0] = int(Get_parameter(infile, "handheld_port_1", 1));
+		handheld_port_indices[1] = int(Get_parameter(infile, "handheld_port_2", 7));
+		handheld_port_indices[2] = int(Get_parameter(infile, "handheld_port_3", 3));
+		handheld_port_indices[3] = int(Get_parameter(infile, "handheld_port_4", 5));
 
 		cfg_BS_Tx_Power      = Real(Get_parameter(infile, "BS_Tx_Power", -9999));
 		cfg_UT_Noise_Figure  = Real(Get_parameter(infile, "UT_Noise_Figure", -9999));
@@ -224,7 +234,7 @@ void Set_simul_param(int argc, char *argv[])
 		num_drop = 100;
 		run_times = 2000;
 		num_MS_persector = 10;
-		num_Indoor_TRxP = 1;
+		num_Indoor_TRxP = 3;
 		simple_num_BS = 19;
 
 		Scheduling_Type = 1;         //// 1 = MU MIMO scheduling, 0 = roundrobin scheduling
@@ -276,64 +286,24 @@ void Set_simul_param(int argc, char *argv[])
 	{
 		num_BS      = 12;
 		num_SECTORS = num_BS * num_Indoor_TRxP;
-		if ( g_mTRP_mode == 1 )
-		{
-			num_mTRP         = 5;
-			num_mTRP_SECTORS = num_mTRP*3;
-		}
-		if ( g_mTRP_mode == 2 )
-		{
-			num_mTRP         = 12;
-			num_mTRP_SECTORS = num_mTRP*3;
-		}		
-		else
-		{
-			num_mTRP         = 0;
-			num_mTRP_SECTORS = 0;
-		}
+		num_mTRP         = 0;
+		num_mTRP_SECTORS = 0;
 	}
 	else if (test_environment == 6) //Dense_Urban_eMBB_C_Micro
 	{
 		num_BS = simple_num_BS;
 		//num_BS = 19;
 		num_SECTORS = num_BS * num_Indoor_TRxP;
-		if ( g_mTRP_mode == 1 )
-		{
-			num_mTRP         = num_BS*3;
-			num_mTRP_SECTORS = num_mTRP*3;
-		}
-		else if (g_mTRP_mode == 2)
-		{
-			num_mTRP         = num_BS*3*3;
-			num_mTRP_SECTORS = num_mTRP*3;
-		}
-		else
-		{
-			num_mTRP         = 0;
-			num_mTRP_SECTORS = 0;
-		}
+		num_mTRP         = 0;
+		num_mTRP_SECTORS = 0;
 	}
 	else
 	{
 		num_BS = simple_num_BS;
 		//num_BS = 19;
 		num_SECTORS = num_BS * 3;
-
-		if ( g_mTRP_mode == 1 )
-		{
-			num_mTRP         = num_BS*3;
-			num_mTRP_SECTORS = num_mTRP*3;
-		}
-		else if (g_mTRP_mode == 2)
-		{
-			num_mTRP         = num_BS*3*3;
-			num_mTRP_SECTORS = num_mTRP*3;
-		}		
-		else
-		{
-			num_mTRP         = 0;
-			num_mTRP_SECTORS = 0;
-		}
+		num_mTRP         = 0;
+		num_mTRP_SECTORS = 0;
 	}
 
 
@@ -357,71 +327,80 @@ void Set_simul_param(int argc, char *argv[])
 
 
 	
-	cout << "num_drops           : " << num_drop << endl;
-	cout << "run_times           : " << run_times << endl;
-	cout << "num_user_per_sector : " << num_MS_persector << endl;
-	cout << "num_Indoor_TRxP     : " << num_Indoor_TRxP << endl;
-	cout << "num_rx_antenna      : " << NUM_RX << endl;
-	cout << "num_tx_antenna      : " << NUM_TX << endl;
-	cout << "num_rx_antenna_port : " << NUM_RX_Port << endl;
-	cout << "num_tx_antenna_port : " << NUM_TX_Port << endl;
-	cout << "num_sectors         : " << num_SECTORS << endl;
-	cout << "num_neighbor        : " << num_neighbor << endl;
-	cout << "grid_interval       : " << grid_interval << endl;
-	cout << "num_of_threads      : " << num_of_threads << endl;
-	cout << "g_comp_mode         : " << g_comp_mode << endl;
-	cout << "comp_ue_pct         : " << comp_ue_pct << endl;
-	cout << "use_min_sinr_for_mcs: " << g_use_min_sinr_for_mcs << " (0=avg, 1=min)" << endl;
-	cout << "olla_enable         : " << g_olla_enable << " (0=off, 1=on)" << endl;
+	cout << "num_drops               : " << num_drop << endl;
+	cout << "run_times               : " << run_times << endl;
+	cout << "num_user_per_sector     : " << num_MS_persector << endl;
+	cout << "num_rx_antenna          : " << NUM_RX << endl;
+	cout << "num_tx_antenna          : " << NUM_TX << endl;
+	cout << "num_rx_antenna_port     : " << NUM_RX_Port << endl;
+	cout << "num_tx_antenna_port     : " << NUM_TX_Port << endl;
+	cout << "num_sectors             : " << num_SECTORS << endl;
+	cout << "num_neighbor            : " << num_neighbor << endl;
+	cout << "grid_interval           : " << grid_interval << endl;
+	cout << "num_of_threads          : " << num_of_threads << endl;
+	cout << "use_min_sinr_for_mcs    : " << g_use_min_sinr_for_mcs << " (0=avg, 1=min)" << endl;
+	cout << "olla_enable             : " << g_olla_enable << " (0=off, 1=on)" << endl;
 	if (g_olla_enable) {
-		cout << "  olla_window_size  : " << g_olla_window_size << " (moving window)" << endl;
-		cout << "  olla_target_bler  : " << g_olla_target_bler * 100 << " %" << endl;
-		cout << "  olla_bler_margin  : " << g_olla_bler_margin * 100 << " % (hysteresis)" << endl;
-		cout << "  olla_step_down    : " << g_olla_step_down << " dB" << endl;
-		cout << "  olla_step_up      : " << g_olla_step_up << " dB" << endl;
-		cout << "  olla_init_offset  : " << g_olla_init_offset << " dB" << endl;
-		cout << "  olla_offset_range : [" << g_olla_min_offset << ", " << g_olla_max_offset << "] dB" << endl;
+		cout << "  ├─ window_size        : " << g_olla_window_size << " (moving window)" << endl;
+		cout << "  ├─ target_bler        : " << g_olla_target_bler * 100 << " %" << endl;
+		cout << "  ├─ bler_margin        : " << g_olla_bler_margin * 100 << " % (hysteresis)" << endl;
+		cout << "  ├─ step_down          : " << g_olla_step_down << " dB" << endl;
+		cout << "  ├─ step_up            : " << g_olla_step_up << " dB" << endl;
+		cout << "  ├─ init_offset        : " << g_olla_init_offset << " dB" << endl;
+		cout << "  └─ offset_range       : [" << g_olla_min_offset << ", " << g_olla_max_offset << "] dB" << endl;
 	}
-	cout << "Scheduling_Type     : " << Scheduling_Type << endl;
+	cout << "Scheduling_Type         : " << Scheduling_Type << endl;
 	if (Scheduling_Type == 1) {
-		cout << "  mumimo_algorithm  : " << g_mumimo_scheduling_algorithm << " (0=SUS, 1=Chordal)" << endl;
+		cout << "  ├─ algorithm          : " << g_mumimo_scheduling_algorithm << " (0=SUS, 1=Chordal)" << endl;
 		if (g_mumimo_scheduling_algorithm == 1) {
-			cout << "  chordal_alpha     : " << g_chordal_alpha << endl;
+			cout << "  └─ chordal_alpha      : " << g_chordal_alpha << endl;
 		}
 	}
-	cout << "folder_name         : " << folder_name << endl;
+	if (channel_param_legacy)
+		cout << "channel_param_legacy    : " << channel_param_legacy << " (old TR 38.901 pre-V19)" << endl;
+	cout << "folder_name             : " << folder_name << endl;
+	if (handheld_mode) {
+		cout << "handheld_mode           : " << handheld_mode << endl;
+		cout << "  ├─ beta               : " << handheld_beta_deg << " deg" << endl;
+		cout << "  └─ ports              : " << handheld_num_ports << " (";
+		for (int i = 0; i < handheld_num_ports; i++) {
+			if (i > 0) cout << ",";
+			cout << handheld_port_indices[i];
+		}
+		cout << ")" << endl;
+	}
 
 	switch (test_environment)
 	{
 	case InH_eMBB_A:
-		cout << "test_environment    : InH_eMBB_A" << endl;
+		cout << "test_environment        : InH_eMBB_A" << endl;
 		break;
 	case InH_eMBB_B:
-		cout << "test_environment    : InH_eMBB_B" << endl;
+		cout << "test_environment        : InH_eMBB_B" << endl;
 		break;
 	case InH_eMBB_C:
-		cout << "test_environment    : InH_eMBB_C" << endl;
+		cout << "test_environment        : InH_eMBB_C" << endl;
 		break;
 	case Dense_Urban_eMBB_A:
-		cout << "test_environment    : Dense_Urban_eMBB_A" << endl;
+		cout << "test_environment        : Dense_Urban_eMBB_A" << endl;
 		break;
 	case Dense_Urban_eMBB_B:
-		cout << "test_environment    : Dense_Urban_eMBB_B" << endl;
+		cout << "test_environment        : Dense_Urban_eMBB_B" << endl;
 		break;
 	case Dense_Urban_eMBB_C_Macro:
-		cout << "test_environment    : Dense_Urban_eMBB_C_Macro" << endl;
+		cout << "test_environment        : Dense_Urban_eMBB_C_Macro" << endl;
 		break;
 	case Dense_Urban_eMBB_C_Micro:
-		cout << "test_environment    : Dense_Urban_eMBB_C_Micro" << endl;
+		cout << "test_environment        : Dense_Urban_eMBB_C_Micro" << endl;
 		break;
 	case Rural_eMBB_A:
-		cout << "test_environment    : Rural_eMBB_A" << endl;
+		cout << "test_environment        : Rural_eMBB_A" << endl;
 		break;
 	case Rural_eMBB_B:
-		cout << "test_environment    : Rural_eMBB_B" << endl;
+		cout << "test_environment        : Rural_eMBB_B" << endl;
 		break;
 	case Rural_eMBB_C:
-		cout << "test_environment    : Rural_eMBB_C" << endl;
+		cout << "test_environment        : Rural_eMBB_C" << endl;
 		break;
 	default:
 		cout << "check test_environment input file" << endl;
@@ -431,35 +410,35 @@ void Set_simul_param(int argc, char *argv[])
 	switch (pathloss_model)
 	{
 	case InH_A:
-		cout << "pathloss_model      : InH_A" << endl;
+		cout << "pathloss_model          : InH_A" << endl;
 		break;
 	case InH_B:
-		cout << "pathloss_model      : InH_B" << endl;
+		cout << "pathloss_model          : InH_B" << endl;
 		break;
 	case UMa_A:
-		cout << "pathloss_model      : UMa_A" << endl;
+		cout << "pathloss_model          : UMa_A" << endl;
 		break;
 	case UMa_B:
-		cout << "pathloss_model      : UMa_B" << endl;
+		cout << "pathloss_model          : UMa_B" << endl;
 		break;
 	case UMi_A:
-		cout << "pathloss_model      : UMi_A" << endl;
+		cout << "pathloss_model          : UMi_A" << endl;
 		break;
 	case UMi_B:
-		cout << "pathloss_model      : UMi_B" << endl;
+		cout << "pathloss_model          : UMi_B" << endl;
 		break;
 	case RMa_A:
-		cout << "pathloss_model      : RMa_A" << endl;
+		cout << "pathloss_model          : RMa_A" << endl;
 		break;
 	case RMa_B:
-		cout << "pathloss_model      : RMa_B" << endl;
+		cout << "pathloss_model          : RMa_B" << endl;
 		break;
 	case InH_ETRI:
-		cout << "pathloss_model      : InH_ETRI" << endl;
+		cout << "pathloss_model          : InH_ETRI" << endl;
 		break;
 	case UMi_ETRI:
-		cout << "pathloss_model      : UMi_ETRI" << endl;
-		break;				
+		cout << "pathloss_model          : UMi_ETRI" << endl;
+		break;
 	default:
 		cout << "check pathloss_model input file" << endl;
 		break;

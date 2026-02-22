@@ -53,7 +53,14 @@
       "Bash(tee:*)",
       "Bash(echo:*)",
       "Bash(git ls-tree:*)",
-      "Bash(git stash pop:*)"
+      "Bash(git stash pop:*)",
+      "Bash(printenv:*)",
+      "Bash(cmd //c \"echo %PATH%\")",
+      "Bash(cmd //c \"where /r C:\\\\ g++.exe 2>nul\")",
+      "Bash(xxd:*)",
+      "mcp__ide__executeCode",
+      "Bash(./EMIMO_SLS.exe:*)",
+      "Bash(\"D:\\\\Dropbox\\\\SLS\\\\2026\\\\Tbps_DLSLS_20251010\\\\EMIMO_SLS.exe\" \"D:\\\\Dropbox\\\\SLS\\\\2026\\\\Tbps_DLSLS_20251010\\\\cfg_FullCal\\\\FullCal_UMa_Config3_7GHz_HandheldB.cfg\")"
     ],
     "deny": [],
     "ask": []

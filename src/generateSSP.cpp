@@ -21,7 +21,7 @@ void Generate_SSP()
 
 	if (TYPE == 11)   //// Get all BS-MS channel coefficient
 	{
-		for (int bs_idx = 0; bs_idx < num_BS + num_mTRP; bs_idx++)
+		for (int bs_idx = 0; bs_idx < num_BS; bs_idx++)
 		{
 			for (int ms_idx = 0; ms_idx < num_MS; ms_idx++)
 			{
@@ -31,7 +31,7 @@ void Generate_SSP()
 	}
 	else           ////// Get MS - adjacent_BS channel coefficient
 	{
-		for (int bs_idx = 0; bs_idx < num_BS + num_mTRP; bs_idx++)
+		for (int bs_idx = 0; bs_idx < num_BS; bs_idx++)
 		{
 			for (int ms_idx = 0; ms_idx < num_MS; ms_idx++)
 			{
@@ -56,7 +56,7 @@ void Compute_Channel_Coef()
 			{
 				int adj_sector_num_to_BS = (int)(links[ms_idx]._sector_in_control);
 				int sec_idx = adj_sector_num_to_BS;  // InH 1TRxP: bs_idx == sector
-				channel[adj_sector_num_to_BS][ms_idx].GetNewChannel(adj_sector_num_to_BS, ms_idx, sec_idx);
+				channel[adj_sector_num_to_BS][ms_idx].GetChannelImpulseResponse(adj_sector_num_to_BS, ms_idx, sec_idx);
 			}
 		}
 		else  // Get MS - adjacent_BS channel coefficient
@@ -72,18 +72,10 @@ void Compute_Channel_Coef()
 					{
 						int adj_sector_num_to_BS;
 						int adj_sector;
-						if ( g_comp_mode == 1 && coeff_idx == 1)
-						{
-							adj_sector_num_to_BS = (int)(links[ms_idx].comp_sector_idx / 3);
-							adj_sector           = links[ms_idx].comp_sector_idx;
-						}
-						else
-						{
-							adj_sector_num_to_BS = (int)(links[ms_idx].adj_sector[coeff_idx] / 3);
-							adj_sector = links[ms_idx].adj_sector[coeff_idx];
-						}
+						adj_sector_num_to_BS = (int)(links[ms_idx].adj_sector[coeff_idx] / 3);
+						adj_sector = links[ms_idx].adj_sector[coeff_idx];
 						int sec_idx = adj_sector % 3;
-						channel[adj_sector_num_to_BS][ms_idx].GetNewChannel(adj_sector_num_to_BS, ms_idx, sec_idx);
+						channel[adj_sector_num_to_BS][ms_idx].GetChannelImpulseResponse(adj_sector_num_to_BS, ms_idx, sec_idx);
 					}
 				#if ENABLE_MULTITHREADING
 				}

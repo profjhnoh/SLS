@@ -39,7 +39,7 @@ public:
 	void Set_circular_angle_spread();
 	void Precompute_ray_angles();
 
-	void GetNewChannel(int bs_idx, int ms_idx, int sector_idx);
+	void GetChannelImpulseResponse(int bs_idx, int ms_idx, int sector_idx);
 	void Allocate_H_usn_memory(int N);
 	void Allocate_H_usn_Init_memory(int N);
 	void Reset_H_usn_memory();

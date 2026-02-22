@@ -203,9 +203,6 @@ void PerDropStatistics(int drop_idx)
 		OutputFile << "    " << "N_pf                    : " << N_pf                    << endl;
 		OutputFile << "    " << "SCHEDULE_DELAY          : " << SCHEDULE_DELAY          << endl;
 		OutputFile << "    " << "num_of_threads          : " << num_of_threads          << endl;
-		OutputFile << "    " << "g_comp_mode             : " << g_comp_mode             << endl;
-		OutputFile << "    " << "comp_ue_pct             : " << comp_ue_pct             << endl;
-		OutputFile << "    " << "g_static_gain_ratio_comp: " << g_static_gain_ratio_comp<< endl;
 		OutputFile << endl;
 
 		OutputFile << "Results : " << drop_idx + 1 << endl;

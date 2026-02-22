@@ -159,34 +159,6 @@ void Sector::Scheduling_NCJT( int ms_idx )
 				}
 			}
 
-			int scheduled_ue = ue_in_control[max_ue];
-			int comp_sector_idx = links[scheduled_ue].comp_sector_idx;
-			
-			if (comp_mode[scheduled_ue] == 1) {
-			if ( comp_sector_idx < num_SECTORS )
-			{
-				
-				if ( g_comp_mode && 
-					comp_mode[scheduled_ue] && 
-					sector[links[scheduled_ue].comp_sector_idx].schedule_done_flag == 0)
-				{
-					sector[links[scheduled_ue].comp_sector_idx].Scheduling_NCJT( scheduled_ue );
-				}
-			}
-			else
-			{
-				int mTRP_idx = (int)(comp_sector_idx/3);
-				if ( g_comp_mode && 
-					comp_mode[scheduled_ue] && 
-					sector[3*mTRP_idx].schedule_done_flag   == 0 && 
-					sector[3*mTRP_idx+1].schedule_done_flag == 0 && 
-					sector[3*mTRP_idx+2].schedule_done_flag == 0
-					)
-				{
-						sector[links[scheduled_ue].comp_sector_idx].Scheduling_NCJT( scheduled_ue );
-				}				
-			}
-			}
 		}
 	}
 	else
@@ -228,9 +200,7 @@ void Sector::Set_AVR_Cqi_NCJT( SCHEDULE_DECISION comp_schedule_info )
 			Real avr_SINR    = 0.;
 			//int comp_sec_idx   = links[ue_in_control[ue_idx]].adj_sector[1];
 			int comp_sec_idx   = links[ue_in_control[ue_idx]].comp_sector_idx;
-			int comp_mode_flag = comp_mode[ue_in_control[ue_idx]] 
-			&& (sector[comp_sec_idx].schedule_done_flag == 0)
-			&& (sector[comp_sec_idx].ppschedulewrite[0][0].ue_selected == ue_in_control[ue_idx]);
+			int comp_mode_flag = 0;
 
 			int comp_ue_idx_in_adjsec = sector[comp_sec_idx].ue_in_control.size() 
 			            +getIndex( sector[comp_sec_idx].ue_in_comp , ue_in_control[ue_idx] );

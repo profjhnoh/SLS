@@ -45,7 +45,7 @@ void Measure()
 	}
 
 	
-	if ( t > 50 ) //&& g_comp_mode )
+	if ( t > 50 )
 	{
 		for (int idx = 0; idx < num_MS; idx++)
 		{
@@ -54,21 +54,6 @@ void Measure()
 		}
 
 		sort(per_ue_thru, per_ue_thru + num_MS, comparator_throughput);
-		int cell_edge_ue_idx = (int)(num_MS * (Real)comp_ue_pct/100.); // cell edge user
-		for (int idx = 0; idx < num_MS; idx++)
-		{
-			comp_mode[idx] = 0;
-		}
-
-		for (int idx = 0; idx < cell_edge_ue_idx; idx++)
-		{
-			int ue_idx = per_ue_thru[idx].first;
-			//Real static_gain_ratio = links[ue_idx].static_gain[0].first - links[ue_idx].static_gain[1].first;
-			//if (static_gain_ratio < g_static_gain_ratio_comp && g_comp_mode )
-			comp_mode[ue_idx] = 1;
-		}
-
-		
 		for (int idx = 0; idx < num_MS; idx++)
 		{
 			int ue_idx   = per_ue_thru[idx].first;

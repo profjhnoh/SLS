@@ -81,7 +81,7 @@ Real Get_LCS_theta(Real alpha, Real beta, Real gamma, Real GCS_theta, Real GCS_p
 Real Get_LCS_pi(Real alpha, Real beta, Real gamma, Real GCS_theta, Real GCS_pi);
 
 Real Get_BS_antenna_pattern(Real theta_GCS, Real pi_GCS, int bs_idx, int sector_index, Real &F_theta_GCS_P1, Real &F_pi_GCS_P1, Real &F_theta_GCS_P2, Real &F_pi_GCS_P2);
-Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int sector_index, Real &F_theta_GCS_P1, Real &F_pi_GCS_P1, Real &F_theta_GCS_P2, Real &F_pi_GCS_P2);
+Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int sector_index, Real &F_theta_GCS_P1, Real &F_pi_GCS_P1, Real &F_theta_GCS_P2, Real &F_pi_GCS_P2, int port_idx = -1);
 
 ComplexReal  Get_BS_antenna_field_pattern(LOCATION interferer, int _bs_idx, int _sec_idx, int tilt_z_idx, int tilt_a_idx, Real v_angle_theta, Real h_angle_pi, Real F_theta_GCS_P1, Real F_pi_GCS_P1, Real F_theta_GCS_P2, Real F_pi_GCS_P2, ComplexReal  &F_tx_theta, ComplexReal  &F_tx_pi);
 ComplexReal  Get_UE_antenna_field_pattern(LOCATION UE , int M, int N, int P, int ms_idx, int sector_idx, int tilt_z_idx, int tilt_a_idx, Real v_angle_theta, Real h_angle_pi, Real F_theta_GCS_P1, Real F_pi_GCS_P1, Real F_theta_GCS_P2, Real F_pi_GCS_P2, ComplexReal  &F_rx_theta_panel_1, ComplexReal  &F_rx_pi_panel_1, ComplexReal  &F_rx_theta_panel_2, ComplexReal  &F_rx_pi_panel_2);
@@ -738,19 +738,6 @@ void LINK::Get_signal_interference_old()
 		} // BS index loop end
 		#endif
 
-		if ( g_comp_mode )
-		{
-			static_gain  [comp_sector_idx].first     = signal;
-			static_gain  [comp_sector_idx].second    = comp_sector_idx;
-
-			analog_beam_selection[comp_sector_idx].a = comp_azimuth_angle_idx_selected;
-			analog_beam_selection[comp_sector_idx].z = comp_zenith_angle_idx_selected;
-			analog_beam_selection[comp_sector_idx].p = comp_panel_idx_selected;
-
-			analog_beam_selection[comp_sector_idx].sector_a = comp_sector_a;
-			analog_beam_selection[comp_sector_idx].sector_z = comp_sector_z;
-		}
-
 		// The interference induced from the main sector to the signal of the comp sector
 		comp_interf_strength[0] = bs_maxpower + 10*log10(
 							channel[self_bs_idx][self_ms_idx].signal_RSRP_gain[self_sector_idx]
@@ -1209,123 +1196,6 @@ void LINK::Get_signal_interference_old()
 		} // BS index loop end
 		
 
-		if ( g_mTRP_mode == 1 || g_mTRP_mode == 2)
-		{
-			for (int mTRP_idx = num_BS; mTRP_idx < num_mTRP + num_BS; mTRP_idx++)
-			{
-				// 220811 jhnoh
-				channel_of_interest                 = &channel[mTRP_idx][self_ms_idx];
-				pathloss                            = channel_of_interest->pathloss;
-				RMS_delay                           = channel_of_interest->RMS_delay_spread;
-				AOA_spread                          = channel_of_interest->circular_angle_spread_AOA;
-				AOD_spread                          = channel_of_interest->circular_angle_spread_AOD;
-				distance                            = channel_of_interest->distance;
-				pathloss                            = channel_of_interest->pathloss_final;
-
-				for (int sector_idx = 0; sector_idx < 3; sector_idx++)
-				{
-					if ((mTRP_idx != self_bs_idx))
-					{			
-						// Analog Beamforming 
-						Real Tmp_RSRP_gain = 0;
-						Real Max_RSRP_gain = 0;
-						Real Inf_RSRP_gain = 0;
-
-						int ue_a_idx_selected  = -1;
-						int ue_z_idx_selected  = -1;
-						int ue_p_idx_selected  = -1;
-						int sec_a_idx_selected = -1;
-						int sec_z_idx_selected = -1;
-
-						// Sector beam index loop
-						for (int sec_a_idx = 0; sec_a_idx < tilt_azimuth_angle_LCS_size; sec_a_idx++)
-						{
-							for (int sec_z_idx = 0; sec_z_idx < tilt_zenith_angle_LCS_size; sec_z_idx++)
-							{
-								// UE beam index loop
-								if (ue_antenna_element_gain == 0)
-								{
-									Tmp_RSRP_gain = 10*log10(channel_of_interest->signal_RSRP_gain
-													[sector_idx][sec_z_idx][sec_a_idx]
-													[0][0][0]);
-									if ( Tmp_RSRP_gain > Max_RSRP_gain  || 
-									( sec_a_idx == 0 && sec_z_idx == 0 ))
-									{
-										Max_RSRP_gain       = Tmp_RSRP_gain;
-										ue_a_idx_selected   = 0;
-										ue_z_idx_selected   = 0;
-										ue_p_idx_selected   = 0;
-										sec_a_idx_selected  = sec_a_idx;
-										sec_z_idx_selected  = sec_z_idx;
-									}
-								}
-								else
-								{
-									for (int ue_z_idx = 0; ue_z_idx < ue_tilt_zenith_angle_LCS_size; ue_z_idx++)
-									{
-										for (int ue_a_idx = 0; ue_a_idx < ue_tilt_azimuth_angle_LCS_size; ue_a_idx++)
-										{						
-											Tmp_RSRP_gain = 10*log10(channel_of_interest->signal_RSRP_gain
-																	[sector_idx][sec_z_idx][sec_a_idx]
-																	[ue_z_idx][ue_a_idx][comp_Rx_panel_idx]);
-
-
-											if ( Tmp_RSRP_gain > Max_RSRP_gain  || 
-											( sec_a_idx == 0 && sec_z_idx == 0 && ue_z_idx == 0 && ue_a_idx == 0 ))
-											{
-												Max_RSRP_gain       = Tmp_RSRP_gain;
-												ue_a_idx_selected   = ue_a_idx;
-												ue_z_idx_selected   = ue_z_idx;
-												ue_p_idx_selected   = comp_Rx_panel_idx;
-												sec_a_idx_selected  = sec_a_idx;
-												sec_z_idx_selected  = sec_z_idx;
-											}
-										}
-									} // UE beam index loop end
-								}
-							}
-						} // Sector beam index loop end
-
-						temp_signal_strength = micro_bs_power + Max_RSRP_gain - pathloss;
-						if ( temp_signal_strength > comp_signal_strength[1] )
-						{						
-							Real temp_interf_strength = micro_bs_power + 10*log10(channel_of_interest->signal_RSRP_gain
-							[sector_idx][sec_z_idx_selected][sec_a_idx_selected]
-							[ue_z_idx_selected][ue_a_idx_selected][panel_idx_selected_for_interference])
-							- pathloss;
-
-							if (temp_signal_strength > temp_interf_strength)
-							{
-								comp_signal_strength[1] = temp_signal_strength;
-								comp_interf_strength[1] = temp_interf_strength;
-								comp_azimuth_angle_idx_selected   = ue_a_idx_selected;
-								comp_zenith_angle_idx_selected    = ue_z_idx_selected;
-								comp_panel_idx_selected           = ue_p_idx_selected;
-								comp_sector_a                     = sec_a_idx_selected;
-								comp_sector_z                     = sec_z_idx_selected;
-								comp_sector_idx                   = mTRP_idx * 3 + (sector_idx);
-							}
-						}
-					} // Exclude Serving BS & Sector 
-				} // Sector index loop end
-			} // BS index loop end
-
-		}
-
-		if ( g_comp_mode )
-		{
-			static_gain  [comp_sector_idx].first     = signal;
-			static_gain  [comp_sector_idx].second    = comp_sector_idx;
-
-			analog_beam_selection[comp_sector_idx].a = comp_azimuth_angle_idx_selected;
-			analog_beam_selection[comp_sector_idx].z = comp_zenith_angle_idx_selected;
-			analog_beam_selection[comp_sector_idx].p = comp_panel_idx_selected;
-
-			analog_beam_selection[comp_sector_idx].sector_a = comp_sector_a;
-			analog_beam_selection[comp_sector_idx].sector_z = comp_sector_z;
-		}
-		
-
 		// The interference induced from the main sector to the signal of the comp sector
 		comp_interf_strength[0] = micro_bs_power + 10*log10(
 							channel[self_bs_idx][self_ms_idx].signal_RSRP_gain[self_sector_idx]
@@ -1383,66 +1253,6 @@ void LINK::Get_signal_interference_old()
 			}
 		}
 
-		if ( g_mTRP_mode == 1 || g_mTRP_mode == 2) 
-		{
-			for (int mTRP_idx = num_BS; mTRP_idx < num_BS + num_mTRP; mTRP_idx++)
-			{
-				pathloss = channel[mTRP_idx][self_ms_idx].pathloss_final;
-				channel_of_interest = &channel[mTRP_idx][self_ms_idx];
-
-				//--------------------------- random beam interference ---------------------------
-				intf_w_rnd_RSRP[mTRP_idx*3  ] = linear2dBm(0);
-				intf_w_rnd_RSRP[mTRP_idx*3+1] = linear2dBm(0);
-				intf_w_rnd_RSRP[mTRP_idx*3+2] = linear2dBm(0);
-
-				rand_sec_a[3*mTRP_idx  ] = -1;
-				rand_sec_a[3*mTRP_idx+1] = -1;
-				rand_sec_a[3*mTRP_idx+2] = -1;
-
-				rand_sec_z[3*mTRP_idx  ] = -1;
-				rand_sec_z[3*mTRP_idx+1] = -1;
-				rand_sec_z[3*mTRP_idx+2] = -1;				
-
-				if ( mTRP_idx == self_bs_idx )
-				{
-				}
-				else
-				{
-					int sector_idx = (int) (3 * randnum.u());
-					int aa = (int)(tilt_azimuth_angle_LCS_size * randnum.u());
-					int zz = (int)(tilt_zenith_angle_LCS_size * randnum.u());
-
-					rand_sec_a[3*mTRP_idx+sector_idx] = aa;
-					rand_sec_z[3*mTRP_idx+sector_idx] = zz;
-
-					//--------------------------------------------------------------------------------
-					random_RSRP_antgain = 
-					linear2dB(channel[mTRP_idx][self_ms_idx].signal_RSRP_gain[sector_idx][zz][aa]
-								[zenith_angle_idx_selected_for_interference]
-								[azimuth_angle_idx_selected_for_interference]
-								[panel_idx_selected_for_interference]);
-
-					signal = micro_bs_power + random_RSRP_antgain - pathloss;
-					interference += dBm2linear(signal);
-					intf_w_rnd_RSRP[mTRP_idx*3 + sector_idx] = signal;
-				}
-			}
-
-			Real test_interference = 0;
-			for(int sec_idx = 0; sec_idx < num_SECTORS + num_mTRP_SECTORS; sec_idx++)
-			{
-				if( sec_idx == _sector_in_control )
-				{
-				}
-				else
-				{
-					test_interference += dBm2linear(intf_w_rnd_RSRP[sec_idx]);
-				}
-			}
-			
-			if ( interference != test_interference)
-				 cout << "Something wrong with interference" << endl;
-		}
 	}
 	#if 0
 	else if (TYPE == 13)
@@ -1590,21 +1400,11 @@ void LINK::Get_adj_SECTORS()
 	Real pathlosss;
 	Real antgainn;
 
-	// jhnoh 220809
-	if ( g_mTRP_mode == 1 || g_mTRP_mode == 2)
-		sort(static_gain,static_gain + num_SECTORS + num_mTRP_SECTORS, comparator); 
-	else
-		sort(static_gain,static_gain + num_SECTORS, comparator); 
+	sort(static_gain,static_gain + num_SECTORS, comparator);
 
 
 	for (int idx = 0; idx < num_SECTORS; idx++)
 		adj_sector[idx] = static_gain[idx].second;
-
-	//Real static_gain_ratio = static_gain[0].first - static_gain[1].first;
-	//if ( static_gain_ratio < 5 && linear2dB(geometry) < 10 && g_comp_mode )
-	//	comp_mode[self_ms_idx] = 1;
-	//else
-	//	comp_mode[self_ms_idx] = 0;
 
 	// jhnoh 230109 
 	// Consider that ue select the other Rx antenna pannel for avoiding inter-layer interference
@@ -1990,7 +1790,7 @@ void LINK::Get_RX_SmallScale_antgain(int M, int N, int P, CHANNEL * channel_of_i
 				Real combined_antenna_gain;
 
 
-				if (ue_antenna_element_gain == 0) // UE omni-antenna case
+				if (ue_antenna_element_gain == 0 && !handheld_mode) // UE omni-antenna case
 				{
 					combined_antenna_gain = 0;
 
@@ -2008,7 +1808,7 @@ void LINK::Get_RX_SmallScale_antgain(int M, int N, int P, CHANNEL * channel_of_i
 				else
 				{
 
-					combined_antenna_gain = Get_UE_antenna_pattern(P, v_angle_theta, h_angle_pi, ms_idx, sector_idx, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2);
+					combined_antenna_gain = Get_UE_antenna_pattern(P, v_angle_theta, h_angle_pi, ms_idx, sector_idx, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, handheld_mode ? M : -1);
 
 					Get_UE_antenna_field_pattern(channel_of_interest->self_ms, M, N, P, ms_idx, sector_idx, tilt_z_idx, tilt_a_idx, v_angle_theta, h_angle_pi, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, F_rx_theta, F_rx_pi, F_rx_theta_2, F_rx_pi_2);
 
@@ -2062,7 +1862,7 @@ void LINK::Get_RX_SmallScale_antgain(int M, int N, int P, CHANNEL * channel_of_i
 
 				Real combined_antenna_gain;
 
-				if (ue_antenna_element_gain == 0) // UE omni-antenna case
+				if (ue_antenna_element_gain == 0 && !handheld_mode) // UE omni-antenna case
 				{
 					combined_antenna_gain = 0;
 
@@ -2077,13 +1877,13 @@ void LINK::Get_RX_SmallScale_antgain(int M, int N, int P, CHANNEL * channel_of_i
 						SmallScale_RX_AntennaGainXLOS_theta(i, j) = 0.;
 						SmallScale_RX_AntennaGainXLOS_pi(i, j) = 1.;
 					}
-					
-					
+
+
 				}
-				else  // UE directional antenna case
+				else  // UE directional antenna case (or handheld)
 				{
 
-					combined_antenna_gain = Get_UE_antenna_pattern(P, v_angle_theta, h_angle_pi, ms_idx, sector_idx, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2);
+					combined_antenna_gain = Get_UE_antenna_pattern(P, v_angle_theta, h_angle_pi, ms_idx, sector_idx, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, handheld_mode ? M : -1);
 
 					Get_UE_antenna_field_pattern(channel_of_interest->self_ms, M, N, P, ms_idx, sector_idx, tilt_z_idx, tilt_a_idx, v_angle_theta, h_angle_pi, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, F_rx_theta, F_rx_pi, F_rx_theta_2, F_rx_pi_2);
 
@@ -2487,8 +2287,8 @@ Real LINK::Get_MS_antgain(int M, int N, int P,
 
 	Real combined_antenna_gain;
 
-	if (ue_antenna_element_gain == 0) // UE omni-antenna case
-	{		
+	if (ue_antenna_element_gain == 0 && !handheld_mode) // UE omni-antenna case
+	{
 		combined_antenna_gain = 0;
 		if (P == 0)
 		{
@@ -2503,7 +2303,7 @@ Real LINK::Get_MS_antgain(int M, int N, int P,
 	}
 	else
 	{
-		combined_antenna_gain = Get_UE_antenna_pattern(P, v_angle_theta, h_angle_pi, ms_idx, sector_idx, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2);
+		combined_antenna_gain = Get_UE_antenna_pattern(P, v_angle_theta, h_angle_pi, ms_idx, sector_idx, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, handheld_mode ? M : -1);
 		Get_UE_antenna_field_pattern(channel_of_interest->self_ms, M, N, P, ms_idx, sector_idx, tilt_z_idx, tilt_a_idx, v_angle_theta, h_angle_pi, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, F_rx_theta, F_rx_pi, F_rx_theta_2, F_rx_pi_2);
 
 		ReceiverAntennaGainXLOS_theta = F_rx_theta;
@@ -2849,8 +2649,77 @@ ComplexReal  Get_BS_antenna_field_pattern(LOCATION interferer,
 }
 
 
-Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int sector_index, Real &F_theta_GCS_P1, Real &F_pi_GCS_P1, Real &F_theta_GCS_P2, Real &F_pi_GCS_P2)
+Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int sector_index, Real &F_theta_GCS_P1, Real &F_pi_GCS_P1, Real &F_theta_GCS_P2, Real &F_pi_GCS_P2, int port_idx)
 {
+	// ================================================================
+	// Handheld UT antenna model (TR 38.901 Section 7.8)
+	// 2-stage rotation: Reference pattern → UT LCS → GCS
+	// ================================================================
+	if (handheld_mode && port_idx >= 0)
+	{
+		// Per-antenna Euler angles (α_u): boresight direction from center to antenna position
+		// For 8 candidate positions on 15cm×7cm device
+		// α_u = atan2(pos.x, -pos.y) maps center→antenna direction to azimuth
+		static const Real HANDHELD_ALPHA_U[8] = {
+			atan2(-0.075, 0.035),   // pos 1: (-L/2, -W/2) → ≈ -65°
+			atan2( 0.0,   0.035),   // pos 2: (0, -W/2)    → 0°
+			atan2( 0.075, 0.035),   // pos 3: (+L/2, -W/2) → ≈ +65°
+			atan2( 0.075, 0.0  ),   // pos 4: (+L/2, 0)    → 90°
+			atan2( 0.075,-0.035),   // pos 5: (+L/2, +W/2) → ≈ +115°
+			atan2( 0.0,  -0.035),   // pos 6: (0, +W/2)    → 180°
+			atan2(-0.075,-0.035),   // pos 7: (-L/2, +W/2) → ≈ -115°
+			atan2(-0.075, 0.0  ),   // pos 8: (-L/2, 0)    → -90°
+		};
+		static const Real HANDHELD_BETA_U  = pi / 2.0;   // 90° for all antennas
+		static const Real HANDHELD_GAMMA_U = 0.0;         // 0° for all antennas
+
+		int ant_idx = handheld_port_indices[port_idx] - 1;  // 1-based → 0-based
+		Real alpha_u = HANDHELD_ALPHA_U[ant_idx];
+		Real beta_u  = HANDHELD_BETA_U;
+		Real gamma_u = HANDHELD_GAMMA_U;
+
+		// UE device orientation (Ω_α, Ω_β, Ω_γ)
+		Real omega_alpha = ms[ms_idx].alpha;
+		Real omega_beta  = ms[ms_idx].beta;
+		Real omega_gamma = ms[ms_idx].gamma;
+
+		// Stage 2 inverse: GCS → UT LCS
+		Real theta_p = Get_LCS_theta(omega_alpha, omega_beta, omega_gamma, theta_GCS, pi_GCS);
+		Real phi_p   = Get_LCS_pi(omega_alpha, omega_beta, omega_gamma, theta_GCS, pi_GCS);
+
+		// Stage 1 inverse: UT LCS → Reference pattern frame
+		Real theta_pp = Get_LCS_theta(alpha_u, beta_u, gamma_u, theta_p, phi_p);
+		Real phi_pp   = Get_LCS_pi(alpha_u, beta_u, gamma_u, theta_p, phi_p);
+
+		// Table 7.3-2 element pattern (θ_3dB=φ_3dB=125°, A_max=22.5 dB, G_max=5.3 dBi)
+		Real theta_pp_deg = theta_pp * (180.0 / pi);
+		Real phi_pp_deg   = phi_pp * (180.0 / pi);
+		Real v_gain = -MIN(12.0 * ((theta_pp_deg - 90.0) / 125.0) * ((theta_pp_deg - 90.0) / 125.0), 22.5);
+		Real h_gain = -MIN(12.0 * (phi_pp_deg / 125.0) * (phi_pp_deg / 125.0), 22.5);
+		Real combined_gain = 5.3 - MIN(-(h_gain + v_gain), 22.5);  // dBi
+
+		Real A = sqrt(pow(10.0, combined_gain / 10.0));
+
+		// Single-pol: ζ=0 → F'_θ = A, F'_φ = 0
+		Real F_theta_ref = A;
+		Real F_phi_ref   = 0.0;
+
+		// Stage 1 field rotation: reference frame → UT LCS
+		Real F_theta_ut, F_phi_ut;
+		LCS_Antenna_field_to_GCS_antenna_pattern(alpha_u, beta_u, gamma_u,
+			theta_p, phi_p, F_theta_ref, F_phi_ref, F_theta_ut, F_phi_ut);
+
+		// Stage 2 field rotation: UT LCS → GCS
+		LCS_Antenna_field_to_GCS_antenna_pattern(omega_alpha, omega_beta, omega_gamma,
+			theta_GCS, pi_GCS, F_theta_ut, F_phi_ut, F_theta_GCS_P1, F_pi_GCS_P1);
+
+		// Handheld = single polarization per port, no panel 2
+		F_theta_GCS_P2 = 0.0;
+		F_pi_GCS_P2    = 0.0;
+
+		return combined_gain;
+	}
+
 	if (TYPE == 11 || TYPE == 12)   ///InH
 	{
 		Real v_angle_theta_LCS_temp = 0.;
@@ -3840,6 +3709,15 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 	Real ray_power[2][MAX_NUM_CLUSTERS][MAX_NUM_RAYS];   // [polRx][cluster][ray]
 	memset(ray_power, 0, sizeof(ray_power));
 
+	// Handheld: per-port ray power (each port has different element pattern)
+	static const int MAX_HANDHELD_PORTS = 8;
+	Real hh_ray_power[MAX_HANDHELD_PORTS][MAX_NUM_CLUSTERS][MAX_NUM_RAYS];
+	Real hh_los_ray_power[MAX_HANDHELD_PORTS];
+	if (handheld_mode) {
+		memset(hh_ray_power, 0, sizeof(hh_ray_power));
+		memset(hh_los_ray_power, 0, sizeof(hh_los_ray_power));
+	}
+
 	for (int n = 0; n < N; n++) {
 		int M_n = ch->NUM_RAY_per_ClusterNUM[n];
 		for (int m = 0; m < M_n; m++) {
@@ -3864,37 +3742,62 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 				tx_Ft_P1, tx_Fp_P1, tx_Ft_P2, tx_Fp_P2);
 
 			// RX element pattern (UE)
-			// For omni UE (ue_antenna_element_gain==0): isotropic {1,0}/{0,1}
-			// For directional UE: actual pattern via Get_UE_antenna_pattern
-			Real rx_Ft[2], rx_Fp[2];
-			if (ue_antenna_element_gain == 0) {
-				rx_Ft[0] = 1.0; rx_Fp[0] = 0.0;  // polRx=0: θ-polarized
-				rx_Ft[1] = 0.0; rx_Fp[1] = 1.0;  // polRx=1: φ-polarized
+			if (handheld_mode) {
+				// Handheld: per-port element pattern (2-stage rotation)
+				Real inv_sqrt_kappa = REAL(1.0) / sqrt(ch->kappa[n][m]);
+				ComplexReal exp_vv(cos(ch->random_phase_vv[n][m] * deg2rad), sin(ch->random_phase_vv[n][m] * deg2rad));
+				ComplexReal exp_vh(cos(ch->random_phase_vh[n][m] * deg2rad), sin(ch->random_phase_vh[n][m] * deg2rad));
+				ComplexReal exp_hv(cos(ch->random_phase_hv[n][m] * deg2rad), sin(ch->random_phase_hv[n][m] * deg2rad));
+				ComplexReal exp_hh(cos(ch->random_phase_hh[n][m] * deg2rad), sin(ch->random_phase_hh[n][m] * deg2rad));
+
+				for (int port = 0; port < handheld_num_ports; port++) {
+					Real rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2;
+					Get_UE_antenna_pattern(0, zoa_rad, aoa_rad, self_ms_idx, 0,
+						rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2, port);
+					// Single pol (MS_P=1): use P1 only
+					ComplexReal rpc =
+						rx_Ft_P1 * exp_vv * tx_Ft_P1 +
+						rx_Ft_P1 * inv_sqrt_kappa * exp_vh * tx_Fp_P1 +
+						rx_Fp_P1 * inv_sqrt_kappa * exp_hv * tx_Ft_P1 +
+						rx_Fp_P1 * exp_hh * tx_Fp_P1;
+					hh_ray_power[port][n][m] = std::norm(rpc);
+				}
+				// Also fill ray_power[0] with port-average for compatibility
+				Real sum_rp = 0;
+				for (int port = 0; port < handheld_num_ports; port++)
+					sum_rp += hh_ray_power[port][n][m];
+				ray_power[0][n][m] = sum_rp;
 			} else {
-				Real rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2;
-				Get_UE_antenna_pattern(0, zoa_rad, aoa_rad, self_ms_idx, 0,
-					rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2);
-				rx_Ft[0] = rx_Ft_P1; rx_Fp[0] = rx_Fp_P1;
-				rx_Ft[1] = rx_Ft_P2; rx_Fp[1] = rx_Fp_P2;
-			}
+				// For omni UE (ue_antenna_element_gain==0): isotropic {1,0}/{0,1}
+				// For directional UE: actual pattern via Get_UE_antenna_pattern
+				Real rx_Ft[2], rx_Fp[2];
+				if (ue_antenna_element_gain == 0) {
+					rx_Ft[0] = 1.0; rx_Fp[0] = 0.0;  // polRx=0: θ-polarized
+					rx_Ft[1] = 0.0; rx_Fp[1] = 1.0;  // polRx=1: φ-polarized
+				} else {
+					Real rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2;
+					Get_UE_antenna_pattern(0, zoa_rad, aoa_rad, self_ms_idx, 0,
+						rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2);
+					rx_Ft[0] = rx_Ft_P1; rx_Fp[0] = rx_Fp_P1;
+					rx_Ft[1] = rx_Ft_P2; rx_Fp[1] = rx_Fp_P2;
+				}
 
-			// Initial random phases and XPR  — Eq. (8.1-2) polarization matrix
-			Real inv_sqrt_kappa = REAL(1.0) / sqrt(ch->kappa[n][m]);
-			ComplexReal exp_vv(cos(ch->random_phase_vv[n][m] * deg2rad), sin(ch->random_phase_vv[n][m] * deg2rad));
-			ComplexReal exp_vh(cos(ch->random_phase_vh[n][m] * deg2rad), sin(ch->random_phase_vh[n][m] * deg2rad));
-			ComplexReal exp_hv(cos(ch->random_phase_hv[n][m] * deg2rad), sin(ch->random_phase_hv[n][m] * deg2rad));
-			ComplexReal exp_hh(cos(ch->random_phase_hh[n][m] * deg2rad), sin(ch->random_phase_hh[n][m] * deg2rad));
+				// Initial random phases and XPR  — Eq. (8.1-2) polarization matrix
+				Real inv_sqrt_kappa = REAL(1.0) / sqrt(ch->kappa[n][m]);
+				ComplexReal exp_vv(cos(ch->random_phase_vv[n][m] * deg2rad), sin(ch->random_phase_vv[n][m] * deg2rad));
+				ComplexReal exp_vh(cos(ch->random_phase_vh[n][m] * deg2rad), sin(ch->random_phase_vh[n][m] * deg2rad));
+				ComplexReal exp_hv(cos(ch->random_phase_hv[n][m] * deg2rad), sin(ch->random_phase_hv[n][m] * deg2rad));
+				ComplexReal exp_hh(cos(ch->random_phase_hh[n][m] * deg2rad), sin(ch->random_phase_hh[n][m] * deg2rad));
 
-			// raysPreComp[polRx] for polTx=0 (port 0 uses first polarization)
-			// = [F_rx,θ; F_rx,φ]^T × [[e^jΦ_θθ, κ^{-1/2}·e^jΦ_θφ];
-			//                          [κ^{-1/2}·e^jΦ_φθ, e^jΦ_φφ]] × [F_tx,θ; F_tx,φ]
-			for (int polRx = 0; polRx < MS_P; polRx++) {
-				ComplexReal rpc =
-					rx_Ft[polRx] * exp_vv * tx_Ft_P1 +
-					rx_Ft[polRx] * inv_sqrt_kappa * exp_vh * tx_Fp_P1 +
-					rx_Fp[polRx] * inv_sqrt_kappa * exp_hv * tx_Ft_P1 +
-					rx_Fp[polRx] * exp_hh * tx_Fp_P1;
-				ray_power[polRx][n][m] = std::norm(rpc);   // |rpc|²
+				// raysPreComp[polRx] for polTx=0 (port 0 uses first polarization)
+				for (int polRx = 0; polRx < MS_P; polRx++) {
+					ComplexReal rpc =
+						rx_Ft[polRx] * exp_vv * tx_Ft_P1 +
+						rx_Ft[polRx] * inv_sqrt_kappa * exp_vh * tx_Fp_P1 +
+						rx_Fp[polRx] * inv_sqrt_kappa * exp_hv * tx_Ft_P1 +
+						rx_Fp[polRx] * exp_hh * tx_Fp_P1;
+					ray_power[polRx][n][m] = std::norm(rpc);   // |rpc|²
+				}
 			}
 		}
 	}
@@ -3927,28 +3830,47 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 		Get_BS_antenna_pattern(los_zod_rad, los_aod_rad, bs_idx, sector_idx,
 			tx_Ft, tx_Fp, tx_Ft2, tx_Fp2);
 
-		// RX pattern for LOS: same omni/directional handling as NLOS above
-		Real los_rx_Ft[2], los_rx_Fp[2];
-		if (ue_antenna_element_gain == 0) {
-			los_rx_Ft[0] = 1.0; los_rx_Fp[0] = 0.0;
-			los_rx_Ft[1] = 0.0; los_rx_Fp[1] = 1.0;
+		if (handheld_mode) {
+			// Per-port LOS ray power
+			Real los_phase_rad = ch->random_phase_vv_LOS * deg2rad;
+			ComplexReal los_exp(cos(los_phase_rad), sin(los_phase_rad));
+
+			for (int port = 0; port < handheld_num_ports; port++) {
+				Real rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2;
+				Get_UE_antenna_pattern(0, los_zoa_rad, los_aoa_rad, self_ms_idx, 0,
+					rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2, port);
+				ComplexReal los_rpc = rx_Ft_P1 * los_exp * tx_Ft - rx_Fp_P1 * los_exp * tx_Fp;
+				hh_los_ray_power[port] = std::norm(los_rpc);
+			}
+			// Also fill los_ray_power[0] with port-sum for compatibility
+			Real sum_lrp = 0;
+			for (int port = 0; port < handheld_num_ports; port++)
+				sum_lrp += hh_los_ray_power[port];
+			los_ray_power[0] = sum_lrp;
 		} else {
-			Real rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2;
-			Get_UE_antenna_pattern(0, los_zoa_rad, los_aoa_rad, self_ms_idx, 0,
-				rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2);
-			los_rx_Ft[0] = rx_Ft_P1; los_rx_Fp[0] = rx_Fp_P1;
-			los_rx_Ft[1] = rx_Ft_P2; los_rx_Fp[1] = rx_Fp_P2;
-		}
+			// RX pattern for LOS: same omni/directional handling as NLOS above
+			Real los_rx_Ft[2], los_rx_Fp[2];
+			if (ue_antenna_element_gain == 0) {
+				los_rx_Ft[0] = 1.0; los_rx_Fp[0] = 0.0;
+				los_rx_Ft[1] = 0.0; los_rx_Fp[1] = 1.0;
+			} else {
+				Real rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2;
+				Get_UE_antenna_pattern(0, los_zoa_rad, los_aoa_rad, self_ms_idx, 0,
+					rx_Ft_P1, rx_Fp_P1, rx_Ft_P2, rx_Fp_P2);
+				los_rx_Ft[0] = rx_Ft_P1; los_rx_Fp[0] = rx_Fp_P1;
+				los_rx_Ft[1] = rx_Ft_P2; los_rx_Fp[1] = rx_Fp_P2;
+			}
 
-		// LOS polarization matrix: [[e^jΦ, 0]; [0, -e^jΦ]]  — Eq. (8.1-3)
-		Real los_phase_rad = ch->random_phase_vv_LOS * deg2rad;
-		ComplexReal los_exp(cos(los_phase_rad), sin(los_phase_rad));
+			// LOS polarization matrix: [[e^jΦ, 0]; [0, -e^jΦ]]  — Eq. (8.1-3)
+			Real los_phase_rad = ch->random_phase_vv_LOS * deg2rad;
+			ComplexReal los_exp(cos(los_phase_rad), sin(los_phase_rad));
 
-		for (int polRx = 0; polRx < MS_P; polRx++) {
-			ComplexReal los_rpc =
-				los_rx_Ft[polRx] * los_exp * tx_Ft -     // (1,1): +e^jΦ
-				los_rx_Fp[polRx] * los_exp * tx_Fp;      // (2,2): -e^jΦ
-			los_ray_power[polRx] = std::norm(los_rpc);
+			for (int polRx = 0; polRx < MS_P; polRx++) {
+				ComplexReal los_rpc =
+					los_rx_Ft[polRx] * los_exp * tx_Ft -     // (1,1): +e^jΦ
+					los_rx_Fp[polRx] * los_exp * tx_Fp;      // (2,2): -e^jΦ
+				los_ray_power[polRx] = std::norm(los_rpc);
+			}
 		}
 	}
 
@@ -3963,7 +3885,7 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 	int K_ue = MS_M / MS_Mp;
 	int L_ue = MS_N / MS_Np;
 	LOCATION3D ue_pos[8][8];
-	if (ue_antenna_element_gain != 0) {
+	if (ue_antenna_element_gain != 0 && !handheld_mode) {
 		for (int k = 0; k < K_ue; k++)
 			for (int l = 0; l < L_ue; l++)
 				ue_pos[k][l] = ms[self_ms_idx].d_rx[k][l][0][0][0];  // panel 0
@@ -3972,7 +3894,88 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 	BeamSearchResult best;
 	bool first = true;
 
-	if (ue_antenna_element_gain == 0)
+	if (handheld_mode)
+	{
+		// --- Handheld UE: per-port element pattern, no UE beam search ---
+		// Each port has a unique element pattern from 2-stage rotation.
+		// RSRP = (1/num_ports) × Σ_port |h_port|²
+		for (int a = 0; a < tilt_azimuth_angle_LCS_size; a++)
+		{
+			for (int z = 0; z < tilt_zenith_angle_LCS_size; z++)
+			{
+				Real alpha_total = 0.0;
+
+				// NLOS: sum over ports
+				for (int n = 0; n < N; n++) {
+					int M_n = ch->NUM_RAY_per_ClusterNUM[n];
+					Real P_n = ch->power[n];
+					for (int m = 0; m < M_n; m++) {
+						// TX array factor (same for all ports)
+						ComplexReal AF(0.0, 0.0);
+						for (int k = 0; k < K; k++) {
+							for (int l = 0; l < L; l++) {
+								Real phase = k_2pi * (
+									sinZoD_cosAoD[n][m] * port0_pos[k][l].x +
+									sinZoD_sinAoD[n][m] * port0_pos[k][l].y +
+									cosZoD[n][m]        * port0_pos[k][l].z);
+								AF += virtualization_weight_wv[z][a][k][l] *
+									ComplexReal(cos(phase), sin(phase));
+							}
+						}
+						Real AF_sq = std::norm(AF);
+
+						// Sum per-port ray power
+						Real sum_port_power = 0.0;
+						for (int port = 0; port < handheld_num_ports; port++)
+							sum_port_power += hh_ray_power[port][n][m];
+
+						alpha_total += (P_n / (Real)M_n) * AF_sq * sum_port_power;
+					}
+				}
+				alpha_total /= K_denom;
+
+				// LOS component
+				if (is_los) {
+					ComplexReal AF_LOS(0.0, 0.0);
+					for (int k = 0; k < K; k++) {
+						for (int l = 0; l < L; l++) {
+							Real phase = k_2pi * (
+								los_sinZoD_cosAoD * port0_pos[k][l].x +
+								los_sinZoD_sinAoD * port0_pos[k][l].y +
+								los_cosZoD        * port0_pos[k][l].z);
+							AF_LOS += virtualization_weight_wv[z][a][k][l] *
+								ComplexReal(cos(phase), sin(phase));
+						}
+					}
+					Real AF_LOS_sq = std::norm(AF_LOS);
+
+					Real sum_port_los = 0.0;
+					for (int port = 0; port < handheld_num_ports; port++)
+						sum_port_los += hh_los_ray_power[port];
+
+					alpha_total += (K_los_num / K_denom) * AF_LOS_sq * sum_port_los;
+				}
+
+				// Average over ports
+				Real rsrp_gain = alpha_total / (Real)handheld_num_ports;
+				Real rsrp_dB = 10.0 * log10(rsrp_gain);
+
+				ch->signal_RSRP_gain[sector_idx][z][a][0][0][0] = rsrp_gain;
+
+				if (first || rsrp_dB > best.max_rsrp_dB)
+				{
+					best.max_rsrp_dB     = rsrp_dB;
+					best.sec_azimuth_idx = a;
+					best.sec_zenith_idx  = z;
+					best.ue_azimuth_idx  = 0;
+					best.ue_zenith_idx   = 0;
+					best.ue_panel_idx    = 0;
+					first = false;
+				}
+			}
+		}
+	}
+	else if (ue_antenna_element_gain == 0)
 	{
 		// --- Omni UE: no UE beam search, no UE AF ---
 		for (int a = 0; a < tilt_azimuth_angle_LCS_size; a++)
@@ -4001,7 +4004,6 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 						Real sum_u_ray_power = 0.0;
 						for (int p = 0; p < MS_P; p++)
 							sum_u_ray_power += ray_power[p][n][m];
-						//sum_u_ray_power = ray_power[0][n][m];
 
 						sum_u_ray_power *= (Real)(MS_M * MS_N);
 
@@ -4366,29 +4368,6 @@ void LINK::compute_interference(const ScenarioConfig& cfg, const std::vector<Can
 			}
 		}
 
-		// g_comp_mode handling for InH 3TRxP
-		if (cfg.sectors_per_bs == 3 && g_comp_mode && comp_sector_idx >= 0)
-		{
-			// Find the comp sector's signal from candidates
-			Real comp_sig = -1e30;
-			for (const auto& c : candidates)
-			{
-				if (c.flat_idx == comp_sector_idx)
-				{
-					comp_sig = c.signal_dBm;
-					break;
-				}
-			}
-			static_gain[comp_sector_idx].first  = comp_sig;
-			static_gain[comp_sector_idx].second = comp_sector_idx;
-
-			analog_beam_selection[comp_sector_idx].a        = comp_azimuth_angle_idx_selected;
-			analog_beam_selection[comp_sector_idx].z        = comp_zenith_angle_idx_selected;
-			analog_beam_selection[comp_sector_idx].p        = comp_panel_idx_selected;
-			analog_beam_selection[comp_sector_idx].sector_a = comp_sector_a;
-			analog_beam_selection[comp_sector_idx].sector_z = comp_sector_z;
-		}
-
 		// comp_interf_strength for InH 3TRxP
 		if (cfg.sectors_per_bs == 3)
 		{
@@ -4447,46 +4426,6 @@ void LINK::compute_interference(const ScenarioConfig& cfg, const std::vector<Can
 			}
 		}
 
-		// mTRP interference
-		if (g_mTRP_mode == 1 || g_mTRP_mode == 2)
-		{
-			for (int mTRP_idx = num_BS; mTRP_idx < num_BS + num_mTRP; mTRP_idx++)
-			{
-				Real pl = channel[mTRP_idx][self_ms_idx].pathloss_final;
-
-				intf_w_rnd_RSRP[mTRP_idx * 3    ] = linear2dBm(0);
-				intf_w_rnd_RSRP[mTRP_idx * 3 + 1] = linear2dBm(0);
-				intf_w_rnd_RSRP[mTRP_idx * 3 + 2] = linear2dBm(0);
-
-				rand_sec_a[3 * mTRP_idx    ] = -1;
-				rand_sec_a[3 * mTRP_idx + 1] = -1;
-				rand_sec_a[3 * mTRP_idx + 2] = -1;
-
-				rand_sec_z[3 * mTRP_idx    ] = -1;
-				rand_sec_z[3 * mTRP_idx + 1] = -1;
-				rand_sec_z[3 * mTRP_idx + 2] = -1;
-
-				if (mTRP_idx == self_bs_idx)
-					continue;
-
-				int sec = (int)(3 * randnum.u());
-				int aa  = (int)(tilt_azimuth_angle_LCS_size * randnum.u());
-				int zz  = (int)(tilt_zenith_angle_LCS_size * randnum.u());
-
-				rand_sec_a[3 * mTRP_idx + sec] = aa;
-				rand_sec_z[3 * mTRP_idx + sec] = zz;
-
-				Real random_rsrp = linear2dB(
-					channel[mTRP_idx][self_ms_idx].signal_RSRP_gain[sec][zz][aa]
-					[zenith_angle_idx_selected_for_interference]
-					[azimuth_angle_idx_selected_for_interference]
-					[panel_idx_selected_for_interference]);
-
-				Real sig = micro_bs_power + random_rsrp - pl;
-				interference += dBm2linear(sig);
-				intf_w_rnd_RSRP[mTRP_idx * 3 + sec] = sig;
-			}
-		}
 	}
 }
 

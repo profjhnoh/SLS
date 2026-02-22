@@ -587,13 +587,9 @@ void Collect_LSP_from_ServingCell()
 	for (int ue_idx = 0; ue_idx < num_MS; ue_idx++)
 	{
 		int serv_bs = links[ue_idx].self_bs_idx;
-		int prop = channel[serv_bs][ue_idx].Propagation;
 
-		// DS: raw LSP (seconds -> nanoseconds)
-		Real ds;
-		if (prop == LOS_propagation)       ds = ms[ue_idx].LSPs[serv_bs](LOS_DS);
-		else if (prop == NLOS_propagation)  ds = ms[ue_idx].LSPs[serv_bs](NLOS_DS);
-		else                                ds = ms[ue_idx].LSPs[serv_bs](OUT2IN_DS);
+		// DS: power-weighted RMS delay spread from clusters (seconds -> nanoseconds)
+		Real ds = channel[serv_bs][ue_idx].RMS_delay_spread;
 		Get_LSP_DS(ds * 1e9, ue_idx);
 
 		// ASD/ASA/ZSD/ZSA: circular angular spread from SSP clusters (degrees)
