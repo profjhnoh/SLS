@@ -15,6 +15,13 @@ Tbps_DLSLS
 cfg_FullCal/
 FullCal_UMa_Config1_6GHz/
 FullCal_UMa_Config2_6GHz/
+FullCal_UMa_Config3_7GHz/
+FullCal_UMi_Config1_6GHz/
+FullCal_UMi_Config2_6GHz/
+FullCal_UMi_Config3_7GHz/
+FullCal_UMi_Config3_7GHz_SNS/
+FullCal_UMi_Config3_7GHz_SNS_OFF/
+
 doc/R1-165975
 doc/R1-2506406
 *.py
@@ -38,4 +45,3 @@ reference_code/
 *.asv
 *.txt
 
-FullCal_UMa_Config3_7GHz/

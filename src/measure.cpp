@@ -69,6 +69,7 @@ void Measure()
 	//cout << " Receive_DL... " << endl;
 }
 
+#if 0  // unused: FER — never called
 Real FER(Real SINR, int MCS)
 {
 	Real Frame_Error_Rate = 1;
@@ -195,3 +196,4 @@ Real FER(Real SINR, int MCS)
 	}
 	return Frame_Error_Rate;
 }
+#endif  // unused: FER

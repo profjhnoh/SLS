@@ -476,16 +476,18 @@ void Sector::Scheduling_RoundRobin(void)
 
 }
 
+#if 0  // unused: Scheduling_mTRP — never called
 void Sector::Scheduling_mTRP( int ms_idx )
 {
 	//Read_Ch_Feedback();
 	//Initialize_schedule_map();
 	Scheduling_NCJT( ms_idx );
 	Set_AVR_Cqi();
-	AVR_Cqi_update(); 
+	AVR_Cqi_update();
 
 	schedule_done_flag = true;
 }
+#endif  // unused: Scheduling_mTRP
 
 
 
@@ -1494,6 +1496,7 @@ void Sector::Initial_Setting(int rb_idx)
 }
 
 
+#if 0  // unused: first_max_ue, SUS_procedure, Get_User_Set, Filter_User_Set — replaced by _threadsafe versions
 /*===================================================================
 FUNCTION: Sector::first_max_ue( int rb_idx )
 
@@ -1855,6 +1858,7 @@ void Sector::Filter_User_Set(int rb_idx, int newly_selected_ue)
 	// Replace user_set with filtered version
 	user_set = filtered_set;
 }
+#endif  // unused: first_max_ue, SUS_procedure, Get_User_Set, Filter_User_Set
 
 
 /*===================================================================
@@ -2929,6 +2933,7 @@ void Sector::ChordalDistance_Scheduling_threadsafe(int rb_idx, vector<int>& loca
 }
 
 
+#if 0  // unused: ChordalDistance_Scheduling — replaced by ChordalDistance_Scheduling_threadsafe
 /*===================================================================
 FUNCTION: Sector::ChordalDistance_Scheduling (non-threadsafe version)
 
@@ -2939,3 +2944,4 @@ void Sector::ChordalDistance_Scheduling(int rb_idx)
 {
 	ChordalDistance_Scheduling_threadsafe(rb_idx, selected_ue, scheduled_ue);
 }
+#endif  // unused: ChordalDistance_Scheduling

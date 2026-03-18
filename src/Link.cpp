@@ -83,7 +83,7 @@ Real Get_LCS_pi(Real alpha, Real beta, Real gamma, Real GCS_theta, Real GCS_pi);
 Real Get_BS_antenna_pattern(Real theta_GCS, Real pi_GCS, int bs_idx, int sector_index, Real &F_theta_GCS_P1, Real &F_pi_GCS_P1, Real &F_theta_GCS_P2, Real &F_pi_GCS_P2);
 Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int sector_index, Real &F_theta_GCS_P1, Real &F_pi_GCS_P1, Real &F_theta_GCS_P2, Real &F_pi_GCS_P2, int port_idx = -1);
 
-ComplexReal  Get_BS_antenna_field_pattern(LOCATION interferer, int _bs_idx, int _sec_idx, int tilt_z_idx, int tilt_a_idx, Real v_angle_theta, Real h_angle_pi, Real F_theta_GCS_P1, Real F_pi_GCS_P1, Real F_theta_GCS_P2, Real F_pi_GCS_P2, ComplexReal  &F_tx_theta, ComplexReal  &F_tx_pi);
+ComplexReal  Get_BS_antenna_field_pattern(LOCATION interferer, int _bs_idx, int _sec_idx, int tilt_z_idx, int tilt_a_idx, Real v_angle_theta, Real h_angle_pi, Real F_theta_GCS_P1, Real F_pi_GCS_P1, Real F_theta_GCS_P2, Real F_pi_GCS_P2, ComplexReal  &F_tx_theta, ComplexReal  &F_tx_pi, const ClusterVR* sns_vr_ptr = nullptr, Real sns_rolloff_C = 0.0);
 ComplexReal  Get_UE_antenna_field_pattern(LOCATION UE , int M, int N, int P, int ms_idx, int sector_idx, int tilt_z_idx, int tilt_a_idx, Real v_angle_theta, Real h_angle_pi, Real F_theta_GCS_P1, Real F_pi_GCS_P1, Real F_theta_GCS_P2, Real F_pi_GCS_P2, ComplexReal  &F_rx_theta_panel_1, ComplexReal  &F_rx_pi_panel_1, ComplexReal  &F_rx_theta_panel_2, ComplexReal  &F_rx_pi_panel_2);
 
 MatrixXReal Get_distance_angular(Real a, Real b, Real c, Real x, Real y, Real z);
@@ -1484,7 +1484,7 @@ void LINK::UE_Initial_Setting(void)
 	  {
 		  if (Channel_Model_Type == 1) // Model B
 		  {
-			  if (randnum.u() > 0.2) // 80% Low Loss  O2I
+			  if (randnum.u() > 0.5) // 80% Low Loss  O2I
 			  {
 				  // Low-loss model
 				  Otoi_loss = 5 - 10 * log10(0.3 * pow(10, -1 * (glass_L / 10)) + 0.7 * pow(10, -1 * (concrete_L / 10)));
@@ -1645,8 +1645,10 @@ Real LINK::Get_antgain(CHANNEL * channel_of_interest, int _bs_idx, int sector_id
 	Real combined_antenna_gain = Get_BS_antenna_pattern(v_angle_theta, h_angle_pi, _bs_idx, _sector_idx, 
 	F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2);
 
-	Get_BS_antenna_field_pattern(channel_of_interest->self_bs, _bs_idx, _sector_idx, tilt_z_idx, tilt_a_idx, 
-	v_angle_theta, h_angle_pi, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, F_tx_theta, F_tx_pi);
+	// SNS: pass LOS VR info to field pattern for per-element attenuation
+	const ClusterVR* los_vr_ptr = (channel_of_interest->sns_any_limited) ? &channel_of_interest->sns_vr_los : nullptr;
+	Get_BS_antenna_field_pattern(channel_of_interest->self_bs, _bs_idx, _sector_idx, tilt_z_idx, tilt_a_idx,
+	v_angle_theta, h_angle_pi, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, F_tx_theta, F_tx_pi, los_vr_ptr, g_sns_rolloff_C);
 
 	TransmitterAntennaGainXLOS_theta = F_tx_theta;
 	TransmitterAntennaGainXLOS_pi    = F_tx_pi;
@@ -1690,7 +1692,11 @@ void LINK::Get_TX_SmallScale_antgain(CHANNEL * channel_of_interest, int _bs_idx,
 
 				Real combined_antenna_gain = Get_BS_antenna_pattern(v_angle_theta, h_angle_pi, _bs_idx, sector_idx, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2);
 
-				Get_BS_antenna_field_pattern(channel_of_interest->self_bs, _bs_idx, sector_idx, tilt_z_idx, tilt_a_idx, v_angle_theta, h_angle_pi, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, F_tx_theta, F_tx_pi);
+				// SNS: pass per-cluster VR info to field pattern for per-element attenuation
+				{
+					const ClusterVR* vr_ptr = (channel_of_interest->sns_any_limited) ? &channel_of_interest->sns_vr[i] : nullptr;
+					Get_BS_antenna_field_pattern(channel_of_interest->self_bs, _bs_idx, sector_idx, tilt_z_idx, tilt_a_idx, v_angle_theta, h_angle_pi, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, F_tx_theta, F_tx_pi, vr_ptr, g_sns_rolloff_C);
+				}
 
 
 				SmallScale_TX_AntennaGainXLOS_theta(i, j) = F_tx_theta;
@@ -1730,7 +1736,11 @@ void LINK::Get_TX_SmallScale_antgain(CHANNEL * channel_of_interest, int _bs_idx,
 
 				Real combined_antenna_gain = Get_BS_antenna_pattern(v_angle_theta, h_angle_pi, _bs_idx, sector_idx, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2);
 
-				Get_BS_antenna_field_pattern(channel_of_interest->self_bs, _bs_idx, sector_idx, tilt_z_idx, tilt_a_idx, v_angle_theta, h_angle_pi, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, F_tx_theta, F_tx_pi);
+				// SNS: pass per-cluster VR info to field pattern for per-element attenuation
+				{
+					const ClusterVR* vr_ptr = (channel_of_interest->sns_any_limited) ? &channel_of_interest->sns_vr[i] : nullptr;
+					Get_BS_antenna_field_pattern(channel_of_interest->self_bs, _bs_idx, sector_idx, tilt_z_idx, tilt_a_idx, v_angle_theta, h_angle_pi, F_theta_GCS_P1, F_pi_GCS_P1, F_theta_GCS_P2, F_pi_GCS_P2, F_tx_theta, F_tx_pi, vr_ptr, g_sns_rolloff_C);
+				}
 
 				SmallScale_TX_AntennaGainXLOS_theta(i,j) = F_tx_theta;
 				SmallScale_TX_AntennaGainXLOS_pi(i,j) = F_tx_pi;
@@ -1959,11 +1969,13 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 						alpha_zero_temp = sqrt(K_linear / (K_linear + 1)) * (ReceiverAntennaGainXLOS_theta * FAST_EXP(Big_PI_LOS) * TransmitterAntennaGainXLOS_theta - ReceiverAntennaGainXLOS_pi * FAST_EXP(Big_PI_LOS) * TransmitterAntennaGainXLOS_pi);
 
 						alpha_zero = abs(alpha_zero_temp)*abs(alpha_zero_temp);
+						// SNS: per-element attenuation now applied inside Get_BS_antenna_field_pattern
 					}
 
 
 					for (int i = 0; i < channel_of_interest->NUM_PATH_for_channelcoeff; i++)
 					{
+						Real cluster_power = 0.;
 						for (int j = 0; j < channel_of_interest->NUM_RAY_per_ClusterNUM[i]; j++)
 						{
 							kappa = channel_of_interest->kappa[i][j];
@@ -1979,8 +1991,10 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 								(SmallScale_RX_AntennaGainXLOS_theta(i, j) * _1_over_sqrt_K * FAST_EXP(Big_pi_NLOS_thetapi) + SmallScale_RX_AntennaGainXLOS_pi(i, j)*FAST_EXP(Big_pi_NLOS_pipi)) * SmallScale_TX_AntennaGainXLOS_pi(i, j)
 								);
 
-							alpha_nmup = alpha_nmup + (abs(alpha_nmup_temp) * abs(alpha_nmup_temp));
+							cluster_power += (abs(alpha_nmup_temp) * abs(alpha_nmup_temp));
 						}
+						// SNS: per-element attenuation now applied inside Get_BS_antenna_field_pattern
+						alpha_nmup += cluster_power;
 					}
 					alpha += alpha_zero + alpha_nmup;
 				}
@@ -2028,19 +2042,21 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 
 						if (channel_of_interest->Propagation == LOS_propagation)
 						{
-							//complex<Real> Big_PI_LOS(0., (360. * randnum.u() - 180.0)* (pi / 180.0));
-
 							// panel 1
 							alpha_zero_temp = sqrt(K_linear / (K_linear + 1)) * (ReceiverAntennaGainXLOS_theta * FAST_EXP(Big_PI_LOS) * TransmitterAntennaGainXLOS_theta - ReceiverAntennaGainXLOS_pi * FAST_EXP(Big_PI_LOS) * TransmitterAntennaGainXLOS_pi);
 							alpha_zero = abs(alpha_zero_temp)*abs(alpha_zero_temp);
+							// SNS: per-element attenuation now in Get_BS_antenna_field_pattern
 
 							// panel 2
 							alpha_zero_temp_panel_2 = sqrt(K_linear / (K_linear + 1)) * (ReceiverAntennaGainXLOS_theta_panel_2 * FAST_EXP(Big_PI_LOS) * TransmitterAntennaGainXLOS_theta - ReceiverAntennaGainXLOS_pi_panel_2 * FAST_EXP(Big_PI_LOS) * TransmitterAntennaGainXLOS_pi);
 							alpha_zero_panel_2 = abs(alpha_zero_temp_panel_2)*abs(alpha_zero_temp_panel_2);
+							// SNS: per-element attenuation now in Get_BS_antenna_field_pattern
 						}
 
 						for (int i = 0; i < channel_of_interest->NUM_PATH_for_channelcoeff; i++)
 						{
+							Real cluster_power_p1 = 0.;
+							Real cluster_power_p2 = 0.;
 							for (int j = 0; j < channel_of_interest->NUM_RAY_per_ClusterNUM[i]; j++)
 							{
 								kappa = channel_of_interest->kappa[i][j];
@@ -2057,7 +2073,7 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 									(SmallScale_RX_AntennaGainXLOS_theta(i, j) * _1_over_sqrt_K * FAST_EXP(Big_pi_NLOS_thetapi) + SmallScale_RX_AntennaGainXLOS_pi(i, j)*FAST_EXP(Big_pi_NLOS_pipi)) * SmallScale_TX_AntennaGainXLOS_pi(i, j)
 									);
 
-								alpha_nmup = alpha_nmup + (abs(alpha_nmup_temp) * abs(alpha_nmup_temp));
+								cluster_power_p1 += (abs(alpha_nmup_temp) * abs(alpha_nmup_temp));
 
 								/// panel 2
 								alpha_nmup_temp_panel_2 = sqrt(channel_of_interest->power[i] / (channel_of_interest->NUM_RAY_per_ClusterNUM[i] * (K_linear + 1))) * (
@@ -2065,9 +2081,11 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 									(SmallScale_RX_AntennaGainXLOS_theta_panel_2(i, j) * _1_over_sqrt_K * FAST_EXP(Big_pi_NLOS_thetapi) + SmallScale_RX_AntennaGainXLOS_pi_panel_2(i, j)*FAST_EXP(Big_pi_NLOS_pipi)) * SmallScale_TX_AntennaGainXLOS_pi(i, j)
 									);
 
-								alpha_nmup_panel_2 = alpha_nmup_panel_2 + (abs(alpha_nmup_temp_panel_2) * abs(alpha_nmup_temp_panel_2));
+								cluster_power_p2 += (abs(alpha_nmup_temp_panel_2) * abs(alpha_nmup_temp_panel_2));
 
 							}
+							alpha_nmup += cluster_power_p1;  // SNS: per-element in Get_BS_antenna_field_pattern
+							alpha_nmup_panel_2 += cluster_power_p2;  // SNS: per-element in Get_BS_antenna_field_pattern
 						}
 						alpha += alpha_zero + alpha_nmup;
 						alpha_panel_2 += alpha_zero_panel_2 + alpha_nmup_panel_2;
@@ -2119,19 +2137,21 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 
 								if (channel_of_interest->Propagation == LOS_propagation)
 								{
-									//complex<Real> Big_PI_LOS(0., (360. * randnum.u() - 180.0)* (pi / 180.0));
-
 									// panel 1
 									alpha_zero_temp = sqrt(K_linear / (K_linear + 1)) * (ReceiverAntennaGainXLOS_theta * FAST_EXP(Big_PI_LOS) * TransmitterAntennaGainXLOS_theta - ReceiverAntennaGainXLOS_pi * FAST_EXP(Big_PI_LOS) * TransmitterAntennaGainXLOS_pi);
 									alpha_zero = abs(alpha_zero_temp)*abs(alpha_zero_temp);
+									// SNS: per-element attenuation now in Get_BS_antenna_field_pattern
 
 									// panel 2
 									alpha_zero_temp_panel_2 = sqrt(K_linear / (K_linear + 1)) * (ReceiverAntennaGainXLOS_theta_panel_2 * FAST_EXP(Big_PI_LOS) * TransmitterAntennaGainXLOS_theta - ReceiverAntennaGainXLOS_pi_panel_2 * FAST_EXP(Big_PI_LOS) * TransmitterAntennaGainXLOS_pi);
 									alpha_zero_panel_2 = abs(alpha_zero_temp_panel_2)*abs(alpha_zero_temp_panel_2);
+									// SNS: per-element attenuation now in Get_BS_antenna_field_pattern
 								}
 
 								for (int i = 0; i < channel_of_interest->NUM_PATH_for_channelcoeff; i++)
 								{
+									Real cluster_power_p1 = 0.;
+									Real cluster_power_p2 = 0.;
 									for (int j = 0; j < channel_of_interest->NUM_RAY_per_ClusterNUM[i]; j++)
 									{
 										kappa = channel_of_interest->kappa[i][j];
@@ -2148,7 +2168,7 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 											(SmallScale_RX_AntennaGainXLOS_theta(i, j) * (Real)_1_over_sqrt_K * FAST_EXP(Big_pi_NLOS_thetapi) + SmallScale_RX_AntennaGainXLOS_pi(i, j)* FAST_EXP(Big_pi_NLOS_pipi)) * SmallScale_TX_AntennaGainXLOS_pi(i, j)
 											);
 
-										alpha_nmup = alpha_nmup + (abs(alpha_nmup_temp) * abs(alpha_nmup_temp));
+										cluster_power_p1 += (abs(alpha_nmup_temp) * abs(alpha_nmup_temp));
 
 										/// panel 2
 										alpha_nmup_temp_panel_2 = (Real)sqrt(channel_of_interest->power[i] / (channel_of_interest->NUM_RAY_per_ClusterNUM[i] * (K_linear + 1))) * (
@@ -2156,9 +2176,11 @@ Real LINK::Get_RSRP(CHANNEL * channel_of_interest, int sec_number, int sec_z_idx
 											(SmallScale_RX_AntennaGainXLOS_theta_panel_2(i, j) * (Real)_1_over_sqrt_K * FAST_EXP(Big_pi_NLOS_thetapi) + SmallScale_RX_AntennaGainXLOS_pi_panel_2(i, j)*FAST_EXP(Big_pi_NLOS_pipi)) * SmallScale_TX_AntennaGainXLOS_pi(i, j)
 											);
 
-										alpha_nmup_panel_2 = alpha_nmup_panel_2 + (abs(alpha_nmup_temp_panel_2) * abs(alpha_nmup_temp_panel_2));
+										cluster_power_p2 += (abs(alpha_nmup_temp_panel_2) * abs(alpha_nmup_temp_panel_2));
 
 									}
+									alpha_nmup += cluster_power_p1;  // SNS: per-element in Get_BS_antenna_field_pattern
+									alpha_nmup_panel_2 += cluster_power_p2;  // SNS: per-element in Get_BS_antenna_field_pattern
 								}
 								alpha += alpha_zero + alpha_nmup;
 								alpha_panel_2 += alpha_zero_panel_2 + alpha_nmup_panel_2;
@@ -2503,19 +2525,21 @@ Real Get_BS_antenna_pattern(Real theta_GCS, Real pi_GCS, int bs_idx, int sector_
 }
 
 
-ComplexReal  Get_BS_antenna_field_pattern(LOCATION interferer, 
-	int _bs_idx, 
-	int _sec_idx, 
-	int tilt_z_idx, 
-	int tilt_a_idx, 
-	Real v_angle_theta, 
-	Real h_angle_pi, 
-	Real F_theta_GCS_P1, 
-	Real F_pi_GCS_P1, 
-	Real F_theta_GCS_P2, 
-	Real F_pi_GCS_P2, 
-	ComplexReal  &F_tx_theta, 
-	ComplexReal  &F_tx_pi)
+ComplexReal  Get_BS_antenna_field_pattern(LOCATION interferer,
+	int _bs_idx,
+	int _sec_idx,
+	int tilt_z_idx,
+	int tilt_a_idx,
+	Real v_angle_theta,
+	Real h_angle_pi,
+	Real F_theta_GCS_P1,
+	Real F_pi_GCS_P1,
+	Real F_theta_GCS_P2,
+	Real F_pi_GCS_P2,
+	ComplexReal  &F_tx_theta,
+	ComplexReal  &F_tx_pi,
+	const ClusterVR* sns_vr_ptr,
+	Real sns_rolloff_C)
 {
 	Real dH;
 	Real dV;
@@ -2568,19 +2592,27 @@ ComplexReal  Get_BS_antenna_field_pattern(LOCATION interferer,
 			d_tx.y = bs[_bs_idx].d_tx[_sec_idx][k][l][0][0][0].y;// +interferer.y; //// sector(rx) [M][N][P][Mg][Ng] <port0>   channel[bs_idx][ms_idx].self_bs.y
 			d_tx.z = bs[_bs_idx].d_tx[_sec_idx][k][l][0][0][0].z;// +bs_height;    //// sector(rx) [M][N][P][Mg][Ng] <port0>   bs_height
 
+			// SNS: per-element per-cluster attenuation (when VR info provided)
+			Real sns_w = REAL(1.0);
+			if (sns_vr_ptr != nullptr) {
+				Real pos_h = l * dH;
+				Real pos_v = k * dV;
+				sns_w = compute_sns_attenuation(pos_h, pos_v, *sns_vr_ptr, sns_rolloff_C);
+			}
+
 			#if COMPARE_PHASE_CALCULATION
 			// Original version: using exp()
-			weight += w * exp(jay * phase_factor * REAL(dot(r_tx, d_tx)));
+			weight += w * sns_w * exp(jay * phase_factor * REAL(dot(r_tx, d_tx)));
 			#elif USE_OPTIMIZED_PHASE
 			// Optimized version: Use Euler's formula directly
 			// exp(i*theta) = cos(theta) + i*sin(theta)
 			Real theta = phase_factor * REAL(dot(r_tx, d_tx));
 			Real cos_theta = cos(theta);
 			Real sin_theta = sin(theta);
-			weight += w * ComplexReal(cos_theta, sin_theta);
+			weight += w * sns_w * ComplexReal(cos_theta, sin_theta);
 			#else
 			// Original version: using exp()
-			weight += w * exp(jay * phase_factor * REAL(dot(r_tx, d_tx)));
+			weight += w * sns_w * exp(jay * phase_factor * REAL(dot(r_tx, d_tx)));
 			#endif
 		}
 	}
@@ -2599,12 +2631,20 @@ ComplexReal  Get_BS_antenna_field_pattern(LOCATION interferer,
 			d_tx.y = bs[_bs_idx].d_tx[_sec_idx][k][l][0][0][0].y;
 			d_tx.z = bs[_bs_idx].d_tx[_sec_idx][k][l][0][0][0].z;
 
+			// SNS: per-element per-cluster attenuation (when VR info provided)
+			Real sns_w2 = REAL(1.0);
+			if (sns_vr_ptr != nullptr) {
+				Real pos_h = l * dH;
+				Real pos_v = k * dV;
+				sns_w2 = compute_sns_attenuation(pos_h, pos_v, *sns_vr_ptr, sns_rolloff_C);
+			}
+
 			// Optimized version: Use Euler's formula directly
 			// exp(i*theta) = cos(theta) + i*sin(theta)
 			Real theta = phase_factor * REAL(dot(r_tx, d_tx));
 			Real cos_theta = cos(theta);
 			Real sin_theta = sin(theta);
-			weight_optimized += w * ComplexReal(cos_theta, sin_theta);
+			weight_optimized += w * sns_w2 * ComplexReal(cos_theta, sin_theta);
 		}
 	}
 	auto end_optimized = std::chrono::high_resolution_clock::now();
@@ -2691,16 +2731,26 @@ Real Get_UE_antenna_pattern(int P, Real theta_GCS, Real pi_GCS, int ms_idx, int 
 		Real theta_pp = Get_LCS_theta(alpha_u, beta_u, gamma_u, theta_p, phi_p);
 		Real phi_pp   = Get_LCS_pi(alpha_u, beta_u, gamma_u, theta_p, phi_p);
 
-		// Table 7.3-2 element pattern (θ_3dB=φ_3dB=125°, A_max=22.5 dB, G_max=5.3 dBi)
-		Real theta_pp_deg = theta_pp * (180.0 / pi);
-		Real phi_pp_deg   = phi_pp * (180.0 / pi);
-		Real v_gain = -MIN(12.0 * ((theta_pp_deg - 90.0) / 125.0) * ((theta_pp_deg - 90.0) / 125.0), 22.5);
-		Real h_gain = -MIN(12.0 * (phi_pp_deg / 125.0) * (phi_pp_deg / 125.0), 22.5);
-		Real combined_gain = 5.3 - MIN(-(h_gain + v_gain), 22.5);  // dBi
-
-		Real A = sqrt(pow(10.0, combined_gain / 10.0));
+		// Element pattern: isotropic (0 dBi) or Table 7.3-2 directive (5.3 dBi max)
+		Real A;
+		Real combined_gain;
+		if (ue_antenna_element_gain == 0) {
+			// Isotropic element: 0 dBi amplitude
+			// Per-antenna polarization direction still applied via (α_u, β_u, γ_u) rotation
+			A = 1.0;
+			combined_gain = 0.0;
+		} else {
+			// Table 7.3-2 element pattern (θ_3dB=φ_3dB=125°, A_max=22.5 dB, G_max=5.3 dBi)
+			Real theta_pp_deg = theta_pp * (180.0 / pi);
+			Real phi_pp_deg   = phi_pp * (180.0 / pi);
+			Real v_gain = -MIN(12.0 * ((theta_pp_deg - 90.0) / 125.0) * ((theta_pp_deg - 90.0) / 125.0), 22.5);
+			Real h_gain = -MIN(12.0 * (phi_pp_deg / 125.0) * (phi_pp_deg / 125.0), 22.5);
+			combined_gain = 5.3 - MIN(-(h_gain + v_gain), 22.5);  // dBi
+			A = sqrt(pow(10.0, combined_gain / 10.0));
+		}
 
 		// Single-pol: ζ=0 → F'_θ = A, F'_φ = 0
+		// Each antenna's unique polarization direction comes from α_u rotation (Section 4.5)
 		Real F_theta_ref = A;
 		Real F_phi_ref   = 0.0;
 
@@ -3093,6 +3143,7 @@ void LCS_Antenna_field_to_GCS_antenna_pattern(Real alpha, Real beta, Real gamma,
 }
 
 
+#if 0  // unused: PIot_sector_antenna_gain, PIot_ue_antenna_gain — never called
 void PIot_sector_antenna_gain()
 {
 	ComplexReal  w;
@@ -3327,6 +3378,7 @@ void PIot_ue_antenna_gain()
 
 	cout << "ue gain--" << endl;
 }
+#endif  // unused: PIot_sector_antenna_gain, PIot_ue_antenna_gain
 
 void LINK::Delete_link_memory()
 {
@@ -3344,6 +3396,7 @@ void LINK::Delete_link_memory()
 
 
 
+#if 0  // unused: Antenna_field_in_LCS — never called
 ANTENNA_FIELD Antenna_field_in_LCS(Real LCS_antenna_gain_in_dB, Real zeta)
 {
 	ANTENNA_FIELD field_pattern;
@@ -3354,6 +3407,7 @@ ANTENNA_FIELD Antenna_field_in_LCS(Real LCS_antenna_gain_in_dB, Real zeta)
 
 	return field_pattern;
 }
+#endif  // unused: Antenna_field_in_LCS
 
 Real dot(LOCATION3D a, LOCATION3D b)
 {
@@ -3376,6 +3430,7 @@ LOCATION3D Transform_angle_to_spheical_vector(Real phi, Real theta)
 	return r;
 }
 
+#if 0  // unused: GCS_Angle_to_LCS_Angle, Sector_Antenna_gain_in_dB, UE_Antenna_gain_in_dB, LCS_Antenna_field_to_GCS_antenna_pattern_rev, Generate_vertical/horizontal_virtualization_weight_link
 SPHERICAL_ANGLE GCS_Angle_to_LCS_Angle(Real alpha, Real beta, Real gamma, SPHERICAL_ANGLE GCS_angle) //GCS_angle : degree  ||  alpha, beta gamma : radian
 {
 	SPHERICAL_ANGLE LCS_angle;
@@ -3487,6 +3542,7 @@ ComplexReal  Generate_horizontal_virtualization_weight_link(Real theta, Real phi
 
 	return v;
 }
+#endif  // unused: GCS_Angle_to_LCS_Angle ... Generate_horizontal_virtualization_weight_link
 
 Real Transform_angle_minus_180_to_plus_180(Real x)
 {
@@ -3918,7 +3974,14 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 									sinZoD_cosAoD[n][m] * port0_pos[k][l].x +
 									sinZoD_sinAoD[n][m] * port0_pos[k][l].y +
 									cosZoD[n][m]        * port0_pos[k][l].z);
-								AF += virtualization_weight_wv[z][a][k][l] *
+								// SNS: per-element per-cluster attenuation inside AF sum
+								Real sns_w = REAL(1.0);
+								if (ch->sns_any_limited) {
+									Real pos_h = l * BS_dH;
+									Real pos_v = k * BS_dV;
+									sns_w = compute_sns_attenuation(pos_h, pos_v, ch->sns_vr[n], g_sns_rolloff_C);
+								}
+								AF += virtualization_weight_wv[z][a][k][l] * sns_w *
 									ComplexReal(cos(phase), sin(phase));
 							}
 						}
@@ -3943,7 +4006,14 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 								los_sinZoD_cosAoD * port0_pos[k][l].x +
 								los_sinZoD_sinAoD * port0_pos[k][l].y +
 								los_cosZoD        * port0_pos[k][l].z);
-							AF_LOS += virtualization_weight_wv[z][a][k][l] *
+							// SNS: per-element LOS attenuation inside AF sum
+							Real sns_w = REAL(1.0);
+							if (ch->sns_any_limited) {
+								Real pos_h = l * BS_dH;
+								Real pos_v = k * BS_dV;
+								sns_w = compute_sns_attenuation(pos_h, pos_v, ch->sns_vr_los, g_sns_rolloff_C);
+							}
+							AF_LOS += virtualization_weight_wv[z][a][k][l] * sns_w *
 								ComplexReal(cos(phase), sin(phase));
 						}
 					}
@@ -3995,7 +4065,14 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 									sinZoD_cosAoD[n][m] * port0_pos[k][l].x +
 									sinZoD_sinAoD[n][m] * port0_pos[k][l].y +
 									cosZoD[n][m]        * port0_pos[k][l].z);
-								AF += virtualization_weight_wv[z][a][k][l] *
+								// SNS: per-element per-cluster attenuation inside AF sum
+								Real sns_w = REAL(1.0);
+								if (ch->sns_any_limited) {
+									Real pos_h = l * BS_dH;
+									Real pos_v = k * BS_dV;
+									sns_w = compute_sns_attenuation(pos_h, pos_v, ch->sns_vr[n], g_sns_rolloff_C);
+								}
+								AF += virtualization_weight_wv[z][a][k][l] * sns_w *
 									ComplexReal(cos(phase), sin(phase));
 							}
 						}
@@ -4020,7 +4097,14 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 								los_sinZoD_cosAoD * port0_pos[k][l].x +
 								los_sinZoD_sinAoD * port0_pos[k][l].y +
 								los_cosZoD        * port0_pos[k][l].z);
-							AF_LOS += virtualization_weight_wv[z][a][k][l] *
+							// SNS: per-element LOS attenuation inside AF sum
+							Real sns_w = REAL(1.0);
+							if (ch->sns_any_limited) {
+								Real pos_h = l * BS_dH;
+								Real pos_v = k * BS_dV;
+								sns_w = compute_sns_attenuation(pos_h, pos_v, ch->sns_vr_los, g_sns_rolloff_C);
+							}
+							AF_LOS += virtualization_weight_wv[z][a][k][l] * sns_w *
 								ComplexReal(cos(phase), sin(phase));
 						}
 					}
@@ -4118,7 +4202,14 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 											sinZoD_cosAoD[n][m] * port0_pos[k][l].x +
 											sinZoD_sinAoD[n][m] * port0_pos[k][l].y +
 											cosZoD[n][m]        * port0_pos[k][l].z);
-										AF += virtualization_weight_wv[z][a][k][l] *
+										// SNS: per-element per-cluster attenuation inside AF sum
+										Real sns_w = REAL(1.0);
+										if (ch->sns_any_limited) {
+											Real pos_h = l * BS_dH;
+											Real pos_v = k * BS_dV;
+											sns_w = compute_sns_attenuation(pos_h, pos_v, ch->sns_vr[n], g_sns_rolloff_C);
+										}
+										AF += virtualization_weight_wv[z][a][k][l] * sns_w *
 											ComplexReal(cos(phase), sin(phase));
 									}
 								}
@@ -4142,7 +4233,14 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 										los_sinZoD_cosAoD * port0_pos[k][l].x +
 										los_sinZoD_sinAoD * port0_pos[k][l].y +
 										los_cosZoD        * port0_pos[k][l].z);
-									AF_LOS += virtualization_weight_wv[z][a][k][l] *
+									// SNS: per-element LOS attenuation inside AF sum
+									Real sns_w = REAL(1.0);
+									if (ch->sns_any_limited) {
+										Real pos_h = l * BS_dH;
+										Real pos_v = k * BS_dV;
+										sns_w = compute_sns_attenuation(pos_h, pos_v, ch->sns_vr_los, g_sns_rolloff_C);
+									}
+									AF_LOS += virtualization_weight_wv[z][a][k][l] * sns_w *
 										ComplexReal(cos(phase), sin(phase));
 								}
 							}

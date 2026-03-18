@@ -213,6 +213,16 @@ void CHANNEL::Reset2Default(void)
 			}
 		}
 	}
+
+	// SNS reset
+	sns_Pr_sns = 0;
+	sns_any_limited = false;
+	sns_vr_los.limited = false;
+	sns_rsrp_power_atten_los = REAL(1.0);
+	for (int i = 0; i < MAX_NUM_CLUSTERS; i++) {
+		sns_vr[i].limited = false;
+		sns_rsrp_power_atten[i] = REAL(1.0);
+	}
 }
 
 void CHANNEL::Set_channel(Real _distance, bool _Indoor, int _bs_idx, int _ms_idx, LOCATION _bs_location, LOCATION _ms_location)
@@ -285,6 +295,8 @@ void CHANNEL::Set_SmallScaleParameter(int _bs_idx, int _ue_idx)
 
 	Set_DELAY();
 	Set_POWER();
+	Generate_VisibilityRegion();
+	Compute_SNS_RSRP_Attenuation();
 	Find_Strong2Clusters();
 	Set_AOAAOD(_bs_idx, _ue_idx);
 	Set_ZOAZOD(_bs_idx, _ue_idx);
@@ -1043,7 +1055,7 @@ void CHANNEL::Set_PATHLOSS()
 			Real g;
 			Real C;
 			Real hE;
-
+			/*
 			if (distance > 18.)
 			{
 				g = (5.0 / 4.0) * pow((distance / 100), 3) * exp(-1 * distance / 150);
@@ -1070,6 +1082,9 @@ void CHANNEL::Set_PATHLOSS()
 			{
 				hE = floor((ms_height_in_channel - 1.5 - 9.) / 3. * randnum.u()) * 3. + 12.;
 			}
+			*/
+
+			hE = 1;
 
 			Real d_BP = 4 * (ms_height_in_channel - hE) * (_bs_height - hE) * carrier_freq / light_speed;
 			Real distance_3d;
@@ -1159,7 +1174,7 @@ void CHANNEL::Set_PATHLOSS()
 					else if (d_BP < distance)
 					{
 						sigma_SF = 4.;
-						pathloss = 40 * log10(distance_3d) + 32.4 + 20. * log10(carrier_freq / 1000000000.) - 9.5 * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
+						pathloss = 32.4 + 40 * log10(distance_3d)  + 20. * log10(carrier_freq / 1000000000.) - 9.5 * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
 					}
 				}
 				//////////////////////////////////////////////// NLOS
@@ -1173,12 +1188,19 @@ void CHANNEL::Set_PATHLOSS()
 					else if (d_BP < distance)
 					{
 						sigma_SF = 4.;
-						pathloss = 40 * log10(distance_3d) + 32.4 + 20. * log10(carrier_freq / 1000000000.) - 9.5 * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
+						pathloss = 32.4 + 40 * log10(distance_3d) + 20. * log10(carrier_freq / 1000000000.) - 9.5 * log10(pow(d_BP, 2) + pow((_bs_height - ms_height_in_channel), 2));
 					}
 					pathloss_2 = 22.4 + 35.3 * log10(distance_3d) + 21.3 * log10(carrier_freq / 1000000000.) - 0.3 * (ms_height_in_channel - 1.5);
 
 					pathloss = MAX(pathloss, pathloss_2);
+					sigma_SF = 7.82;
 				}
+
+				if (Propagation == OUT2IN_propagation)
+				{
+					sigma_SF = 7;
+				}
+
 			}
 			else if (Channel_Model_Type == 2)
 			{
@@ -1247,6 +1269,12 @@ void CHANNEL::Set_PATHLOSS()
 						pathloss = MAX(pathloss, pathloss_2);
 					}
 				}
+
+				if (Propagation == OUT2IN_propagation)
+				{
+					sigma_SF = 7;
+				}
+
 			}
 
 		}
@@ -2214,29 +2242,42 @@ void CHANNEL::Set_Channel_Parameters()
 			else if (Channel_Model_Type == 1)
 			{
 				if (carrier_freq > 500000000) /// 0.5GHz < fc <= 100GHz
-				// if (carrier_freq > 500000000 && carrier_freq <= 100000000000) /// 0.5GHz < fc <= 100GHz
 				{
+					// ===== TR 38.901 Table 7.5-6 Part 1: UMi-Street Canyon =====
+					Real fc = (carrier_freq / 1000000000.);  // fc [GHz]
+
 					if (Propagation == 1) // LOS
 					{
-						num_path = 12; // Number of clusters
+						num_path = 12;
 						r_tau = 3;
 
-						// K_factor = normal(9, 5);
 						mu_K_factor = 9.;
 						sigma_K_factor = 5;
-						K_factor = pow(10, normal(mu_K_factor, sigma_K_factor) / 10); //
+						K_factor = pow(10, normal(mu_K_factor, sigma_K_factor) / 10);
 
-						mu_DS = -7.14 - 0.24 * log10(1 + (carrier_freq / 1000000000));
-						sigma_DS = 0.38;
-						DS = pow(10, normal(mu_DS, sigma_DS)); // = sigma_tau in M.2135
+						if (channel_param_legacy) {
+							// Legacy (e00) frequency-dependent formulas
+							mu_DS = -7.14 - 0.24 * log10(1 + fc);
+							sigma_DS = 0.38;
+							mu_ASD = 1.21 - 0.05 * log10(1 + fc);
+							sigma_ASD = 0.41;
+							mu_ASA = 1.73 - 0.08 * log10(1 + fc);
+							sigma_ASA = 0.28 + 0.014 * log10(1 + fc);
+							mu_ZSA = 0.73 - 0.1 * log10(1 + fc);
+							sigma_ZSA = 0.34 - 0.04 * log10(1 + fc);
+						} else {
+							// Current spec (V19/j10) frequency-dependent formulas
+							mu_DS = -0.18 * log10(1 + fc) - 7.28;
+							sigma_DS = 0.39;
+							mu_ASD = -0.05 * log10(1 + fc) + 1.21;
+							sigma_ASD = 0.08 * log10(1 + fc) + 0.29;
+							mu_ASA = -0.07 * log10(1 + fc) + 1.66;
+							sigma_ASA = 0.021 * log10(1 + fc) + 0.26;
+							mu_ZSA = -0.11 * log10(1 + fc) + 0.81;
+							sigma_ZSA = -0.03 * log10(1 + fc) + 0.29;
+						}
+						DS = pow(10, normal(mu_DS, sigma_DS));
 
-						mu_ASD = 1.21 - 0.05 * log10(1 + (carrier_freq / 1000000000));
-						sigma_ASD = 0.41;
-						mu_ASA = 1.73 - 0.08 * log10(1 + (carrier_freq / 1000000000));
-						sigma_ASA = 0.28 + 0.014 * log10(1 + (carrier_freq / 1000000000));
-
-						mu_ZSA = 0.73 - 0.1 * log10(1 + (carrier_freq / 1000000000));
-						sigma_ZSA = 0.34 - 0.04 * log10(1 + (carrier_freq / 1000000000));
 						mu_ZSD = MAX(-0.21, -14.8 * (distance / 1000) + 0.01 * abs(ms[self_ms_idx].MS_HEIGHT_FINAL - _bs_height) + 0.83);
 						sigma_ZSD = 0.35;
 						mu_offset_ZOD = 0;
@@ -2251,39 +2292,51 @@ void CHANNEL::Set_Channel_Parameters()
 					}
 					else if (Propagation == 0) //// NLOS
 					{
-						num_path = 19; // Number of clusters
+						num_path = 19;
 						r_tau = 2.1;
 
 						K_factor = -1; // N/A
 						mu_K_factor = -1;
 						sigma_K_factor = -1;
 
-						mu_DS = -6.83 - 0.24 * log10(1 + (carrier_freq / 1000000000));
-						sigma_DS = 0.28 + 0.16 * log10(1 + (carrier_freq / 1000000000));
-						DS = pow(10, normal(mu_DS, sigma_DS)); // = sigma_tau in M.2135
+						if (channel_param_legacy) {
+							// Legacy (e00) frequency-dependent formulas
+							mu_DS = -6.83 - 0.24 * log10(1 + fc);
+							sigma_DS = 0.28 + 0.16 * log10(1 + fc);
+							mu_ASD = 1.53 - 0.23 * log10(1 + fc);
+							sigma_ASD = 0.33 + 0.11 * log10(1 + fc);
+							mu_ASA = 1.81 - 0.08 * log10(1 + fc);
+							sigma_ASA = 0.3 + 0.05 * log10(1 + fc);
+							mu_ZSA = 0.92 - 0.04 * log10(1 + fc);
+							sigma_ZSA = 0.41 - 0.07 * log10(1 + fc);
+						} else {
+							// Current spec (V19/j10) frequency-dependent formulas
+							mu_DS = -0.22 * log10(1 + fc) - 6.87;
+							sigma_DS = 0.19 * log10(1 + fc) + 0.22;
+							mu_ASD = -0.24 * log10(1 + fc) + 1.54;
+							sigma_ASD = 0.10 * log10(1 + fc) + 0.33;
+							mu_ASA = -0.07 * log10(1 + fc) + 1.76;
+							sigma_ASA = 0.05 * log10(1 + fc) + 0.27;
+							mu_ZSA = -0.03 * log10(1 + fc) + 0.92;
+							sigma_ZSA = -0.05 * log10(1 + fc) + 0.35;
+						}
+						DS = pow(10, normal(mu_DS, sigma_DS));
 
-						mu_ASD = 1.53 - 0.23 * log10(1 + (carrier_freq / 1000000000));
-						sigma_ASD = 0.33 + 0.11 * log10(1 + (carrier_freq / 1000000000));
-						mu_ASA = 1.81 - 0.08 * log10(1 + (carrier_freq / 1000000000));
-						sigma_ASA = 0.3 + 0.05 * log10(1 + (carrier_freq / 1000000000));
-
-						mu_ZSA = 0.92 - 0.04 * log10(1 + (carrier_freq / 1000000000));
-						sigma_ZSA = 0.41 - 0.07 * log10(1 + (carrier_freq / 1000000000));
 						mu_ZSD = MAX(-0.5, -3.1 * (distance / 1000) + 0.01 * MAX(ms[self_ms_idx].MS_HEIGHT_FINAL - _bs_height, 0) + 0.2);
 						sigma_ZSD = 0.35;
 						mu_offset_ZOD = -1 * pow(10, -1.5 * log10(MAX(10, distance)) + 3.3);
 
 						cluster_DS = 11;
-						cluster_ASD = 5;
-						cluster_ASA = 8;
-						cluster_ZSA = 3;
+						cluster_ASD = 10;
+						cluster_ASA = 22;
+						cluster_ZSA = 7;
 
-						XPR = normal(9, 5);
-						cluster_shadowing = 4;
+						XPR = normal(8, 3);
+						cluster_shadowing = 3;
 					}
 					else if (Propagation == 2) ///// OUT2IN
 					{
-						num_path = 12; // Number of clusters
+						num_path = 12;
 						r_tau = 2.2;
 
 						K_factor = -1; // N/A
@@ -2292,12 +2345,12 @@ void CHANNEL::Set_Channel_Parameters()
 
 						mu_DS = -6.62;
 						sigma_DS = 0.32;
-						DS = pow(10, normal(mu_DS, sigma_DS)); // = sigma_tau in M.2135
+						DS = pow(10, normal(mu_DS, sigma_DS));
 
 						mu_ASD = 1.25;
 						sigma_ASD = 0.42;
-						mu_ASA = 1.25;
-						sigma_ASA = 0.42;
+						mu_ASA = 1.76;
+						sigma_ASA = 0.16;
 
 						mu_ZSA = 1.01;
 						sigma_ZSA = 0.43;
@@ -3251,6 +3304,185 @@ void CHANNEL::Set_POWER()
 	}
 }
 
+// ====================================================================
+// BS-side Spatial Non-Stationarity: Generate Visibility Regions
+// j20 Section 7.6.14.1.3 (Stochastic VR Model)
+// Called after Set_POWER() — uses power[] (linear) per cluster
+// ====================================================================
+static void sns_setup_corner(ClusterVR& vr, Real a, Real b, Real W, Real H)
+{
+	// 50% left/right, 50% top/bottom (independent)
+	bool right = (randnum.u() < REAL(0.5));
+	bool top   = (randnum.u() < REAL(0.5));
+
+	vr.a = a;
+	vr.b = b;
+
+	if (!right && !top) {       // bottom-left
+		vr.x0 = REAL(0.0);  vr.y0 = REAL(0.0);
+		vr.xa = a;           vr.yb = b;
+		vr.xA = W;           vr.yB = H;
+	} else if (right && !top) { // bottom-right
+		vr.x0 = W;           vr.y0 = REAL(0.0);
+		vr.xa = W - a;       vr.yb = b;
+		vr.xA = REAL(0.0);   vr.yB = H;
+	} else if (!right && top) { // top-left
+		vr.x0 = REAL(0.0);  vr.y0 = H;
+		vr.xa = a;           vr.yb = H - b;
+		vr.xA = W;           vr.yB = REAL(0.0);
+	} else {                    // top-right
+		vr.x0 = W;           vr.y0 = H;
+		vr.xa = W - a;       vr.yb = H - b;
+		vr.xA = REAL(0.0);   vr.yB = REAL(0.0);
+	}
+
+	Real dx = vr.xA - vr.xa;
+	Real dy = vr.yB - vr.yb;
+	vr.D_n = sqrt(dx * dx + dy * dy);
+}
+
+void CHANNEL::Generate_VisibilityRegion()
+{
+	if (!g_sns_bs_enabled) {
+		sns_any_limited = false;
+		return;
+	}
+
+	// Step 1: Per-UT visibility probability — truncated normal clamped to [0,1]
+	// Table 7.6.14.1.2-1: μ, σ per scenario
+	Real Pr_raw = normal(g_sns_mu_P_vis, g_sns_sigma_P_vis);
+	sns_Pr_sns = MAX(REAL(0.0), MIN(REAL(1.0), Pr_raw));
+
+	// Step 2: Antenna array dimensions in wavelengths (including panel groups)
+	Real W = (BS_N - 1) * BS_dH + (BS_Ng - 1) * (BS_N * BS_dH + BS_dgH);
+	Real H = (BS_M - 1) * BS_dV + (BS_Mg - 1) * (BS_M * BS_dV + BS_dgV);
+
+	// Step 3: Find max cluster power (dB)
+	// Per spec (Eq. 7.6-57): "In the case of LOS condition, the LOS path is considered
+	// as an additional cluster, and the power ratio of the LOS path to NLOS clusters
+	// follows the Ricean K-factor generated in Clause 7.5."
+	// Use powerForAngles[n] which includes K-factor scaling (Eq. 7.5-8):
+	//   LOS: powerForAngles[0] = power[0]/(K+1) + K/(K+1)
+	//   NLOS: powerForAngles[n] = power[n]/(K+1)
+	// For NLOS case, powerForAngles[n] = power[n] (no K-factor).
+	Real P_max_lin = REAL(0.0);
+	for (int n = 0; n < num_path; n++) {
+		if (powerForAngles[n] > P_max_lin) P_max_lin = powerForAngles[n];
+	}
+	if (P_max_lin <= REAL(0.0)) {
+		sns_any_limited = false;
+		return;
+	}
+	Real P_max_dB = REAL(10.0) * log10(P_max_lin);
+
+	sns_any_limited = false;
+
+	// NLOS clusters
+	for (int n = 0; n < num_path; n++) {
+		if (powerForAngles[n] <= REAL(0.0)) {
+			sns_vr[n].limited = false;
+			continue;
+		}
+
+		// Step 4: random draw to determine if cluster is visibility-limited
+		Real x_n = randnum.u();
+		if (x_n < sns_Pr_sns && W > REAL(0.0) && H > REAL(0.0)) {
+			// Step 5: This cluster is visibility-limited
+			sns_vr[n].limited = true;
+
+			Real P_n_dB = REAL(10.0) * log10(powerForAngles[n]);
+			Real delta = normal(REAL(0.0), g_sns_vr_delta);  // N(0, σ_δ)
+
+			// V_n = A * exp(-(Pmax - Pn)/R) + B + δ, clamped to [0,1]  (Eq. 7.6-57)
+			Real V_n = g_sns_vr_A * exp(-(P_max_dB - P_n_dB) / g_sns_vr_R) + g_sns_vr_B + delta;
+			V_n = MAX(REAL(0.0), MIN(REAL(1.0), V_n));
+			sns_vr[n].V_n = V_n;
+
+			// a ~ unif(V_n*W, W), b = V_n*H*W/a (constant area = V_n*W*H)
+			Real a_min = V_n * W;
+			Real a = a_min + randnum.u() * (W - a_min);
+			Real b = (a > REAL(0.0)) ? (V_n * H * W / a) : H;
+			if (b > H) { b = H; a = (H > REAL(0.0)) ? (V_n * H * W / b) : W; }
+
+			sns_setup_corner(sns_vr[n], a, b, W, H);
+			sns_any_limited = true;
+		} else {
+			sns_vr[n].limited = false;
+		}
+	}
+
+	// Zero out unused clusters
+	for (int n = num_path; n < MAX_NUM_CLUSTERS; n++) {
+		sns_vr[n].limited = false;
+	}
+
+	// LOS path: shares VR with cluster 0 (first cluster).
+	// powerForAngles[0] = power[0]/(K+1) + K/(K+1) already includes LOS power,
+	// so sns_vr[0]'s VR already reflects the LOS contribution.
+	// The LOS path and cluster 0 share the same spatial direction,
+	// so they should have the same visibility region.
+	if (Propagation == LOS_propagation) {
+		sns_vr_los = sns_vr[0];
+	} else {
+		sns_vr_los.limited = false;
+	}
+}
+
+// Forward declaration (defined later in this file, before GetChannelImpulseResponse)
+static inline Real compute_sns_attenuation(
+	Real pos_h, Real pos_v, const ClusterVR& vr, Real rolloff_C);
+
+// ====================================================================
+// Compute average SNS power attenuation across all BS elements
+// for each cluster. Used by Get_RSRP() to reflect SNS in coupling loss.
+// Must be called after Generate_VisibilityRegion().
+// ====================================================================
+void CHANNEL::Compute_SNS_RSRP_Attenuation()
+{
+	// Default: no attenuation
+	for (int n = 0; n < MAX_NUM_CLUSTERS; n++)
+		sns_rsrp_power_atten[n] = REAL(1.0);
+	sns_rsrp_power_atten_los = REAL(1.0);
+
+	if (!sns_any_limited) return;
+
+	int M = BS_M;
+	int N = BS_N;
+	Real total_elements = (Real)(M * N);
+
+	// NLOS clusters
+	for (int n = 0; n < num_path; n++) {
+		if (!sns_vr[n].limited) {
+			sns_rsrp_power_atten[n] = REAL(1.0);
+			continue;
+		}
+		Real sum_gamma = REAL(0.0);
+		for (int s_m = 0; s_m < M; s_m++) {
+			Real pos_v = s_m * BS_dV;
+			for (int s_n = 0; s_n < N; s_n++) {
+				Real pos_h = s_n * BS_dH;
+				Real atten = compute_sns_attenuation(pos_h, pos_v, sns_vr[n], g_sns_rolloff_C);
+				sum_gamma += atten * atten;  // power domain (atten is amplitude)
+			}
+		}
+		sns_rsrp_power_atten[n] = sum_gamma / total_elements;
+	}
+
+	// LOS path
+	if (sns_vr_los.limited) {
+		Real sum_gamma = REAL(0.0);
+		for (int s_m = 0; s_m < M; s_m++) {
+			Real pos_v = s_m * BS_dV;
+			for (int s_n = 0; s_n < N; s_n++) {
+				Real pos_h = s_n * BS_dH;
+				Real atten = compute_sns_attenuation(pos_h, pos_v, sns_vr_los, g_sns_rolloff_C);
+				sum_gamma += atten * atten;
+			}
+		}
+		sns_rsrp_power_atten_los = sum_gamma / total_elements;
+	}
+}
+
 void CHANNEL::Find_Strong2Clusters()
 {
 	/////////////////////////////////////////////////
@@ -4168,6 +4400,14 @@ void CHANNEL::Set_SUBCLUSTER()
 	power[strongest_power_idx]  = power[strongest_power_idx ] * 10. / 20.;
 	power[strongest_power_idx2] = power[strongest_power_idx2] * 10. / 20.;
 
+	// SNS: Subclusters inherit parent cluster's Visibility Region
+	// Subclusters are split from the 2 strongest clusters, so they share
+	// the same spatial visibility characteristics.
+	sns_vr[num_path]     = sns_vr[strongest_power_idx];
+	sns_vr[num_path + 1] = sns_vr[strongest_power_idx];
+	sns_vr[num_path + 2] = sns_vr[strongest_power_idx2];
+	sns_vr[num_path + 3] = sns_vr[strongest_power_idx2];
+
 	AOA[num_path] = AOA[strongest_power_idx];
 	AOA[num_path + 1] = AOA[strongest_power_idx];
 	AOA[num_path + 2] = AOA[strongest_power_idx2];
@@ -4464,6 +4704,7 @@ void CHANNEL::Set_circular_angle_spread()
 	delete[] flat_pow;
 }
 
+#if 0  // unused functions: Load_precalculate, Update, Update_per_time, Update_per_time_precise — replaced by Update_v2/Update_per_time_v2
 void CHANNEL::Load_precalculate(Real t, int _ms_idx, int _initial_time_offset)
 {
 	ms_idx = _ms_idx;
@@ -5077,6 +5318,7 @@ void CHANNEL::Update_per_time_precise(Real t, int adj_sector, int _ms_idx)
 		}
 	}
 }
+#endif  // unused: Load_precalculate, Update, Update_per_time, Update_per_time_precise
 
 // ====================================================================
 // v2: Channel coefficient generation with K-factor correction and
@@ -5557,6 +5799,7 @@ Real Get_LCS_pi(Real alpha, Real beta, Real gamma, Real GCS_theta, Real GCS_pi)
 
 }
 */
+#if 0  // unused: Get_cos_psi, Get_sin_psi — never called
 Real Get_cos_psi(Real alpha, Real beta, Real gamma, Real GCS_theta, Real GCS_pi)
 {
 	Real A = cos(beta) * cos(gamma) * sin(GCS_theta) - (sin(beta) * cos(gamma) * cos(GCS_pi - alpha) - sin(gamma) * sin(GCS_pi - alpha)) * cos(GCS_theta);
@@ -5578,7 +5821,7 @@ Real Get_sin_psi(Real alpha, Real beta, Real gamma, Real GCS_theta, Real GCS_pi)
 
 	return sin_psi;
 }
-
+#endif  // unused: Get_cos_psi, Get_sin_psi
 
 // ====================================================================
 // Element-Level Channel Matrix Generation (ns-3 GetChannelImpulseResponse style)
@@ -5636,6 +5879,7 @@ void CHANNEL::Allocate_H_usn_memory(int N)
 	H_usn_num_clusters = N;
 }
 
+#if 0  // unused: Reset_H_usn_memory — never called
 void CHANNEL::Reset_H_usn_memory()
 {
 	// Zero-fill all element-level buffers for reuse. No deallocation.
@@ -5673,6 +5917,17 @@ void CHANNEL::Reset_H_usn_memory()
 		H_usn[n].setZero();
 	}
 }
+#endif  // unused: Reset_H_usn_memory
+
+// ====================================================================
+// SNS helper: compute amplitude attenuation for a TX element position
+// relative to a cluster's Visibility Region boundary.
+// j20 Eq. 7.6-58: γ = exp(-d / C)  [power domain]
+// C = roll-off parameter (wavelength units), Table 7.6.14.1.2-3
+// Returns sqrt(γ) for amplitude scaling.
+// pos_h, pos_v: element position in wavelength units (LCS)
+// ====================================================================
+// compute_sns_attenuation() is now defined in h/channel.h (shared with Link.cpp)
 
 void CHANNEL::GetChannelImpulseResponse(int bs_idx, int ms_idx, int sector_idx)
 {
@@ -5790,6 +6045,8 @@ void CHANNEL::GetChannelImpulseResponse(int bs_idx, int ms_idx, int sector_idx)
 		}
 	}
 
+	// (SNS array dimensions now stored in ClusterVR struct)
+
 	// Phase D: Compute H_usn[n](u, s) = Σ_m { √(P_n/M) · raysPreComp · exp(j·rxPhase) · exp(j·txPhase) }
 	for (int n = 0; n < N; n++) {
 		H_usn[n].setZero();
@@ -5850,7 +6107,16 @@ void CHANNEL::GetChannelImpulseResponse(int bs_idx, int ms_idx, int sector_idx)
 						ComplexReal(cos(rxPhase), sin(rxPhase)) *
 						ComplexReal(cos(txPhase), sin(txPhase));
 				}
-				H_usn[n](u, s) = norm * h_val;
+				// SNS: BS-side per-element per-cluster attenuation
+				// Element LCS position: horizontal = s_n * dH, vertical = s_m * dV
+				// (For multi-panel, add ng*dgH / mg*dgV when Phase D supports Mg/Ng)
+				Real sns_atten = REAL(1.0);
+				if (sns_any_limited) {
+					Real pos_h = s_n * BS_dH;
+					Real pos_v = s_m * BS_dV;
+					sns_atten = compute_sns_attenuation(pos_h, pos_v, sns_vr[n], g_sns_rolloff_C);
+				}
+				H_usn[n](u, s) = norm * sns_atten * h_val;
 			}
 		}
 	}
@@ -5943,7 +6209,16 @@ void CHANNEL::GetChannelImpulseResponse(int bs_idx, int ms_idx, int sector_idx)
 					ComplexReal(cos(rxLosPhase), sin(rxLosPhase)) *
 					ComplexReal(cos(txLosPhase), sin(txLosPhase));
 
-				H_usn_LOS(u, s) = scale_los * losRay;
+				// SNS: BS-side LOS attenuation
+				// (LOS path is almost never limited since it dominates total power,
+				//  but included for completeness per spec Section 7.6.14.1.3)
+				Real sns_los_atten = REAL(1.0);
+				if (sns_any_limited) {
+					Real los_pos_h = s_n * BS_dH;
+					Real los_pos_v = s_m * BS_dV;
+					sns_los_atten = compute_sns_attenuation(los_pos_h, los_pos_v, sns_vr_los, g_sns_rolloff_C);
+				}
+				H_usn_LOS(u, s) = scale_los * sns_los_atten * losRay;
 			}
 		}
 

@@ -7,6 +7,55 @@ using namespace Eigen;
 #ifndef _CHANNEL_H_
 #define _CHANNEL_H_
 
+// BS-side Spatial Non-Stationarity: per-cluster Visibility Region (VR) info
+// j20 Section 7.6.14.1.3 (Stochastic VR Model)
+struct ClusterVR {
+	bool  limited;    // true = visibility-limited
+	Real  V_n;        // VR size factor [0,1]
+	Real  a;          // VR width (wavelength units)
+	Real  b;          // VR height (wavelength units)
+	Real  x0, y0;     // reference corner (array corner where VR is anchored)
+	Real  xa, yb;     // VR inner edge (opposite to anchor within VR)
+	Real  xA, yB;     // far array corner (opposite to anchor)
+	Real  D_n;        // sqrt((xA-xa)^2 + (yB-yb)^2) — roll-off normalizer
+};
+
+// Compute per-element SNS amplitude attenuation (Eq. 7.6-58)
+// Returns sqrt(gamma) where gamma is the power attenuation factor.
+// Spec formula: alpha_{i,n} = exp( -C * d / D_n )
+//   where d = distance from element to VR boundary edge
+//         D_n = diagonal distance from VR inner edge to far array corner
+//         C = roll-off factor (Table 7.6.14.1.2-3)
+// pos_h, pos_v: element position in wavelengths
+// Used by both channel.cpp (GetChannelImpulseResponse) and Link.cpp (RSRP)
+static inline Real compute_sns_attenuation(
+	Real pos_h, Real pos_v, const ClusterVR& vr, Real rolloff_C)
+{
+	if (!vr.limited) return REAL(1.0);
+
+	bool inside_x = (fabs(pos_h - vr.x0) <= vr.a);
+	bool inside_y = (fabs(pos_v - vr.y0) <= vr.b);
+
+	if (inside_x && inside_y) return REAL(1.0);
+	if (rolloff_C <= REAL(0.0)) return REAL(1.0);
+	if (vr.D_n <= REAL(0.0)) return REAL(1.0);
+
+	Real dx = fabs(pos_h - vr.xa);
+	Real dy = fabs(pos_v - vr.yb);
+
+	Real d;
+	if (!inside_x && inside_y)
+		d = dx;
+	else if (inside_x && !inside_y)
+		d = dy;
+	else
+		d = sqrt(dx * dx + dy * dy);
+
+	Real gamma = exp(-rolloff_C * d / vr.D_n);  // Eq. 7.6-58: exp(-C * d / D_n)
+
+	return sqrt(gamma);  // power → amplitude
+}
+
 class CHANNEL
 {
 public:
@@ -45,6 +94,8 @@ public:
 	void Reset_H_usn_memory();
 	void Update_H_usn_per_time(Real t, int ms_idx, int sector_idx);
 	void PrecomputeDoppler(int bs_idx, int ms_idx);
+	void Generate_VisibilityRegion();
+	void Compute_SNS_RSRP_Attenuation();
 
 	void Set_AOAAOD_LOS();
 	void Set_AOAAOD_NLOS();
@@ -273,6 +324,17 @@ public:
 
 	bool H_usn_allocated                                = false;
 	int  H_usn_num_clusters                             = 0;
+
+	// === BS-side Spatial Non-Stationarity (SNS) ===
+	ClusterVR sns_vr[MAX_NUM_CLUSTERS];   // NLOS cluster VR
+	ClusterVR sns_vr_los;                 // LOS path VR
+	Real      sns_Pr_sns                 = 0;  // per-UT visibility probability [0,1]
+	bool      sns_any_limited            = false;  // any limited cluster?
+
+	// Average SNS power attenuation per cluster (mean of gamma across BS elements)
+	// Used in RSRP to reflect SNS effect on coupling loss
+	Real      sns_rsrp_power_atten[MAX_NUM_CLUSTERS] = {0,};  // NLOS clusters
+	Real      sns_rsrp_power_atten_los               = 1.0;   // LOS path
 
 private:
 	

@@ -151,6 +151,7 @@ extern Real Total_BS_Tx_power;
 
 extern Real cfg_BS_Tx_Power;
 extern Real cfg_UT_Noise_Figure;
+extern Real cfg_UE_antenna_element_gain;
 
 extern int num_floor;
 extern int num_propagation_condition;
@@ -289,6 +290,16 @@ extern int handheld_mode;            // 0=off, 1=handheld
 extern int handheld_num_ports;       // active ports (e.g., 4 for Config B)
 extern int handheld_port_indices[8]; // 1-based antenna position indices
 extern Real handheld_beta_deg;       // UT β angle (degrees)
+
+// BS-side Spatial Non-Stationarity (SNS) parameters
+extern int  g_sns_bs_enabled;
+extern Real g_sns_mu_P_vis;
+extern Real g_sns_sigma_P_vis;
+extern Real g_sns_vr_A;
+extern Real g_sns_vr_B;
+extern Real g_sns_vr_R;
+extern Real g_sns_vr_delta;
+extern Real g_sns_rolloff_C;
 
 extern ofstream  Calibration_Debug_info;
 

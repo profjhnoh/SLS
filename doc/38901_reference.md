@@ -8,20 +8,21 @@
 ## 목차
 
 1. [코드-Spec 매핑](#1-코드-spec-매핑)
-2. [채널 생성 절차 (Section 7.5)](#2-채널-생성-절차-section-75) — Step 1~12 상세
+2. [안테나 모델링 (Section 7.3)](#2-안테나-모델링-section-73) — BS + UT Handheld model
 3. [Path Loss 모델 (Section 7.4.1)](#3-path-loss-모델-section-741) — UMa, UMi, InH, RMa, InF, SMa
 4. [LOS 확률 모델 (Section 7.4.2)](#4-los-확률-모델-section-742)
 5. [O2I Penetration Loss (Section 7.4.3)](#5-o2i-penetration-loss-section-743)
-6. [안테나 모델링 (Section 7.3)](#6-안테나-모델링-section-73)
+6. [채널 생성 절차 (Section 7.5)](#6-채널-생성-절차-section-75) — Step 1~12 상세
 7. [LSP 파라미터 테이블 (Table 7.5-6)](#7-lsp-파라미터-테이블-table-756) — Part 1~4: UMi/UMa/RMa/InH/InF/SMa + Cross-Correlations + Correlation Distance
 8. [ZSD/ZOD 오프셋 (Table 7.5-7~12)](#8-zsdzod-오프셋-table-757~12)
 9. [Scaling Factor 테이블](#9-scaling-factor-테이블) — Table 7.5-2,3,4,5
-10. [Calibration 파라미터 (Section 7.8)](#10-calibration-파라미터-section-78)
-11. [추가 모델링 컴포넌트 (Section 7.6)](#11-추가-모델링-컴포넌트-section-76) — 산소 흡수, 공간 일관성, Blockage
+10. [Calibration 파라미터 (Section 7.8)](#10-calibration-파라미터-section-78) — Full + BS Side SNS Calibration merged
+11. [추가 모델링 컴포넌트 (Section 7.6)](#11-추가-모델링-컴포넌트-section-76) — 산소 흡수, 공간 일관성, Blockage, SNS
 12. [RSRP 계산 공식 (TR 36.873)](#12-rsrp-계산-공식-tr-36873)
 13. [Annex A: Circular Angle Spread 계산](#13-annex-a-circular-angle-spread-계산)
 
 ---
+
 
 ## 1. 코드-Spec 매핑
 
@@ -42,9 +43,764 @@
 | `src/receive_downlink.cpp` | 수신 처리, SINR/BLER | - |
 | `src/Logging_Point.cpp` | CDF 통계 수집 | 7.8 calibration metrics |
 
----
+## 2. 안테나 모델링 (Section 7.3)
 
-## 2. 채널 생성 절차 (Section 7.5)
+### BS 안테나 어레이 구조
+
+$$
+(M_g, N_g, M, N, P, d_H, d_V, d_{g,H}, d_{g,V})
+$$
+
+- $M_g \times N_g$ = 패널 수 (수직 × 수평)
+- $M \times N$ = 패널당 엘리먼트 수 (수직 × 수평, 동일 편파)
+- $P$ = 편파 수 (1 또는 2)
+- $d_H$, $d_V$ = 엘리먼트 간격 [$\lambda$]
+- $d_{g,H}$, $d_{g,V}$ = 패널 간격 [$\lambda$]
+
+**엘리먼트 위치 계산** (Initiallization.cpp):
+
+$$
+d_{tx}[m][n][p][m_g][n_g].y = n \cdot d_H + n_g \cdot d_{g,H} \quad \text{(수평)}
+$$
+
+$$
+d_{tx}[m][n][p][m_g][n_g].z = m \cdot d_V + m_g \cdot d_{g,V} \quad \text{(수직)}
+$$
+
+### 단일 엘리먼트 방사 패턴 (Table 7.3-1)
+
+**수직 컷:** ($\theta_{3dB} = 65°$, GCS 기준 $\theta$는 zenith 각)
+
+$$
+A_{E,V}(\theta) = -\min\!\left\{ 12 \left(\frac{\theta - 90°}{\theta_{3dB}}\right)^2,\; SLA_V \right\}, \quad SLA_V = 30 \text{ dB}
+$$
+
+**수평 컷:** ($\varphi_{3dB} = 65°$)
+
+$$
+A_{E,H}(\varphi) = -\min\!\left\{ 12 \left(\frac{\varphi}{\varphi_{3dB}}\right)^2,\; A_{\max} \right\}, \quad A_{\max} = 30 \text{ dB}
+$$
+
+**3D 패턴:**
+
+$$
+A_E(\theta, \varphi) = -\min\!\left\{ -\left(A_{E,V}(\theta) + A_{E,H}(\varphi)\right),\; A_{\max} \right\}
+$$
+
+$$
+G_{E,\max} = 8 \text{ dBi}
+$$
+
+### Antenna Port Mapping (Beamtilt)
+
+$$
+w_m = \frac{1}{\sqrt{M}} \exp\!\left(-j \frac{2\pi}{\lambda} (m-1) d_V \cos\theta_{etilt}\right) \tag{7.3-1}
+$$
+
+### Polarized Antenna Modelling
+
+**Model-2** (calibration에서 사용):
+
+$$
+F_{\theta'}(\theta', \varphi') = \sqrt{A'(\theta', \varphi')} \cdot \cos(\zeta) \tag{7.3-4}
+$$
+
+$$
+F_{\varphi'}(\theta', \varphi') = \sqrt{A'(\theta', \varphi')} \cdot \sin(\zeta) \tag{7.3-5}
+$$
+
+- $\zeta = 0°$: 수직 편파
+- $\zeta = \pm 45°$: X-pol 쌍
+
+**Model-1** (더 정확):
+
+$$
+\begin{bmatrix}
+F_{\theta'} \\
+F_{\varphi'}
+\end{bmatrix}
+=
+\begin{bmatrix}
++\cos\psi & -\sin\psi \\
++\sin\psi & +\cos\psi
+\end{bmatrix}
+\begin{bmatrix}
+F_{\theta''} \\
+F_{\varphi''}
+\end{bmatrix} \tag{7.3-3}
+$$
+
+### UT 안테나 모델 (Handheld) — Section 7.3
+
+#### 디바이스 형상 및 안테나 배치
+
+Handheld UT는 평면 직사각형 디바이스로 모델링한다:
+
+$$
+\text{Device dimensions} = (X, Y, Z) = (15 \text{ cm},\; 7 \text{ cm},\; 0 \text{ cm}) \quad \text{(depth, width, height)}
+$$
+
+**8개 안테나 후보 위치** (Figure 7.3-2): 4개 꼭짓점 + 4개 변 중앙점. 디바이스 중심이 원점이며, 기준 방향($\Omega_{UT}=0°$)에서 긴 변(15cm)이 $x'$축, 짧은 변(7cm)이 $y'$축, 법선이 $z'$축이다.
+
+| 위치 | 좌표 $(x', y')$ [cm] | 중심→안테나 방위각 $\phi_c$ |
+|:---:|:---:|:---:|
+| (1) | $(-7.5,\; +3.5)$ | $\text{atan2}(3.5, -7.5) \approx 155°$ |
+| (2) | $(0,\; +3.5)$ | $90°$ |
+| (3) | $(+7.5,\; +3.5)$ | $\text{atan2}(3.5, 7.5) \approx 25°$ |
+| (4) | $(+7.5,\; 0)$ | $0°$ |
+| (5) | $(+7.5,\; -3.5)$ | $\text{atan2}(-3.5, 7.5) \approx -25°$ |
+| (6) | $(0,\; -3.5)$ | $-90°$ |
+| (7) | $(-7.5,\; -3.5)$ | $\text{atan2}(-3.5, -7.5) \approx -155°$ |
+| (8) | $(-7.5,\; 0)$ | $180°$ |
+
+> **Note:** 번호 배치는 Figure 7.3-2 원본 참조. CPE(9개 위치)와 달리 handheld는 중심 위치 없이 8개이다.
+
+#### 기준 방향 (Reference Orientation)
+
+기준 방향에서 GCS와 UT LCS가 일치한다 (Figure 7.3-3):
+
+$$
+\Omega_{UT,\alpha} = 0°, \quad \Omega_{UT,\beta} = 0°, \quad \Omega_{UT,\gamma} = 0°
+$$
+
+디바이스가 수평으로 놓인 상태에서 법선벡터($z'$축)가 천정을 가리킨다.
+
+#### 단일 엘리먼트 방사 패턴 (Table 7.3-2)
+
+Table 7.3-2에서 안테나는 $\hat{\theta}''$, $\hat{\varphi}''$ 방향으로 oriented되어 있으며, boresight는 $\theta'' = 90°$, $\varphi'' = 0°$ 방향($x'$축, broadside)이다.
+
+**수직 컷** (vertical cut of the radiation power pattern):
+
+$$
+A''_{E,V}(\theta'') = -\min\!\left\{ 12 \left(\frac{\theta'' - 90°}{\theta_{3dB}}\right)^2,\; SLA_V \right\} \text{ [dB]}
+$$
+
+$$
+\theta_{3dB} = 125°, \quad SLA_V = 22.5 \text{ dB}
+$$
+
+**수평 컷** (horizontal cut of the radiation power pattern):
+
+$$
+A''_{E,H}(\varphi'') = -\min\!\left\{ 12 \left(\frac{\varphi''}{\varphi_{3dB}}\right)^2,\; A_{\max} \right\} \text{ [dB]}
+$$
+
+$$
+\varphi_{3dB} = 125°, \quad A_{\max} = 22.5 \text{ dB}
+$$
+
+**3D 방사 패턴:**
+
+$$
+A''_{E}(\theta'', \varphi'') = -\min\!\left\{ -\left(A''_{E,V}(\theta'') + A''_{E,H}(\varphi'')\right),\; A_{\max} \right\} \text{ [dB]}
+$$
+
+**최대 지향성 이득:**
+
+$$
+G_{E,\max} = 5.3 \text{ dBi}
+$$
+
+**최종 엘리먼트 패턴 (linear scale):**
+
+$$
+A'(\theta'', \varphi'') = G_{E,\max} + A''_E(\theta'', \varphi'') \text{ [dB]}
+$$
+
+> **Table 7.3-1 (BS)과의 비교:**
+>
+> | 파라미터 | Table 7.3-2 (Handheld UT) | Table 7.3-1 (BS) |
+> |:---:|:---:|:---:|
+> | $\theta_{3dB}$ | $125°$ | $65°$ |
+> | $\varphi_{3dB}$ | $125°$ | $65°$ |
+> | $SLA_V$ | $22.5$ dB | $30$ dB |
+> | $A_{\max}$ | $22.5$ dB | $30$ dB |
+> | $G_{E,\max}$ | $5.3$ dBi | $8$ dBi |
+>
+> Handheld UT는 BS 대비 빔폭이 약 2배 넓고 (125° vs 65°), 최대 감쇄가 낮으며 (22.5 vs 30 dB), 이득이 작다 (5.3 vs 8 dBi). 핸드폰 안테나의 넓은 방사 특성을 반영한다.
+
+#### 편파 모델링 (Polarized Antenna Modelling for Handheld UT)
+
+##### 기준 방사 패턴 (Reference Radiation Pattern)
+
+**Single polarization** (1개 안테나 패턴, 주로 FR1에서 사용):
+
+$$
+F'_{\theta}(\theta'', \varphi'') = \sqrt{10^{A'(\theta'',\varphi'')/10}}, \quad F'_{\varphi}(\theta'', \varphi'') = 0
+$$
+
+기준 편파 방향은 $\hat{\theta}''$ 방향 (수직 편파)이다.
+
+**Dual polarization** (2개 안테나 패턴, FR2 전용):
+
+- 첫 번째 패턴: $F'_{\theta} = \sqrt{10^{A'/10}}$, $F'_{\varphi} = 0$
+- 두 번째 패턴: $F'_{\theta} = 0$, $F'_{\varphi} = \sqrt{10^{A'/10}}$
+
+##### 안테나 위치별 편파 방향 (Figure 7.3-7)
+
+각 안테나의 실제 편파 방향은 **디바이스 평면에 평행**하고, **중심→안테나 방향 벡터에 수직**이다.
+
+중심→안테나 방향 벡터 $\vec{d}_u = (dx_u, dy_u)$에 대해, single-pol 편파 방향 벡터:
+
+$$
+\vec{p}_u = \frac{(-dy_u,\; dx_u,\; 0)}{|(-dy_u,\; dx_u)|}
+$$
+
+| 위치 | 중심→안테나 $(dx, dy)$ | 편파 방향 $\vec{p}_u$ |
+|:---:|:---:|:---:|
+| (1) | $(-7.5, +3.5)$ | $(-3.5, -7.5, 0)/8.28$ |
+| (2) | $(0, +3.5)$ | $(-1, 0, 0)$ |
+| (3) | $(+7.5, +3.5)$ | $(-3.5, +7.5, 0)/8.28$ |
+| (4) | $(+7.5, 0)$ | $(0, +1, 0)$ |
+| (5) | $(+7.5, -3.5)$ | $(+3.5, +7.5, 0)/8.28$ |
+| (6) | $(0, -3.5)$ | $(+1, 0, 0)$ |
+| (7) | $(-7.5, -3.5)$ | $(+3.5, -7.5, 0)/8.28$ |
+| (8) | $(-7.5, 0)$ | $(0, -1, 0)$ |
+
+**Dual polarization** (FR2, Figure 7.3-8):
+
+- 첫 번째 패턴: single-pol 방향에서 중심→안테나 축을 기준으로 $+45°$ 회전
+- 두 번째 패턴: 첫 번째에 수직이고, 중심→안테나 방향에도 수직
+
+##### 안테나별 회전 각도 $(\alpha_u, \beta_u, \gamma_u)$
+
+기준 패턴의 $\hat{\theta}''$ 편파(수직)를 각 안테나의 실제 편파 방향으로 변환하기 위한 3D 회전 각도:
+
+$$
+\beta_u = 90° \quad \text{(}\hat{z}\text{ 방향 편파를 디바이스 평면으로 눕힘)}
+$$
+
+$$
+\alpha_u = \text{atan2}(p_{u,y},\; p_{u,x}) \quad \text{(편파 방향의 방위각)}
+$$
+
+$$
+\gamma_u = 0° \quad \text{(single polarization의 경우 추가 슬랜트 없음)}
+$$
+
+#### 2단계 좌표 회전 (Field Pattern Rotation)
+
+Handheld UT의 안테나 field pattern을 GCS로 변환하는 과정은 **2단계 회전**이다:
+
+**Stage 1 — 안테나 개별 회전** (Eq. 7.3-6, 7.3-7, 7.3-8):
+
+기준 패턴 $(F'_{\theta}, F'_{\varphi})$를 각 안테나 $u$의 방향으로 회전:
+
+$$
+\begin{bmatrix}
+F''_{\theta,u}(\theta'_u, \varphi'_u) \\
+F''_{\varphi,u}(\theta'_u, \varphi'_u)
+\end{bmatrix}
+=
+\begin{bmatrix}
+\cos\psi_u & -\sin\psi_u \\
+\sin\psi_u & \cos\psi_u
+\end{bmatrix}
+\begin{bmatrix}
+F'_{\theta}(\theta'', \varphi'') \\
+F'_{\varphi}(\theta'', \varphi'')
+\end{bmatrix} \tag{7.3-6, 7.3-7}
+$$
+
+여기서:
+
+- $(\theta'', \varphi'') \to (\theta'_u, \varphi'_u)$: Eq. 7.1-7, 7.1-8을 $(\alpha_u, \beta_u, \gamma_u)$로 적용
+- $\psi_u$: Eq. 7.1-15를 $(\alpha_u, \beta_u, \gamma_u)$로 계산:
+
+$$
+\psi_u = \text{atan2}\!\left(
+\sin\beta_u \sin\gamma_u \cos(\varphi-\alpha_u) + \cos\beta_u \sin\gamma_u \sin\theta - \sin\beta_u \cos\gamma_u \cos\theta,\;
+\cos\beta_u \cos\gamma_u - \sin\beta_u \sin\gamma_u \cos(\varphi-\alpha_u) \sin\theta
+\right) \tag{7.1-15}
+$$
+
+**Stage 2 — UT 전체 GCS 회전** (Eq. 7.1-11):
+
+Stage 1 결과를 UT의 GCS 방향 $(\Omega_{UT,\alpha}, \Omega_{UT,\beta}, \Omega_{UT,\gamma})$으로 최종 회전:
+
+$$
+\begin{bmatrix}
+F_{\theta}(\theta, \varphi) \\
+F_{\varphi}(\theta, \varphi)
+\end{bmatrix}
+=
+\begin{bmatrix}
+\cos\psi_{UT} & -\sin\psi_{UT} \\
+\sin\psi_{UT} & \cos\psi_{UT}
+\end{bmatrix}
+\begin{bmatrix}
+F''_{\theta,u}(\theta'_u, \varphi'_u) \\
+F''_{\varphi,u}(\theta'_u, \varphi'_u)
+\end{bmatrix} \tag{7.1-11}
+$$
+
+여기서 $\psi_{UT}$는 $(\Omega_{UT,\alpha}, \Omega_{UT,\beta}, \Omega_{UT,\gamma})$와 GCS 각도 $(\theta, \varphi)$로 Eq. 7.1-15 적용.
+
+> **현재 코드와의 차이:** 현재 `Get_UE_antenna_pattern()`은 1단계 회전(UT 전체 방향)만 수행한다. Handheld 모델에서는 안테나별 개별 회전(Stage 1)이 추가되어 **총 2단계 회전**이 필요하다.
+
+#### UT Calibration 방향
+
+| 시나리오 | $\Omega_{UT,\alpha}$ | $\Omega_{UT,\beta}$ | $\Omega_{UT,\gamma}$ |
+|:---:|:---:|:---:|:---:|
+| One-hand blockage (SNS) | $\text{uniform}[0°, 360°]$ | $45°$ | $0°$ |
+| Dual-hand blockage (SNS) | $\text{uniform}[0°, 360°]$ | $0°$ | $45°$ |
+| Hand + head blockage (SNS) | $\text{uniform}[0°, 360°]$ | $90°$ | $0°$ |
+| All other cases (default) | $\text{uniform}[0°, 360°]$ | $45°$ | $0°$ |
+
+#### Spatial Non-Stationarity (SNS) at BS Side — Section 7.6.14.1.3 (Stochastic Model)
+
+BS 안테나 어레이의 각 element별로 클러스터 가시성(visibility)이 다르게 적용되는 모델.
+Clause 7.5의 Step 9와 Step 10 사이에 아래 추가 단계를 수행하여, 안테나 element별 power attenuation factor $\alpha_{i,n}$을 계산한다.
+
+**Step I: 클러스터별 visibility limitation 판정 (Eq. 7.6-53, 7.6-54)**
+
+각 클러스터 $n$에 대해, $x_n < Pr_{sns}$이면 visibility-limited로 판정한다.
+
+$$x_n \sim U(0,1) \tag{7.6-53}$$
+
+$$Pr_{sns} = \text{clamp}\left(N(\mu_{vis}, \sigma^2_{vis}),\; 0,\; 1\right) \tag{7.6-54}$$
+
+$Pr_{sns}$는 UT당 1회 생성, $x_n$은 클러스터마다 독립 생성. 파라미터 $\mu_{vis}$, $\sigma_{vis}$는 Table 7.6.14.1.2-1 참조.
+
+**Step II: Visibility Region (VR) 생성 (Eq. 7.6-55, 7.6-56, 7.6-57)**
+
+Visibility-limited 클러스터에 대해 직사각형 VR($a \times b$)을 생성:
+
+$$a \sim U(V_n \cdot W,\; W) \tag{7.6-55}$$
+
+$$b = V_n \cdot H \cdot W / a \tag{7.6-56}$$
+
+여기서 $W$, $H$는 안테나 어레이의 수평/수직 크기(wavelength 단위). $V_n$은 파워 기반 VR 크기 factor:
+
+$$V_n = A \cdot \exp\!\left(-\frac{\max(P_n) - P_n}{R}\right) + B + \delta \tag{7.6-57}$$
+
+$V_n$은 $[0, 1]$로 clamp. 여기서:
+
+- $P_n$: 클러스터 $n$의 power (dB). **Eq. 7.5-6에서 생성된 power를 참조하되, LOS 조건에서는 K-factor가 적용된 `powerForAngles` 사용** (Eq. 7.5-8: $P'_1 = P_1/(K_R+1) + K_R/(K_R+1)$, $P'_n = P_n/(K_R+1)$).
+- $\max(P_n)$: 모든 클러스터 중 최대 power (LOS 조건에서 `powerForAngles[0]`이 K-factor로 인해 최대).
+- $\delta \sim N(0, \sigma_\delta)$: **exp 바깥에서 additive로 더해짐** ($A \cdot \exp(\ldots) + B + \delta$, NOT $A \cdot \exp(\ldots + \delta)$).
+- $A$, $B$, $R$, $\sigma_\delta$: Table 7.6.14.1.2-2 참조.
+
+각 VR은 어레이의 4개 코너 중 하나에 랜덤 배치 (좌/우 50%, 상/하 50%).
+
+**LOS 경로의 VR:** LOS 조건에서 `powerForAngles[0]`에 이미 K/(K+1)이 포함되어 있으므로, cluster 0이 자동으로 가장 큰 VR을 받는다. LOS 경로는 cluster 0과 동일한 공간 방향이므로, LOS VR = cluster 0의 VR을 그대로 사용한다 (`sns_vr_los = sns_vr[0]`).
+
+**서브클러스터의 VR:** 2개의 strongest cluster가 3개 서브클러스터로 분할될 때, 서브클러스터는 부모 클러스터의 VR을 상속한다.
+
+**Step III: Per-element power attenuation factor (Eq. 7.6-58)**
+
+Visibility-limited 클러스터 $n$에 대해, 안테나 element $i$의 power attenuation:
+
+$$\alpha_{i,n} = \begin{cases}
+1 & |x_i - x_{0,n}| \le a \text{ and } |y_i - y_{0,n}| \le b \\
+\exp\!\left(-C \cdot \frac{|x_i - x_{a,n}|}{D_n}\right) & |x_i - x_{0,n}| > a \text{ and } |y_i - y_{0,n}| \le b \\
+\exp\!\left(-C \cdot \frac{|y_i - y_{b,n}|}{D_n}\right) & |x_i - x_{0,n}| \le a \text{ and } |y_i - y_{0,n}| > b \\
+\exp\!\left(-C \cdot \frac{\sqrt{|x_i - x_{a,n}|^2 + |y_i - y_{b,n}|^2}}{D_n}\right) & \text{otherwise}
+\end{cases} \tag{7.6-58}$$
+
+여기서:
+
+- $(x_i, y_i)$: element $i$의 좌표 (wavelength 단위)
+- $(x_{0,n}, y_{0,n})$: VR reference corner
+- $(x_{a,n}, y_{b,n})$: VR 내부 경계 (reference corner의 대각선 반대)
+- $(x_{A,n}, y_{B,n})$: 어레이의 먼 코너
+- $D_n = \sqrt{(x_{A,n} - x_{a,n})^2 + (y_{B,n} - y_{b,n})^2}$: VR 경계에서 어레이 먼 코너까지 거리
+- $C = 13$: roll-off factor (Table 7.6.14.1.2-3, 전 시나리오 동일)
+
+> **주의 (OMML 파싱 결과):** 38901-j20.docx의 OMML 수식에서 분수 구조는 분자 = $-d$, 분모 = $D_n$이며, $\cdot C$가 분수에 곱해지는 형태이다. 즉 지수부는 $(-d / D_n) \cdot C = -C \cdot d / D_n$. $-d / (D_n \cdot C)$로 해석하면 안 됨. far corner에서 $d = D_n$일 때 $\alpha = \exp(-13) \approx 2.3 \times 10^{-6}$ (-56.5 dB)으로, VR 바깥 element는 사실상 해당 클러스터를 볼 수 없음.
+
+**Step IV: 채널 계수 적용**
+
+Eq. 7.5-28 (NLOS) 및 Eq. 7.5-29 (LOS)에서 per-element 채널 계수 $H_{u,s,n}$에 $\sqrt{\alpha_{s,n}}$ (amplitude)을 곱한다.
+
+RSRP 계산 시에는 port-level TX 패턴의 coherent element sum 안에서 per-element로 적용해야 한다:
+$F'_{tx,p} = \sum_s w_s \cdot \sqrt{\alpha_{s,n}} \cdot e^{j\phi_s} \cdot F_{tx,s}$
+(사후 평균 감쇠 $|F|^2 \cdot \text{avg}(\alpha)$는 수학적으로 틀림)
+
+#### Spatial Non-Stationarity (SNS) at UT Side — Section 7.6.14.2
+
+UT의 **90%**에 SNS를 적용한다. 각 usage scenario(Table 7.6.14.2-1)에 따라 안테나 위치별 power attenuation $\Gamma_{RX,u}$ (또는 $\Gamma_{TX,u}$)를 Table 7.6.14.2-2에서 결정한다.
+
+채널 계수 적용 (Step 11):
+
+$$
+H'_{u,s,\text{NLOS}} = \sqrt{\Gamma_{RX,u}} \cdot H_{u,s,\text{NLOS}} \quad \text{(Eq. 7.5-28에서 적용)} \tag{7.6.14.2}
+$$
+
+$$
+H'_{u,s,\text{LOS}} = \sqrt{\Gamma_{RX,u}} \cdot H_{u,s,\text{LOS}} \quad \text{(Eq. 7.5-29에서 적용)}
+$$
+
+> $\Gamma$는 power 비율이므로 amplitude에는 $\sqrt{\Gamma}$를 곱한다.
+
+#### Optional: Antenna Imbalance
+
+Handheld UT에서 선택적으로 안테나 port별 랜덤 loss를 적용할 수 있다. UL/DL 방향에 독립적으로 적용 가능하며, **기본값은 imbalance 없음**이다.
+
+**Note:** Full calibration (Table 7.8-2)에서는 UT 안테나 패턴 = **Isotropic** ($G_{E,\max} = 0$ dBi). Handheld 모델은 추가 calibration (Table 7.8-2A)에서 적용한다.
+
+## 3. Path Loss 모델 (Section 7.4.1)
+
+$f_c$: 주파수 [GHz], $d_{2D}$: 수평 거리 [m], $d_{3D}$: 3D 거리 [m], $h_{BS}$/$h_{UT}$: 안테나 높이 [m]
+
+### UMa (0.5~100 GHz)
+
+**LOS:**
+
+$$
+PL_1 = 28.0 + 22 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) \quad (10\text{m} \le d_{2D} \le d'_{BP})
+$$
+
+$$
+PL_2 = 28.0 + 40 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) - 9 \log_{10}\!\left((d'_{BP})^2 + (h_{BS}-h_{UT})^2\right) \quad (d'_{BP} \le d_{2D} \le 5000\text{m})
+$$
+
+$$
+\sigma_{SF} = 4 \text{ dB}
+$$
+
+$$
+d'_{BP} = \frac{4 \, h'_{BS} \, h'_{UT} \, f_c \times 10^9}{c}, \quad c = 3 \times 10^8 \text{ m/s}
+$$
+
+$$
+h'_{BS} = h_{BS} - h_E, \quad h'_{UT} = h_{UT} - h_E
+$$
+
+$h_E = 1$ m (확률적: $P(h_E = h)$ ~ uniform, $h \in \{12(n_{fl}-1)+1.5 : n_{fl}=1,\ldots,\text{max\_fl}\}$)
+
+**NLOS:**
+
+$$
+PL = \max(PL_{\text{UMa-LOS}},\; PL'_{\text{UMa-NLOS}})
+$$
+
+$$
+PL'_{\text{UMa-NLOS}} = 13.54 + 39.08 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) - 0.6(h_{UT}-1.5)
+$$
+
+$$
+\sigma_{SF} = 6 \text{ dB}
+$$
+
+(Optional) $PL = 32.4 + 20\log_{10}(f_c) + 30\log_{10}(d_{3D})$, $\sigma_{SF} = 7.8$ dB
+
+### UMi - Street Canyon (0.5~100 GHz)
+
+**LOS:**
+
+$$
+PL_1 = 32.4 + 21 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) \quad (10\text{m} \le d_{2D} \le d'_{BP})
+$$
+
+$$
+PL_2 = 32.4 + 40 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) - 9.5 \log_{10}\!\left((d'_{BP})^2 + (h_{BS}-h_{UT})^2\right) \quad (d'_{BP} \le d_{2D} \le 5000\text{m})
+$$
+
+$$
+\sigma_{SF} = 4 \text{ dB}
+$$
+
+$$
+d'_{BP} = \frac{4 \, h'_{BS} \, h'_{UT} \, f_c \times 10^9}{c}, \quad c = 3 \times 10^8 \text{ m/s}
+$$
+
+$$
+h'_{BS} = h_{BS} - h_E, \quad h'_{UT} = h_{UT} - h_E, \quad h_E = 1 \text{ m}
+$$
+
+> **Note:** UMi에서는 $h_E = 1$ m로 고정 (UMa와 달리 확률적 $h_E$ 없음). $h_{BS}$ 기본값 = 10 m.
+
+**NLOS:**
+
+$$
+PL = \max(PL_{\text{UMi-LOS}},\; PL'_{\text{UMi-NLOS}})
+$$
+
+$$
+PL'_{\text{UMi-NLOS}} = 22.4 + 35.3 \log_{10}(d_{3D}) + 21.3 \log_{10}(f_c) - 0.3(h_{UT}-1.5)
+$$
+
+$$
+\sigma_{SF} = 7.82 \text{ dB}
+$$
+
+(Optional) $PL = 32.4 + 20\log_{10}(f_c) + 31.9\log_{10}(d_{3D})$, $\sigma_{SF} = 8.2$ dB
+
+> **적용 조건:** $10\text{m} \le d_{2D} \le 5000\text{m}$, $1.5\text{m} \le h_{UT} \le 22.5\text{m}$, $h_{BS} = 10\text{m}$
+
+### InH - Office (0.5~100 GHz)
+
+**LOS:**
+
+$$
+PL = 32.4 + 17.3 \log_{10}(d_{3D}) + 20 \log_{10}(f_c), \quad \sigma_{SF} = 3 \text{ dB}
+$$
+
+**NLOS:**
+
+$$
+PL = \max(PL_{\text{InH-LOS}},\; PL'_{\text{InH-NLOS}})
+$$
+
+$$
+PL'_{\text{InH-NLOS}} = 17.30 + 38.3 \log_{10}(d_{3D}) + 24.9 \log_{10}(f_c), \quad \sigma_{SF} = 8.03 \text{ dB}
+$$
+
+(Optional) $PL = 32.4 + 20\log_{10}(f_c) + 31.9\log_{10}(d_{3D})$, $\sigma_{SF} = 8.29$ dB
+
+### RMa (0.5~7 GHz)
+
+**LOS:**
+
+$$
+PL_1 = 20\log_{10}\!\left(\frac{40\pi \, d_{3D} \, f_c}{3}\right) + \min(0.03 h^{1.72}, 10)\log_{10}(d_{3D}) - \min(0.044 h^{1.72}, 14.77) + 0.002 \log_{10}(h) \cdot d_{3D}
+$$
+
+$$
+PL_2 = PL_1(d_{BP}) + 40\log_{10}(d_{3D}/d_{BP})
+$$
+
+$$
+d_{BP} = \frac{2\pi \, h_{BS} \, h_{UT} \, f_c \times 10^9}{c}
+$$
+
+$$
+\sigma_{SF} = 4 \text{ dB } (d_{2D} < d_{BP}), \quad 6 \text{ dB } (d_{2D} \ge d_{BP})
+$$
+
+**NLOS:**
+
+$$
+PL = \max(PL_{\text{RMa-LOS}},\; PL'_{\text{RMa-NLOS}})
+$$
+
+$$
+PL'_{\text{RMa-NLOS}} = 161.04 - 7.1\log_{10}(W) + 7.5\log_{10}(h) - (24.37 - 3.7(h/h_{BS})^2)\log_{10}(h_{BS})
+$$
+$$
++ (43.42 - 3.1\log_{10}(h_{BS}))(\log_{10}(d_{3D}) - 3) + 20\log_{10}(f_c) - (3.2(\log_{10}(11.75 h_{UT}))^2 - 4.97)
+$$
+
+$$
+\sigma_{SF} = 8 \text{ dB}
+$$
+
+### InF (0.5~100 GHz)
+
+**LOS:**
+
+$$
+PL = 31.84 + 21.50 \log_{10}(d_{3D}) + 19.00 \log_{10}(f_c), \quad \sigma_{SF} = 4.3 \text{ dB}
+$$
+
+**NLOS (4 sub-scenarios):**
+
+$$
+\text{InF-SL}: \; PL = 33.0 + 25.5 \log_{10}(d_{3D}) + 20 \log_{10}(f_c), \quad \sigma_{SF} = 5.7 \text{ dB}
+$$
+
+$$
+\text{InF-DL}: \; PL = 18.6 + 35.7 \log_{10}(d_{3D}) + 20 \log_{10}(f_c), \quad \sigma_{SF} = 7.2 \text{ dB}
+$$
+
+$$
+\text{InF-SH}: \; PL = 32.4 + 23.0 \log_{10}(d_{3D}) + 20 \log_{10}(f_c), \quad \sigma_{SF} = 5.9 \text{ dB}
+$$
+
+$$
+\text{InF-DH}: \; PL = 33.63 + 21.9 \log_{10}(d_{3D}) + 20 \log_{10}(f_c), \quad \sigma_{SF} = 4.0 \text{ dB}
+$$
+
+### SMa (0.5~37 GHz, new in Rel-19)
+
+**LOS:**
+
+$$
+PL_1 = 26.0 + 22 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) \quad (10\text{m} \le d_{2D} \le d'_{BP})
+$$
+
+$$
+PL_2 = PL_1(d'_{BP}) + 40\log_{10}(d_{3D}/d'_{BP}) \quad (d'_{BP} \le d_{2D} \le 5000\text{m})
+$$
+
+$$
+\sigma_{SF} = 4 \text{ dB}
+$$
+
+$$
+d'_{BP} = \frac{4 \, h'_{BS} \, h'_{UT} \, f_c \times 10^9}{c}
+$$
+
+**NLOS:**
+
+$$
+PL = \max(PL_{\text{SMa-LOS}},\; PL'_{\text{SMa-NLOS}})
+$$
+
+$$
+PL'_{\text{SMa-NLOS}} = 13.54 + 39.08 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) - 0.6(h_{UT}-1.5)
+$$
+
+$$
+\sigma_{SF} = 6 \text{ dB}
+$$
+
+> **Note:** $f_c$ 정규화 = 1 GHz, 거리 정규화 = 1 m. $0.5 < f_c < 37$ GHz.
+## 4. LOS 확률 모델 (Section 7.4.2)
+
+### UMa
+
+$$
+P_{\text{LOS}} =
+\begin{cases}
+\min\!\left(\dfrac{18}{d_{2D}}, 1\right) \cdot \left(1 - e^{-d_{2D}/63}\right) + e^{-d_{2D}/63} & h_{UT} \le 13\text{m} \\[6pt]
+\dfrac{1}{1 + C(d_{2D}, h_{UT})} & 13\text{m} < h_{UT} \le 23\text{m}
+\end{cases}
+$$
+
+$$
+C(d_{2D}, h_{UT}) = \left(\frac{h_{UT}-13}{10}\right)^{1.5} \cdot g(d_{2D})
+$$
+
+$$
+g(d_{2D}) =
+\begin{cases}
+1.25 \times 10^{-6} \cdot d_{2D}^2 \cdot e^{-d_{2D}/150} & d_{2D} > 18\text{m} \\
+0 & d_{2D} \le 18\text{m}
+\end{cases}
+$$
+
+### UMi - Street Canyon
+
+$$
+P_{\text{LOS}} = \min\!\left(\frac{18}{d_{2D}}, 1\right) \cdot \left(1 - e^{-d_{2D}/36}\right) + e^{-d_{2D}/36}
+$$
+
+### InH - Office
+
+$$
+\text{Mixed office:} \quad P_{\text{LOS}} =
+\begin{cases}
+1 & d_{2D} \le 1.2\text{m} \\
+e^{-(d_{2D}-1.2)/4.7} & 1.2\text{m} < d_{2D} < 6.5\text{m} \\
+0.32 \cdot e^{-(d_{2D}-6.5)/32.6} & 6.5\text{m} \le d_{2D}
+\end{cases}
+$$
+
+$$
+\text{Open office:} \quad P_{\text{LOS}} =
+\begin{cases}
+1 & d_{2D} \le 5\text{m} \\
+e^{-(d_{2D}-5)/70.8} & 5\text{m} < d_{2D} \le 49\text{m} \\
+0.54 \cdot e^{-(d_{2D}-49)/211.7} & 49\text{m} < d_{2D}
+\end{cases}
+$$
+
+### RMa
+
+$$
+P_{\text{LOS}} =
+\begin{cases}
+1 & d_{2D} \le 10\text{m} \\
+e^{-(d_{2D}-10)/1000} & 10\text{m} < d_{2D}
+\end{cases}
+$$
+
+### InF (Indoor Factory)
+
+$$
+\text{InF-SL:} \quad P_{\text{LOS}} = e^{-d_{2D} / k_{SL}}
+$$
+
+$$
+\text{InF-DL:} \quad P_{\text{LOS}} = e^{-d_{2D} / k_{DL}}
+$$
+
+$$
+\text{InF-SH:} \quad P_{\text{LOS}} = 1 - \left(1 - e^{-d_{2D}/k_{SH1}}\right)\left(1 + \frac{d_{2D}}{k_{SH2}} \cdot e^{-d_{2D}/k_{SH2}}\right)
+$$
+
+$$
+\text{InF-DH:} \quad P_{\text{LOS}} = 1 - \left(1 - e^{-d_{2D}/k_{DH1}}\right)\left(1 + \frac{d_{2D}}{k_{DH2}} \cdot e^{-d_{2D}/k_{DH2}}\right)
+$$
+
+$$
+\text{InF-HH:} \quad P_{\text{LOS}} = 1 \quad \text{(항상 LOS)}
+$$
+
+> Note: $k$ 값들은 clutter 밀도($r$), clutter 높이($h_c$), BS/UT 높이에 의존한다. 상세 수식은 Table 7.4.2-1 참조.
+
+### SMa (Suburban Macro)
+
+$$
+P_{\text{LOS}} = e^{-d_{2D} / 63} \quad (d_{\text{out}})
+$$
+
+> Note: outdoor 부분 거리에 적용. 상세 수식은 Table 7.4.2-1의 SMa 항 참조.
+
+## 5. O2I Penetration Loss (Section 7.4.3)
+
+### 전체 구조
+
+$$
+PL = PL_b + PL_{tw} + PL_{in} + \mathcal{N}(0, \sigma_P^2) \tag{7.4-2}
+$$
+
+- $PL_b$ = 기본 outdoor path loss
+- $PL_{tw}$ = 건물 외벽 관통 손실
+- $PL_{in}$ = 건물 내부 손실
+
+### 재료별 관통 손실
+
+$$
+L_{\text{glass}} = 2 + 0.2 f \;\text{[dB]} \quad \text{(표준 유리, 3cm)}
+$$
+
+$$
+L_{\text{IRRglass}} = 23 + 0.3 f \;\text{[dB]} \quad \text{(IRR 유리)}
+$$
+
+$$
+L_{\text{concrete}} = 5 + 4 f \;\text{[dB]} \quad \text{(콘크리트, 23cm)}
+$$
+
+$$
+L_{\text{plywood}} = 1.03 + 0.17 f \;\text{[dB]} \quad \text{(합판, 1.75cm)}
+$$
+
+$$
+L_{\text{wood}} = 4.85 + 0.12 f \;\text{[dB]} \quad \text{(목재, 3.3cm)}
+$$
+
+($f$: GHz)
+
+### O2I 모델
+
+| 모델 | $PL_{tw}$ [dB] | $PL_{in}$ [dB] | $\sigma_P$ [dB] |
+|---|---|---|---|
+| **Low-loss** | $5 - 10\log_{10}(0.3 \cdot 10^{-L_{\text{glass}}/10} + 0.7 \cdot 10^{-L_{\text{concrete}}/10})$ | $0.5 \cdot d_{\text{2D-in}}$ | 4.4 |
+| **High-loss** | $5 - 10\log_{10}(0.7 \cdot 10^{-L_{\text{IRRglass}}/10} + 0.3 \cdot 10^{-L_{\text{concrete}}/10})$ | $0.5 \cdot d_{\text{2D-in}}$ | 6.5 |
+| **Low-loss A** | $5 - 10\log_{10}(0.3 \cdot 10^{-L_{\text{glass}}/10} + 0.7 \cdot 10^{-L_{\text{plywood}}/10})$ | $0.5 \cdot d_{\text{2D-in}}$ | 4.4 |
+
+$d_{\text{2D,in}}$ 생성:
+- UMa, UMi-Street Canyon: $d_{\text{2D,in}} = \min(25 U_1, 25 U_2)$, $U_1, U_2 \sim \text{Uniform}(0,1)$ 독립
+- RMa: $d_{\text{2D,in}} = \min(10 U_1, 10 U_2)$, $U_1, U_2 \sim \text{Uniform}(0,1)$ 독립
+- UT별로 독립 생성
+
+적용:
+- UMa, UMi: Low-loss + High-loss (비율은 시나리오 의존)
+- Calibration (Table 7.8-1): **50% low-loss + 50% high-loss** → pathloss_model `_B` 사용
+
+### O2I Car Penetration
+
+$$
+PL = PL_b + \mathcal{N}(\mu, \sigma_P^2) \tag{7.4-4}
+$$
+
+$\mu = 9$ dB (일반), $\mu = 20$ dB (금속 코팅 차창), $\sigma_P = 5$ dB
+
+## 6. 채널 생성 절차 (Section 7.5)
 
 > 채널 계수 생성은 Figure 7.5-1의 절차를 따르며, 하향링크(downlink)를 가정한다. 상향링크의 경우 arrival/departure 파라미터를 교환한다.
 > GCS에서 zenith각 $\theta=0°$는 천정, $\theta=90°$는 수평선이다. 구면 단위벡터 $\hat{\theta}$, $\hat{\varphi}$는 전파 방향 기준으로 정의된다.
@@ -556,692 +1312,6 @@ $$
 여기서 $PL$은 Step 3의 path loss [dB], $SF$는 Step 4의 shadow fading [dB].
 > **Note:** SF의 부호 정의: 양(+)의 SF는 path loss 모델 예측보다 UT에서 더 많은 수신 전력을 의미한다.
 
----
-
-## 3. Path Loss 모델 (Section 7.4.1)
-
-$f_c$: 주파수 [GHz], $d_{2D}$: 수평 거리 [m], $d_{3D}$: 3D 거리 [m], $h_{BS}$/$h_{UT}$: 안테나 높이 [m]
-
-### UMa (0.5~100 GHz)
-
-**LOS:**
-
-$$
-PL_1 = 28.0 + 22 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) \quad (10\text{m} \le d_{2D} \le d'_{BP})
-$$
-
-$$
-PL_2 = 28.0 + 40 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) - 9 \log_{10}\!\left((d'_{BP})^2 + (h_{BS}-h_{UT})^2\right) \quad (d'_{BP} \le d_{2D} \le 5000\text{m})
-$$
-
-$$
-\sigma_{SF} = 4 \text{ dB}
-$$
-
-$$
-d'_{BP} = \frac{4 \, h'_{BS} \, h'_{UT} \, f_c \times 10^9}{c}, \quad c = 3 \times 10^8 \text{ m/s}
-$$
-
-$$
-h'_{BS} = h_{BS} - h_E, \quad h'_{UT} = h_{UT} - h_E
-$$
-
-$h_E = 1$ m (확률적: $P(h_E = h)$ ~ uniform, $h \in \{12(n_{fl}-1)+1.5 : n_{fl}=1,\ldots,\text{max\_fl}\}$)
-
-**NLOS:**
-
-$$
-PL = \max(PL_{\text{UMa-LOS}},\; PL'_{\text{UMa-NLOS}})
-$$
-
-$$
-PL'_{\text{UMa-NLOS}} = 13.54 + 39.08 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) - 0.6(h_{UT}-1.5)
-$$
-
-$$
-\sigma_{SF} = 6 \text{ dB}
-$$
-
-(Optional) $PL = 32.4 + 20\log_{10}(f_c) + 30\log_{10}(d_{3D})$, $\sigma_{SF} = 7.8$ dB
-
-### UMi - Street Canyon (0.5~100 GHz)
-
-**LOS:**
-
-$$
-PL_1 = 32.4 + 21 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) \quad (10\text{m} \le d_{2D} \le d'_{BP})
-$$
-
-$$
-PL_2 = 32.4 + 40 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) - 9.5 \log_{10}\!\left((d'_{BP})^2 + (h_{BS}-h_{UT})^2\right) \quad (d'_{BP} \le d_{2D} \le 5000\text{m})
-$$
-
-$$
-\sigma_{SF} = 4 \text{ dB}
-$$
-
-**NLOS:**
-
-$$
-PL = \max(PL_{\text{UMi-LOS}},\; PL'_{\text{UMi-NLOS}})
-$$
-
-$$
-PL'_{\text{UMi-NLOS}} = 22.4 + 35.3 \log_{10}(d_{3D}) + 21.3 \log_{10}(f_c) - 0.3(h_{UT}-1.5)
-$$
-
-$$
-\sigma_{SF} = 7.82 \text{ dB}
-$$
-
-(Optional) $PL = 32.4 + 20\log_{10}(f_c) + 31.9\log_{10}(d_{3D})$, $\sigma_{SF} = 8.2$ dB
-
-### InH - Office (0.5~100 GHz)
-
-**LOS:**
-
-$$
-PL = 32.4 + 17.3 \log_{10}(d_{3D}) + 20 \log_{10}(f_c), \quad \sigma_{SF} = 3 \text{ dB}
-$$
-
-**NLOS:**
-
-$$
-PL = \max(PL_{\text{InH-LOS}},\; PL'_{\text{InH-NLOS}})
-$$
-
-$$
-PL'_{\text{InH-NLOS}} = 17.30 + 38.3 \log_{10}(d_{3D}) + 24.9 \log_{10}(f_c), \quad \sigma_{SF} = 8.03 \text{ dB}
-$$
-
-(Optional) $PL = 32.4 + 20\log_{10}(f_c) + 31.9\log_{10}(d_{3D})$, $\sigma_{SF} = 8.29$ dB
-
-### RMa (0.5~7 GHz)
-
-**LOS:**
-
-$$
-PL_1 = 20\log_{10}\!\left(\frac{40\pi \, d_{3D} \, f_c}{3}\right) + \min(0.03 h^{1.72}, 10)\log_{10}(d_{3D}) - \min(0.044 h^{1.72}, 14.77) + 0.002 \log_{10}(h) \cdot d_{3D}
-$$
-
-$$
-PL_2 = PL_1(d_{BP}) + 40\log_{10}(d_{3D}/d_{BP})
-$$
-
-$$
-d_{BP} = \frac{2\pi \, h_{BS} \, h_{UT} \, f_c \times 10^9}{c}
-$$
-
-$$
-\sigma_{SF} = 4 \text{ dB } (d_{2D} < d_{BP}), \quad 6 \text{ dB } (d_{2D} \ge d_{BP})
-$$
-
-**NLOS:**
-
-$$
-PL = \max(PL_{\text{RMa-LOS}},\; PL'_{\text{RMa-NLOS}})
-$$
-
-$$
-PL'_{\text{RMa-NLOS}} = 161.04 - 7.1\log_{10}(W) + 7.5\log_{10}(h) - (24.37 - 3.7(h/h_{BS})^2)\log_{10}(h_{BS})
-$$
-$$
-+ (43.42 - 3.1\log_{10}(h_{BS}))(\log_{10}(d_{3D}) - 3) + 20\log_{10}(f_c) - (3.2(\log_{10}(11.75 h_{UT}))^2 - 4.97)
-$$
-
-$$
-\sigma_{SF} = 8 \text{ dB}
-$$
-
-### InF (0.5~100 GHz)
-
-**LOS:**
-
-$$
-PL = 31.84 + 21.50 \log_{10}(d_{3D}) + 19.00 \log_{10}(f_c), \quad \sigma_{SF} = 4.3 \text{ dB}
-$$
-
-**NLOS (4 sub-scenarios):**
-
-$$
-\text{InF-SL}: \; PL = 33.0 + 25.5 \log_{10}(d_{3D}) + 20 \log_{10}(f_c), \quad \sigma_{SF} = 5.7 \text{ dB}
-$$
-
-$$
-\text{InF-DL}: \; PL = 18.6 + 35.7 \log_{10}(d_{3D}) + 20 \log_{10}(f_c), \quad \sigma_{SF} = 7.2 \text{ dB}
-$$
-
-$$
-\text{InF-SH}: \; PL = 32.4 + 23.0 \log_{10}(d_{3D}) + 20 \log_{10}(f_c), \quad \sigma_{SF} = 5.9 \text{ dB}
-$$
-
-$$
-\text{InF-DH}: \; PL = 33.63 + 21.9 \log_{10}(d_{3D}) + 20 \log_{10}(f_c), \quad \sigma_{SF} = 4.0 \text{ dB}
-$$
-
-### SMa (0.5~37 GHz, new in Rel-19)
-
-**LOS:**
-
-$$
-PL_1 = 26.0 + 22 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) \quad (10\text{m} \le d_{2D} \le d'_{BP})
-$$
-
-$$
-PL_2 = PL_1(d'_{BP}) + 40\log_{10}(d_{3D}/d'_{BP}) \quad (d'_{BP} \le d_{2D} \le 5000\text{m})
-$$
-
-$$
-\sigma_{SF} = 4 \text{ dB}
-$$
-
-$$
-d'_{BP} = \frac{4 \, h'_{BS} \, h'_{UT} \, f_c \times 10^9}{c}
-$$
-
-**NLOS:**
-
-$$
-PL = \max(PL_{\text{SMa-LOS}},\; PL'_{\text{SMa-NLOS}})
-$$
-
-$$
-PL'_{\text{SMa-NLOS}} = 13.54 + 39.08 \log_{10}(d_{3D}) + 20 \log_{10}(f_c) - 0.6(h_{UT}-1.5)
-$$
-
-$$
-\sigma_{SF} = 6 \text{ dB}
-$$
-
-> **Note:** $f_c$ 정규화 = 1 GHz, 거리 정규화 = 1 m. $0.5 < f_c < 37$ GHz.
-
----
-
-## 4. LOS 확률 모델 (Section 7.4.2)
-
-### UMa
-
-$$
-P_{\text{LOS}} =
-\begin{cases}
-\min\!\left(\dfrac{18}{d_{2D}}, 1\right) \cdot \left(1 - e^{-d_{2D}/63}\right) + e^{-d_{2D}/63} & h_{UT} \le 13\text{m} \\[6pt]
-\dfrac{1}{1 + C(d_{2D}, h_{UT})} & 13\text{m} < h_{UT} \le 23\text{m}
-\end{cases}
-$$
-
-$$
-C(d_{2D}, h_{UT}) = \left(\frac{h_{UT}-13}{10}\right)^{1.5} \cdot g(d_{2D})
-$$
-
-$$
-g(d_{2D}) =
-\begin{cases}
-1.25 \times 10^{-6} \cdot d_{2D}^2 \cdot e^{-d_{2D}/150} & d_{2D} > 18\text{m} \\
-0 & d_{2D} \le 18\text{m}
-\end{cases}
-$$
-
-### UMi - Street Canyon
-
-$$
-P_{\text{LOS}} = \min\!\left(\frac{18}{d_{2D}}, 1\right) \cdot \left(1 - e^{-d_{2D}/36}\right) + e^{-d_{2D}/36}
-$$
-
-### InH - Office
-
-$$
-\text{Mixed office:} \quad P_{\text{LOS}} =
-\begin{cases}
-1 & d_{2D} \le 1.2\text{m} \\
-e^{-(d_{2D}-1.2)/4.7} & 1.2\text{m} < d_{2D} < 6.5\text{m} \\
-0.32 \cdot e^{-(d_{2D}-6.5)/32.6} & 6.5\text{m} \le d_{2D}
-\end{cases}
-$$
-
-$$
-\text{Open office:} \quad P_{\text{LOS}} =
-\begin{cases}
-1 & d_{2D} \le 5\text{m} \\
-e^{-(d_{2D}-5)/70.8} & 5\text{m} < d_{2D} \le 49\text{m} \\
-0.54 \cdot e^{-(d_{2D}-49)/211.7} & 49\text{m} < d_{2D}
-\end{cases}
-$$
-
-### RMa
-
-$$
-P_{\text{LOS}} =
-\begin{cases}
-1 & d_{2D} \le 10\text{m} \\
-e^{-(d_{2D}-10)/1000} & 10\text{m} < d_{2D}
-\end{cases}
-$$
-
-### InF (Indoor Factory)
-
-$$
-\text{InF-SL:} \quad P_{\text{LOS}} = e^{-d_{2D} / k_{SL}}
-$$
-
-$$
-\text{InF-DL:} \quad P_{\text{LOS}} = e^{-d_{2D} / k_{DL}}
-$$
-
-$$
-\text{InF-SH:} \quad P_{\text{LOS}} = 1 - \left(1 - e^{-d_{2D}/k_{SH1}}\right)\left(1 + \frac{d_{2D}}{k_{SH2}} \cdot e^{-d_{2D}/k_{SH2}}\right)
-$$
-
-$$
-\text{InF-DH:} \quad P_{\text{LOS}} = 1 - \left(1 - e^{-d_{2D}/k_{DH1}}\right)\left(1 + \frac{d_{2D}}{k_{DH2}} \cdot e^{-d_{2D}/k_{DH2}}\right)
-$$
-
-$$
-\text{InF-HH:} \quad P_{\text{LOS}} = 1 \quad \text{(항상 LOS)}
-$$
-
-> Note: $k$ 값들은 clutter 밀도($r$), clutter 높이($h_c$), BS/UT 높이에 의존한다. 상세 수식은 Table 7.4.2-1 참조.
-
-### SMa (Suburban Macro)
-
-$$
-P_{\text{LOS}} = e^{-d_{2D} / 63} \quad (d_{\text{out}})
-$$
-
-> Note: outdoor 부분 거리에 적용. 상세 수식은 Table 7.4.2-1의 SMa 항 참조.
-
----
-
-## 5. O2I Penetration Loss (Section 7.4.3)
-
-### 전체 구조
-
-$$
-PL = PL_b + PL_{tw} + PL_{in} + \mathcal{N}(0, \sigma_P^2) \tag{7.4-2}
-$$
-
-- $PL_b$ = 기본 outdoor path loss
-- $PL_{tw}$ = 건물 외벽 관통 손실
-- $PL_{in}$ = 건물 내부 손실
-
-### 재료별 관통 손실
-
-$$
-L_{\text{glass}} = 2 + 0.2 f \;\text{[dB]} \quad \text{(표준 유리, 3cm)}
-$$
-
-$$
-L_{\text{IRRglass}} = 23 + 0.3 f \;\text{[dB]} \quad \text{(IRR 유리)}
-$$
-
-$$
-L_{\text{concrete}} = 5 + 4 f \;\text{[dB]} \quad \text{(콘크리트, 23cm)}
-$$
-
-$$
-L_{\text{plywood}} = 1.03 + 0.17 f \;\text{[dB]} \quad \text{(합판, 1.75cm)}
-$$
-
-$$
-L_{\text{wood}} = 4.85 + 0.12 f \;\text{[dB]} \quad \text{(목재, 3.3cm)}
-$$
-
-($f$: GHz)
-
-### O2I 모델
-
-| 모델 | $PL_{tw}$ [dB] | $PL_{in}$ [dB] | $\sigma_P$ [dB] |
-|---|---|---|---|
-| **Low-loss** | $5 - 10\log_{10}(0.3 \cdot 10^{-L_{\text{glass}}/10} + 0.7 \cdot 10^{-L_{\text{concrete}}/10})$ | $0.5 \cdot d_{\text{2D-in}}$ | 4.4 |
-| **High-loss** | $5 - 10\log_{10}(0.7 \cdot 10^{-L_{\text{IRRglass}}/10} + 0.3 \cdot 10^{-L_{\text{concrete}}/10})$ | $0.5 \cdot d_{\text{2D-in}}$ | 6.5 |
-| **Low-loss A** | $5 - 10\log_{10}(0.3 \cdot 10^{-L_{\text{glass}}/10} + 0.7 \cdot 10^{-L_{\text{plywood}}/10})$ | $0.5 \cdot d_{\text{2D-in}}$ | 4.4 |
-
-$d_{\text{2D,in}}$ 생성:
-- UMa, UMi-Street Canyon: $d_{\text{2D,in}} = \min(25 U_1, 25 U_2)$, $U_1, U_2 \sim \text{Uniform}(0,1)$ 독립
-- RMa: $d_{\text{2D,in}} = \min(10 U_1, 10 U_2)$, $U_1, U_2 \sim \text{Uniform}(0,1)$ 독립
-- UT별로 독립 생성
-
-적용:
-- UMa, UMi: Low-loss + High-loss (비율은 시나리오 의존)
-- Calibration (Table 7.8-1): **50% low-loss + 50% high-loss** → pathloss_model `_B` 사용
-
-### O2I Car Penetration
-
-$$
-PL = PL_b + \mathcal{N}(\mu, \sigma_P^2) \tag{7.4-4}
-$$
-
-$\mu = 9$ dB (일반), $\mu = 20$ dB (금속 코팅 차창), $\sigma_P = 5$ dB
-
----
-
-## 6. 안테나 모델링 (Section 7.3)
-
-### BS 안테나 어레이 구조
-
-$$
-(M_g, N_g, M, N, P, d_H, d_V, d_{g,H}, d_{g,V})
-$$
-
-- $M_g \times N_g$ = 패널 수 (수직 × 수평)
-- $M \times N$ = 패널당 엘리먼트 수 (수직 × 수평, 동일 편파)
-- $P$ = 편파 수 (1 또는 2)
-- $d_H$, $d_V$ = 엘리먼트 간격 [$\lambda$]
-- $d_{g,H}$, $d_{g,V}$ = 패널 간격 [$\lambda$]
-
-**엘리먼트 위치 계산** (Initiallization.cpp):
-
-$$
-d_{tx}[m][n][p][m_g][n_g].y = n \cdot d_H + n_g \cdot d_{g,H} \quad \text{(수평)}
-$$
-
-$$
-d_{tx}[m][n][p][m_g][n_g].z = m \cdot d_V + m_g \cdot d_{g,V} \quad \text{(수직)}
-$$
-
-### 단일 엘리먼트 방사 패턴 (Table 7.3-1)
-
-**수직 컷:** ($\theta_{3dB} = 65°$, GCS 기준 $\theta$는 zenith 각)
-
-$$
-A_{E,V}(\theta) = -\min\!\left\{ 12 \left(\frac{\theta - 90°}{\theta_{3dB}}\right)^2,\; SLA_V \right\}, \quad SLA_V = 30 \text{ dB}
-$$
-
-**수평 컷:** ($\varphi_{3dB} = 65°$)
-
-$$
-A_{E,H}(\varphi) = -\min\!\left\{ 12 \left(\frac{\varphi}{\varphi_{3dB}}\right)^2,\; A_{\max} \right\}, \quad A_{\max} = 30 \text{ dB}
-$$
-
-**3D 패턴:**
-
-$$
-A_E(\theta, \varphi) = -\min\!\left\{ -\left(A_{E,V}(\theta) + A_{E,H}(\varphi)\right),\; A_{\max} \right\}
-$$
-
-$$
-G_{E,\max} = 8 \text{ dBi}
-$$
-
-### Antenna Port Mapping (Beamtilt)
-
-$$
-w_m = \frac{1}{\sqrt{M}} \exp\!\left(-j \frac{2\pi}{\lambda} (m-1) d_V \cos\theta_{etilt}\right) \tag{7.3-1}
-$$
-
-### Polarized Antenna Modelling
-
-**Model-2** (calibration에서 사용):
-
-$$
-F_{\theta'}(\theta', \varphi') = \sqrt{A'(\theta', \varphi')} \cdot \cos(\zeta) \tag{7.3-4}
-$$
-
-$$
-F_{\varphi'}(\theta', \varphi') = \sqrt{A'(\theta', \varphi')} \cdot \sin(\zeta) \tag{7.3-5}
-$$
-
-- $\zeta = 0°$: 수직 편파
-- $\zeta = \pm 45°$: X-pol 쌍
-
-**Model-1** (더 정확):
-
-$$
-\begin{bmatrix}
-F_{\theta'} \\
-F_{\varphi'}
-\end{bmatrix}
-=
-\begin{bmatrix}
-+\cos\psi & -\sin\psi \\
-+\sin\psi & +\cos\psi
-\end{bmatrix}
-\begin{bmatrix}
-F_{\theta''} \\
-F_{\varphi''}
-\end{bmatrix} \tag{7.3-3}
-$$
-
-### UT 안테나 모델 (Handheld) — Section 7.3
-
-#### 디바이스 형상 및 안테나 배치
-
-Handheld UT는 평면 직사각형 디바이스로 모델링한다:
-
-$$
-\text{Device dimensions} = (X, Y, Z) = (15 \text{ cm},\; 7 \text{ cm},\; 0 \text{ cm}) \quad \text{(depth, width, height)}
-$$
-
-**8개 안테나 후보 위치** (Figure 7.3-2): 4개 꼭짓점 + 4개 변 중앙점. 디바이스 중심이 원점이며, 기준 방향($\Omega_{UT}=0°$)에서 긴 변(15cm)이 $x'$축, 짧은 변(7cm)이 $y'$축, 법선이 $z'$축이다.
-
-| 위치 | 좌표 $(x', y')$ [cm] | 중심→안테나 방위각 $\phi_c$ |
-|:---:|:---:|:---:|
-| (1) | $(-7.5,\; +3.5)$ | $\text{atan2}(3.5, -7.5) \approx 155°$ |
-| (2) | $(0,\; +3.5)$ | $90°$ |
-| (3) | $(+7.5,\; +3.5)$ | $\text{atan2}(3.5, 7.5) \approx 25°$ |
-| (4) | $(+7.5,\; 0)$ | $0°$ |
-| (5) | $(+7.5,\; -3.5)$ | $\text{atan2}(-3.5, 7.5) \approx -25°$ |
-| (6) | $(0,\; -3.5)$ | $-90°$ |
-| (7) | $(-7.5,\; -3.5)$ | $\text{atan2}(-3.5, -7.5) \approx -155°$ |
-| (8) | $(-7.5,\; 0)$ | $180°$ |
-
-> **Note:** 번호 배치는 Figure 7.3-2 원본 참조. CPE(9개 위치)와 달리 handheld는 중심 위치 없이 8개이다.
-
-#### 기준 방향 (Reference Orientation)
-
-기준 방향에서 GCS와 UT LCS가 일치한다 (Figure 7.3-3):
-
-$$
-\Omega_{UT,\alpha} = 0°, \quad \Omega_{UT,\beta} = 0°, \quad \Omega_{UT,\gamma} = 0°
-$$
-
-디바이스가 수평으로 놓인 상태에서 법선벡터($z'$축)가 천정을 가리킨다.
-
-#### 단일 엘리먼트 방사 패턴 (Table 7.3-2)
-
-Table 7.3-2에서 안테나는 $\hat{\theta}''$, $\hat{\varphi}''$ 방향으로 oriented되어 있으며, boresight는 $\theta'' = 90°$, $\varphi'' = 0°$ 방향($x'$축, broadside)이다.
-
-**수직 컷** (vertical cut of the radiation power pattern):
-
-$$
-A''_{E,V}(\theta'') = -\min\!\left\{ 12 \left(\frac{\theta'' - 90°}{\theta_{3dB}}\right)^2,\; SLA_V \right\} \text{ [dB]}
-$$
-
-$$
-\theta_{3dB} = 125°, \quad SLA_V = 22.5 \text{ dB}
-$$
-
-**수평 컷** (horizontal cut of the radiation power pattern):
-
-$$
-A''_{E,H}(\varphi'') = -\min\!\left\{ 12 \left(\frac{\varphi''}{\varphi_{3dB}}\right)^2,\; A_{\max} \right\} \text{ [dB]}
-$$
-
-$$
-\varphi_{3dB} = 125°, \quad A_{\max} = 22.5 \text{ dB}
-$$
-
-**3D 방사 패턴:**
-
-$$
-A''_{E}(\theta'', \varphi'') = -\min\!\left\{ -\left(A''_{E,V}(\theta'') + A''_{E,H}(\varphi'')\right),\; A_{\max} \right\} \text{ [dB]}
-$$
-
-**최대 지향성 이득:**
-
-$$
-G_{E,\max} = 5.3 \text{ dBi}
-$$
-
-**최종 엘리먼트 패턴 (linear scale):**
-
-$$
-A'(\theta'', \varphi'') = G_{E,\max} + A''_E(\theta'', \varphi'') \text{ [dB]}
-$$
-
-> **Table 7.3-1 (BS)과의 비교:**
->
-> | 파라미터 | Table 7.3-2 (Handheld UT) | Table 7.3-1 (BS) |
-> |:---:|:---:|:---:|
-> | $\theta_{3dB}$ | $125°$ | $65°$ |
-> | $\varphi_{3dB}$ | $125°$ | $65°$ |
-> | $SLA_V$ | $22.5$ dB | $30$ dB |
-> | $A_{\max}$ | $22.5$ dB | $30$ dB |
-> | $G_{E,\max}$ | $5.3$ dBi | $8$ dBi |
->
-> Handheld UT는 BS 대비 빔폭이 약 2배 넓고 (125° vs 65°), 최대 감쇄가 낮으며 (22.5 vs 30 dB), 이득이 작다 (5.3 vs 8 dBi). 핸드폰 안테나의 넓은 방사 특성을 반영한다.
-
-#### 편파 모델링 (Polarized Antenna Modelling for Handheld UT)
-
-##### 기준 방사 패턴 (Reference Radiation Pattern)
-
-**Single polarization** (1개 안테나 패턴, 주로 FR1에서 사용):
-
-$$
-F'_{\theta}(\theta'', \varphi'') = \sqrt{10^{A'(\theta'',\varphi'')/10}}, \quad F'_{\varphi}(\theta'', \varphi'') = 0
-$$
-
-기준 편파 방향은 $\hat{\theta}''$ 방향 (수직 편파)이다.
-
-**Dual polarization** (2개 안테나 패턴, FR2 전용):
-
-- 첫 번째 패턴: $F'_{\theta} = \sqrt{10^{A'/10}}$, $F'_{\varphi} = 0$
-- 두 번째 패턴: $F'_{\theta} = 0$, $F'_{\varphi} = \sqrt{10^{A'/10}}$
-
-##### 안테나 위치별 편파 방향 (Figure 7.3-7)
-
-각 안테나의 실제 편파 방향은 **디바이스 평면에 평행**하고, **중심→안테나 방향 벡터에 수직**이다.
-
-중심→안테나 방향 벡터 $\vec{d}_u = (dx_u, dy_u)$에 대해, single-pol 편파 방향 벡터:
-
-$$
-\vec{p}_u = \frac{(-dy_u,\; dx_u,\; 0)}{|(-dy_u,\; dx_u)|}
-$$
-
-| 위치 | 중심→안테나 $(dx, dy)$ | 편파 방향 $\vec{p}_u$ |
-|:---:|:---:|:---:|
-| (1) | $(-7.5, +3.5)$ | $(-3.5, -7.5, 0)/8.28$ |
-| (2) | $(0, +3.5)$ | $(-1, 0, 0)$ |
-| (3) | $(+7.5, +3.5)$ | $(-3.5, +7.5, 0)/8.28$ |
-| (4) | $(+7.5, 0)$ | $(0, +1, 0)$ |
-| (5) | $(+7.5, -3.5)$ | $(+3.5, +7.5, 0)/8.28$ |
-| (6) | $(0, -3.5)$ | $(+1, 0, 0)$ |
-| (7) | $(-7.5, -3.5)$ | $(+3.5, -7.5, 0)/8.28$ |
-| (8) | $(-7.5, 0)$ | $(0, -1, 0)$ |
-
-**Dual polarization** (FR2, Figure 7.3-8):
-
-- 첫 번째 패턴: single-pol 방향에서 중심→안테나 축을 기준으로 $+45°$ 회전
-- 두 번째 패턴: 첫 번째에 수직이고, 중심→안테나 방향에도 수직
-
-##### 안테나별 회전 각도 $(\alpha_u, \beta_u, \gamma_u)$
-
-기준 패턴의 $\hat{\theta}''$ 편파(수직)를 각 안테나의 실제 편파 방향으로 변환하기 위한 3D 회전 각도:
-
-$$
-\beta_u = 90° \quad \text{(}\hat{z}\text{ 방향 편파를 디바이스 평면으로 눕힘)}
-$$
-
-$$
-\alpha_u = \text{atan2}(p_{u,y},\; p_{u,x}) \quad \text{(편파 방향의 방위각)}
-$$
-
-$$
-\gamma_u = 0° \quad \text{(single polarization의 경우 추가 슬랜트 없음)}
-$$
-
-#### 2단계 좌표 회전 (Field Pattern Rotation)
-
-Handheld UT의 안테나 field pattern을 GCS로 변환하는 과정은 **2단계 회전**이다:
-
-**Stage 1 — 안테나 개별 회전** (Eq. 7.3-6, 7.3-7, 7.3-8):
-
-기준 패턴 $(F'_{\theta}, F'_{\varphi})$를 각 안테나 $u$의 방향으로 회전:
-
-$$
-\begin{bmatrix}
-F''_{\theta,u}(\theta'_u, \varphi'_u) \\
-F''_{\varphi,u}(\theta'_u, \varphi'_u)
-\end{bmatrix}
-=
-\begin{bmatrix}
-\cos\psi_u & -\sin\psi_u \\
-\sin\psi_u & \cos\psi_u
-\end{bmatrix}
-\begin{bmatrix}
-F'_{\theta}(\theta'', \varphi'') \\
-F'_{\varphi}(\theta'', \varphi'')
-\end{bmatrix} \tag{7.3-6, 7.3-7}
-$$
-
-여기서:
-
-- $(\theta'', \varphi'') \to (\theta'_u, \varphi'_u)$: Eq. 7.1-7, 7.1-8을 $(\alpha_u, \beta_u, \gamma_u)$로 적용
-- $\psi_u$: Eq. 7.1-15를 $(\alpha_u, \beta_u, \gamma_u)$로 계산:
-
-$$
-\psi_u = \text{atan2}\!\left(
-\sin\beta_u \sin\gamma_u \cos(\varphi-\alpha_u) + \cos\beta_u \sin\gamma_u \sin\theta - \sin\beta_u \cos\gamma_u \cos\theta,\;
-\cos\beta_u \cos\gamma_u - \sin\beta_u \sin\gamma_u \cos(\varphi-\alpha_u) \sin\theta
-\right) \tag{7.1-15}
-$$
-
-**Stage 2 — UT 전체 GCS 회전** (Eq. 7.1-11):
-
-Stage 1 결과를 UT의 GCS 방향 $(\Omega_{UT,\alpha}, \Omega_{UT,\beta}, \Omega_{UT,\gamma})$으로 최종 회전:
-
-$$
-\begin{bmatrix}
-F_{\theta}(\theta, \varphi) \\
-F_{\varphi}(\theta, \varphi)
-\end{bmatrix}
-=
-\begin{bmatrix}
-\cos\psi_{UT} & -\sin\psi_{UT} \\
-\sin\psi_{UT} & \cos\psi_{UT}
-\end{bmatrix}
-\begin{bmatrix}
-F''_{\theta,u}(\theta'_u, \varphi'_u) \\
-F''_{\varphi,u}(\theta'_u, \varphi'_u)
-\end{bmatrix} \tag{7.1-11}
-$$
-
-여기서 $\psi_{UT}$는 $(\Omega_{UT,\alpha}, \Omega_{UT,\beta}, \Omega_{UT,\gamma})$와 GCS 각도 $(\theta, \varphi)$로 Eq. 7.1-15 적용.
-
-> **현재 코드와의 차이:** 현재 `Get_UE_antenna_pattern()`은 1단계 회전(UT 전체 방향)만 수행한다. Handheld 모델에서는 안테나별 개별 회전(Stage 1)이 추가되어 **총 2단계 회전**이 필요하다.
-
-#### UT Calibration 방향
-
-| 시나리오 | $\Omega_{UT,\alpha}$ | $\Omega_{UT,\beta}$ | $\Omega_{UT,\gamma}$ |
-|:---:|:---:|:---:|:---:|
-| One-hand blockage (SNS) | $\text{uniform}[0°, 360°]$ | $45°$ | $0°$ |
-| Dual-hand blockage (SNS) | $\text{uniform}[0°, 360°]$ | $0°$ | $45°$ |
-| Hand + head blockage (SNS) | $\text{uniform}[0°, 360°]$ | $90°$ | $0°$ |
-| All other cases (default) | $\text{uniform}[0°, 360°]$ | $45°$ | $0°$ |
-
-#### Spatial Non-Stationarity (SNS) at UT Side — Section 7.6.14.2
-
-UT의 **90%**에 SNS를 적용한다. 각 usage scenario(Table 7.6.14.2-1)에 따라 안테나 위치별 power attenuation $\Gamma_{RX,u}$ (또는 $\Gamma_{TX,u}$)를 Table 7.6.14.2-2에서 결정한다.
-
-채널 계수 적용 (Step 11):
-
-$$
-H'_{u,s,\text{NLOS}} = \sqrt{\Gamma_{RX,u}} \cdot H_{u,s,\text{NLOS}} \quad \text{(Eq. 7.5-28에서 적용)} \tag{7.6.14.2}
-$$
-
-$$
-H'_{u,s,\text{LOS}} = \sqrt{\Gamma_{RX,u}} \cdot H_{u,s,\text{LOS}} \quad \text{(Eq. 7.5-29에서 적용)}
-$$
-
-> $\Gamma$는 power 비율이므로 amplitude에는 $\sqrt{\Gamma}$를 곱한다.
-
-#### Optional: Antenna Imbalance
-
-Handheld UT에서 선택적으로 안테나 port별 랜덤 loss를 적용할 수 있다. UL/DL 방향에 독립적으로 적용 가능하며, **기본값은 imbalance 없음**이다.
-
-**Note:** Full calibration (Table 7.8-2)에서는 UT 안테나 패턴 = **Isotropic** ($G_{E,\max} = 0$ dBi). Handheld 모델은 추가 calibration (Table 7.8-2A)에서 적용한다.
-
----
-
 ## 7. LSP 파라미터 테이블 (Table 7.5-6)
 
 ### Part 1: UMi-Street Canyon & UMa
@@ -1276,10 +1346,11 @@ $f_c$: GHz, $d_{2D}$: km
 | $\mu_{\lg ZSA}$ | $-0.11\log_{10}(1+f_c)+0.81$ | $-0.03\log_{10}(1+f_c)+0.92$ | $1.01$ | $0.96$ | $-0.2856\log_{10}(f_c)+1.445$ | $1.01$ |
 | $\sigma_{\lg ZSA}$ | $-0.03\log_{10}(1+f_c)+0.29$ | $-0.05\log_{10}(1+f_c)+0.35$ | $0.43$ | $0.15$ | $0.17$ | $0.43$ |
 
-#### K-factor, XPR, Clusters
+#### Shadow Fading, K-factor, XPR, Clusters
 
 | 파라미터 | UMi LOS | UMi NLOS | UMi O2I | UMa LOS | UMa NLOS | UMa O2I |
 |---|---|---|---|---|---|---|
+| $\sigma_{SF}$ [dB] | 4 | 7.82 | 7 | 4 | 6 | 7 |
 | $\mu_K$ [dB] | 9 | N/A | N/A | 9 | N/A | N/A |
 | $\sigma_K$ [dB] | 5 | N/A | N/A | 3.5 | N/A | N/A |
 | $\mu_{\text{XPR}}$ [dB] | 9 | 8 | 9 | 8 | 7 | 9 |
@@ -1509,8 +1580,56 @@ $f_c$: GHz, $d_{2D}$: km
 > - UMi: $f_c < 2$ GHz → $f_c = 2$로 치환
 > - InH: $f_c < 6$ GHz → $f_c = 6$으로 치환
 
----
+### e00 Legacy LSP 파라미터 (UMi, Config 1 Calibration용)
 
+> **배경:** 3GPP TR 38.901 초기 버전(e00)에서 UMi LSP 수식이 현재 spec과 다르다. Config 1 calibration 재현 시 legacy 파라미터를 사용해야 할 수 있다. 아래는 현재 spec과의 차이점만 기술한다.
+
+#### UMi LOS (e00 Legacy)
+
+| 파라미터 | e00 Legacy | 현재 Spec |
+|---|---|---|
+| $\mu_{\lg DS}$ | $-7.14 - 0.24\log_{10}(1+f_c)$ | $-0.18\log_{10}(1+f_c)-7.28$ |
+| $\sigma_{\lg DS}$ | $0.38$ | $0.39$ |
+| $\mu_{\lg ASD}$ | $1.21 - 0.05\log_{10}(1+f_c)$ | $-0.05\log_{10}(1+f_c)+1.21$ |
+| $\sigma_{\lg ASD}$ | $0.41$ | $0.08\log_{10}(1+f_c)+0.29$ |
+| $\mu_{\lg ASA}$ | $1.73 - 0.08\log_{10}(1+f_c)$ | $-0.07\log_{10}(1+f_c)+1.66$ |
+| $\sigma_{\lg ASA}$ | $0.28 + 0.014\log_{10}(1+f_c)$ | $0.021\log_{10}(1+f_c)+0.26$ |
+| $\mu_{\lg ZSA}$ | $0.73 - 0.1\log_{10}(1+f_c)$ | $-0.11\log_{10}(1+f_c)+0.81$ |
+| $\sigma_{\lg ZSA}$ | $0.34 - 0.04\log_{10}(1+f_c)$ | $-0.03\log_{10}(1+f_c)+0.29$ |
+
+> **Note:** $\mu_{\lg ASD}$는 e00과 현재 spec에서 수식 동일. $\sigma_{\lg ASD}$, $\mu_{\lg ASA}$, $\mu_{\lg DS}$ 등에서 계수/상수가 다르다.
+
+#### UMi NLOS (e00 Legacy)
+
+| 파라미터 | e00 Legacy | 현재 Spec |
+|---|---|---|
+| $\mu_{\lg DS}$ | $-6.83 - 0.24\log_{10}(1+f_c)$ | $-0.22\log_{10}(1+f_c)-6.87$ |
+| $\sigma_{\lg DS}$ | $0.28 + 0.16\log_{10}(1+f_c)$ | $0.19\log_{10}(1+f_c)+0.22$ |
+| $\mu_{\lg ASD}$ | $1.53 - 0.23\log_{10}(1+f_c)$ | $-0.24\log_{10}(1+f_c)+1.54$ |
+| $\sigma_{\lg ASD}$ | $0.33 + 0.11\log_{10}(1+f_c)$ | $0.10\log_{10}(1+f_c)+0.33$ |
+| $\mu_{\lg ASA}$ | $1.81 - 0.08\log_{10}(1+f_c)$ | $-0.07\log_{10}(1+f_c)+1.76$ |
+| $\sigma_{\lg ASA}$ | $0.3 + 0.05\log_{10}(1+f_c)$ | $0.05\log_{10}(1+f_c)+0.27$ |
+| $\mu_{\lg ZSA}$ | $0.92 - 0.04\log_{10}(1+f_c)$ | $-0.03\log_{10}(1+f_c)+0.92$ |
+| $\sigma_{\lg ZSA}$ | $0.41 - 0.07\log_{10}(1+f_c)$ | $-0.05\log_{10}(1+f_c)+0.35$ |
+
+#### UMi O2I (e00 Legacy)
+
+e00 legacy와 현재 spec 동일 (주파수 비의존 파라미터이므로 변경 없음).
+
+#### e00 vs 현재 Spec 수치 비교 예시 ($f_c = 6$ GHz)
+
+| 파라미터 | e00 LOS | Spec LOS | e00 NLOS | Spec NLOS |
+|---|---|---|---|---|
+| $\mu_{\lg DS}$ | $-7.34$ | $-7.43$ | $-7.03$ | $-7.06$ |
+| $\sigma_{\lg DS}$ | $0.38$ | $0.39$ | $0.41$ | $0.38$ |
+| $\mu_{\lg ASD}$ | $1.17$ | $1.17$ | $1.34$ | $1.35$ |
+| $\sigma_{\lg ASD}$ | $0.41$ | $0.36$ | $0.42$ | $0.41$ |
+| $\mu_{\lg ASA}$ | $1.66$ | $1.60$ | $1.74$ | $1.70$ |
+| $\sigma_{\lg ASA}$ | $0.29$ | $0.28$ | $0.34$ | $0.31$ |
+| $\mu_{\lg ZSA}$ | $0.65$ | $0.71$ | $0.89$ | $0.89$ |
+| $\sigma_{\lg ZSA}$ | $0.31$ | $0.26$ | $0.35$ | $0.31$ |
+
+> **Note:** $\log_{10}(1+6) = \log_{10}(7) \approx 0.845$
 ## 8. ZSD/ZOD 오프셋 (Table 7.5-7~12)
 
 ### UMa (Table 7.5-7)
@@ -1585,14 +1704,11 @@ $$
 > - **$f_c < 6$ GHz일 때 Table 7.5-7과 7.5-10의 frequency-dependent 파라미터는 $f_c = 6$으로 치환**
 > - **O2I 링크의 ZSD 파라미터:** outdoor 링크 부분의 LOS 조건에 따라 Table 7.5-7/8의 outdoor 파라미터를 사용
 
----
-
 ## 9. Scaling Factor 테이블
 
 (Section 7 Step 7에 통합됨. Table 7.5-2, 7.5-3, 7.5-4, 7.5-5 참조.)
 
 ---
-
 ## 10. Calibration 파라미터 (Section 7.8)
 
 ### Table 7.8-1: Large Scale Calibration

@@ -136,8 +136,20 @@ void Set_simul_param(int argc, char *argv[])
 		handheld_port_indices[2] = int(Get_parameter(infile, "handheld_port_3", 3));
 		handheld_port_indices[3] = int(Get_parameter(infile, "handheld_port_4", 5));
 
+		// BS-side Spatial Non-Stationarity (SNS)
+		// Default values: UMi (Table 7.6.14.1.2-1/2/3)
+		g_sns_bs_enabled   = int(Get_parameter(infile, "sns_bs_enabled", 0));
+		g_sns_mu_P_vis     = Get_parameter(infile, "sns_mu_P_vis", 0.49);
+		g_sns_sigma_P_vis  = Get_parameter(infile, "sns_sigma_P_vis", 0.18);
+		g_sns_vr_A         = Get_parameter(infile, "sns_vr_A", 0.12);
+		g_sns_vr_B         = Get_parameter(infile, "sns_vr_B", 0.48);
+		g_sns_vr_R         = Get_parameter(infile, "sns_vr_R", 50.0);
+		g_sns_vr_delta     = Get_parameter(infile, "sns_vr_delta", 0.0316);
+		g_sns_rolloff_C    = Get_parameter(infile, "sns_rolloff_C", 13.0);
+
 		cfg_BS_Tx_Power      = Real(Get_parameter(infile, "BS_Tx_Power", -9999));
 		cfg_UT_Noise_Figure  = Real(Get_parameter(infile, "UT_Noise_Figure", -9999));
+		cfg_UE_antenna_element_gain = Real(Get_parameter(infile, "ue_antenna_element_gain", -9999));
 
 		num_mTRP = simple_num_BS*3;
 
@@ -358,6 +370,13 @@ void Set_simul_param(int argc, char *argv[])
 	}
 	if (channel_param_legacy)
 		cout << "channel_param_legacy    : " << channel_param_legacy << " (old TR 38.901 pre-V19)" << endl;
+	if (g_sns_bs_enabled) {
+		cout << "sns_bs_enabled          : " << g_sns_bs_enabled << " (j20 Stochastic VR)" << endl;
+		cout << "  ├─ Pr_sns (mu/sigma)  : " << g_sns_mu_P_vis << " / " << g_sns_sigma_P_vis << endl;
+		cout << "  ├─ vr_A/B             : " << g_sns_vr_A << " / " << g_sns_vr_B << endl;
+		cout << "  ├─ vr_R/sigma_delta   : " << g_sns_vr_R << " / " << g_sns_vr_delta << endl;
+		cout << "  └─ rolloff_C          : " << g_sns_rolloff_C << endl;
+	}
 	cout << "folder_name             : " << folder_name << endl;
 	if (handheld_mode) {
 		cout << "handheld_mode           : " << handheld_mode << endl;

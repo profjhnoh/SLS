@@ -910,6 +910,7 @@ void table_setting_RBIR(void)
 
 
 
+#if 0  // unused: Load_BLER_vienna_file — never called (commented out in StandardInitialization)
 void Load_BLER_vienna_file()
 {
 	//string trash;
@@ -955,7 +956,7 @@ void Load_BLER_vienna_file()
 	BLER_vienna_input.close();
 
 }
-
+#endif  // unused: Load_BLER_vienna_file
 
 
 

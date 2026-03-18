@@ -147,6 +147,7 @@ Real bs_height;
 
 Real cfg_BS_Tx_Power;
 Real cfg_UT_Noise_Figure;
+Real cfg_UE_antenna_element_gain = -9999;  // -9999 = use scenario default
 
 Real macro_bs_height;
 Real micro_bs_height;
@@ -283,6 +284,17 @@ int handheld_mode = 0;            // 0=off, 1=handheld
 int handheld_num_ports = 4;       // active ports (e.g., 4 for Config B)
 int handheld_port_indices[8] = {1,7,3,5,0,0,0,0}; // 1-based antenna position indices
 Real handheld_beta_deg = 45.0;    // UT β angle (degrees)
+
+// BS-side Spatial Non-Stationarity (SNS) parameters
+// Default values: UMi (Table 7.6.14.1.2-1/2/3)
+int  g_sns_bs_enabled  = 0;       // 0=off, 1=on
+Real g_sns_mu_P_vis    = 0.49;    // Pr_sns mean (Table 7.6.14.1.2-1, UMi)
+Real g_sns_sigma_P_vis = 0.18;    // Pr_sns sigma (Table 7.6.14.1.2-1, UMi)
+Real g_sns_vr_A        = 0.12;    // VR size A (Table 7.6.14.1.2-2, UMi)
+Real g_sns_vr_B        = 0.48;    // VR size B (Table 7.6.14.1.2-2, UMi)
+Real g_sns_vr_R        = 50.0;    // Power-VR R (Table 7.6.14.1.2-2, UMi)
+Real g_sns_vr_delta    = 0.0316;  // σ_δ = sqrt(0.001) (Table 7.6.14.1.2-2, UMi)
+Real g_sns_rolloff_C   = 13.0;    // Roll-off C (Table 7.6.14.1.2-3)
 
 ofstream  Calibration_Debug_info;
 

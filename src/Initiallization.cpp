@@ -298,17 +298,17 @@ void Set_Parameter(int scenario)
 			num_LINK = num_MS;
 
 			user_speed = 3;  //[3km/h] Indoor user // outdoor user speed -> decided later
-			Total_BS_Tx_power = 30; //[dBm for 10MHz]
+			Total_BS_Tx_power = 44; //[dBm for 10MHz]
 			//carrier_freq = 4000000000.; //[4GHz]
 			Wavelength = light_speed / carrier_freq;
 
-			bs_maxpower = 37+19; //[dBm for 10MHz] = Total BS TX power
+			bs_maxpower = 44; //[dBm for 10MHz] = Total BS TX power
 			micro_bs_power = bs_maxpower - 7;
 
 			ms_maxpower = 23; //[dBm UE power class]
 			BS_noisefig = 7;
 			MS_noisefig = 10;
-			ue_antenna_element_gain = 5;
+			ue_antenna_element_gain = 0;  // UMi: isotropic UE antenna (TR 38.901 Table 7.8-2A, calibration)
 			max_antgain = 8; //[dBi]  BS antenna element gain
 
 			//bandwidth = 10000000.; //[10MHz]  10 * 10 ^ 6
@@ -316,15 +316,15 @@ void Set_Parameter(int scenario)
 			//noise = dBm2linear(thermal_noise + MS_noisefig) * bandwidth; //[linear]  
 			noise = dBm2linear(thermal_noise + (10. * log10(bandwidth)) + MS_noisefig); //[linear]  
 
-			bs_height = 25.; //[m]
-			macro_bs_height     = 25.;
+			bs_height = 10.; //[m]
+			macro_bs_height     = 10.;
             micro_bs_height     = 10.;
 
 			ms_height_in = 0;   /// in LOS prob part
 			ms_height_out = 1.5;
-			inter_site_distance = 200;   /// should be reported by the proponent... 10 = just random number
+			inter_site_distance = 200;   // UMi Street Canyon: ISD = 200m (TR 38.901 Table 7.8-2A)
 
-			min_distance = 0.; // not decided in M.2412
+			min_distance = 10.; // UMi: minimum BS-UT distance = 10m (TR 38.901 Table 7.8-2A)
 			ANGLE_tilt = 0.; // change by calibration config
 
 			num_floor = 8;
@@ -534,8 +534,14 @@ void Set_Parameter(int scenario)
 		ut_nf_overridden = true;
 	}
 
-	// Handheld mode: force directional UE antenna path (actual gain is hardcoded in Get_UE_antenna_pattern)
-	if (handheld_mode) {
+	// cfg override for UE antenna element gain (e.g., 0=isotropic, 5=directional)
+	bool ue_gain_overridden = false;
+	if (cfg_UE_antenna_element_gain > -9998) {
+		ue_antenna_element_gain = cfg_UE_antenna_element_gain;
+		ue_gain_overridden = true;
+	}
+	// Handheld mode default: force directional path unless cfg explicitly overrides
+	if (handheld_mode && !ue_gain_overridden) {
 		ue_antenna_element_gain = 5;  // non-zero flag to trigger BF code paths
 	}
 
@@ -548,9 +554,10 @@ void Set_Parameter(int scenario)
 	cout << "bs_noise_figure         : " << BS_noisefig << " dB" << endl;
 	cout << "ue_noise_figure         : " << MS_noisefig << " dB" << (ut_nf_overridden ? " (overridden by cfg)" : "") << endl;
 	cout << "bs_antenna_element_gain : " << max_antgain << " dBi" << endl;
-	cout << "ue_antenna_element_gain : " << ue_antenna_element_gain << " dBi" << endl;
-	if (handheld_mode)
-		cout << "  └─ handheld mode      : forced to " << ue_antenna_element_gain << endl;
+	cout << "ue_antenna_element_gain : " << ue_antenna_element_gain << " dBi";
+	if (ue_gain_overridden) cout << " (overridden by cfg)";
+	else if (handheld_mode) cout << " (handheld default)";
+	cout << endl;
 	cout << "thermal_noise_level     : " << thermal_noise << " dBm/Hz" << endl;
 	cout << "simulation_bandwidth    : " << bandwidth << " Hz" << endl;
 
@@ -1683,7 +1690,7 @@ void Set_antenna_location_vector()
 	for (int bs_idx = 0; bs_idx < num_BS + num_mTRP; bs_idx++)
 	{
 		Real alpha;
-		Real beta =(Mechanic_tilt - 90.) * (pi / 180.);
+		Real beta  = 0; //(Mechanic_tilt - 90.) * (pi / 180.);
 		Real gamma = 0;
 
 		if (TYPE == 11)  //InH
@@ -1978,36 +1985,46 @@ void Generate_bs_2D_DFT_beam_precoder()
 		else
 		{
 			if (Calibration_mode == 1)
-			{				
+			{
+				// Full Calibration: single fixed beam at mechanical bore-sight
+				// TR 38.901: "panning (0,0) deg" = no electronic steering,
+				// total beam direction determined by mechanical tilt only.
+				// Same convention as UMa (Configuration_Type==0) calibration.
 				//bs
-				bs_tilt_azimuth_angle_LCS[0] = (-7 * pi / 16);
-				bs_tilt_azimuth_angle_LCS[1] = (-5 * pi / 16);
-				bs_tilt_azimuth_angle_LCS[2] = (-3 * pi / 16);
-				bs_tilt_azimuth_angle_LCS[3] = (-1 * pi / 16);
-				bs_tilt_azimuth_angle_LCS[4] = (1 * pi / 16);
-				bs_tilt_azimuth_angle_LCS[5] = (3 * pi / 16);
-				bs_tilt_azimuth_angle_LCS[6] = (5 * pi / 16);
-				bs_tilt_azimuth_angle_LCS[7] = (7 * pi / 16);
+				bs_tilt_azimuth_angle_LCS[0] = 0.;
+				bs_tilt_zenith_angle_LCS[0] = 102. * (pi / 180.);
 
-				bs_tilt_zenith_angle_LCS[0] = (1 * pi / 8);
-				bs_tilt_zenith_angle_LCS[1] = (3 * pi / 8);
-				bs_tilt_zenith_angle_LCS[2] = (5 * pi / 8);
-				bs_tilt_zenith_angle_LCS[3] = (7 * pi / 8);
+				tilt_azimuth_angle_LCS_size = 1;
+				tilt_zenith_angle_LCS_size = 1;
 
-				tilt_azimuth_angle_LCS_size = 8;
-				tilt_zenith_angle_LCS_size = 4;
-
-				//ue
-				ue_tilt_azimuth_angle_LCS[0] = (-3 * pi / 8);
-				ue_tilt_azimuth_angle_LCS[1] = (-pi / 8);
-				ue_tilt_azimuth_angle_LCS[2] = (pi / 8);
-				ue_tilt_azimuth_angle_LCS[3] = (3 * pi / 8);
-
-				ue_tilt_zenith_angle_LCS[0] = (pi / 4);
-				ue_tilt_zenith_angle_LCS[1] = (3 * pi / 4);
-
-				ue_tilt_azimuth_angle_LCS_size = 4;
-				ue_tilt_zenith_angle_LCS_size = 2;
+				// [DISABLED] Previous 32-beam DFT grid (8 azimuth x 4 zenith)
+				// — caused ~10 dB CL / SIR mismatch because none of the DFT
+				//   beams aligned with the calibration bore-sight (theta_LCS=102°),
+				//   and interfering BSs selected random beams from this grid.
+				//// bs
+				//bs_tilt_azimuth_angle_LCS[0] = (-7 * pi / 16);
+				//bs_tilt_azimuth_angle_LCS[1] = (-5 * pi / 16);
+				//bs_tilt_azimuth_angle_LCS[2] = (-3 * pi / 16);
+				//bs_tilt_azimuth_angle_LCS[3] = (-1 * pi / 16);
+				//bs_tilt_azimuth_angle_LCS[4] = (1 * pi / 16);
+				//bs_tilt_azimuth_angle_LCS[5] = (3 * pi / 16);
+				//bs_tilt_azimuth_angle_LCS[6] = (5 * pi / 16);
+				//bs_tilt_azimuth_angle_LCS[7] = (7 * pi / 16);
+				//bs_tilt_zenith_angle_LCS[0] = (1 * pi / 8);
+				//bs_tilt_zenith_angle_LCS[1] = (3 * pi / 8);
+				//bs_tilt_zenith_angle_LCS[2] = (5 * pi / 8);
+				//bs_tilt_zenith_angle_LCS[3] = (7 * pi / 8);
+				//tilt_azimuth_angle_LCS_size = 8;
+				//tilt_zenith_angle_LCS_size = 4;
+				//// ue
+				//ue_tilt_azimuth_angle_LCS[0] = (-3 * pi / 8);
+				//ue_tilt_azimuth_angle_LCS[1] = (-pi / 8);
+				//ue_tilt_azimuth_angle_LCS[2] = (pi / 8);
+				//ue_tilt_azimuth_angle_LCS[3] = (3 * pi / 8);
+				//ue_tilt_zenith_angle_LCS[0] = (pi / 4);
+				//ue_tilt_zenith_angle_LCS[1] = (3 * pi / 4);
+				//ue_tilt_azimuth_angle_LCS_size = 4;
+				//ue_tilt_zenith_angle_LCS_size = 2;
 			}
 			else
 			{

@@ -60,7 +60,10 @@
       "Bash(xxd:*)",
       "mcp__ide__executeCode",
       "Bash(./EMIMO_SLS.exe:*)",
-      "Bash(\"D:\\\\Dropbox\\\\SLS\\\\2026\\\\Tbps_DLSLS_20251010\\\\EMIMO_SLS.exe\" \"D:\\\\Dropbox\\\\SLS\\\\2026\\\\Tbps_DLSLS_20251010\\\\cfg_FullCal\\\\FullCal_UMa_Config3_7GHz_HandheldB.cfg\")"
+      "Bash(\"D:\\\\Dropbox\\\\SLS\\\\2026\\\\Tbps_DLSLS_20251010\\\\EMIMO_SLS.exe\" \"D:\\\\Dropbox\\\\SLS\\\\2026\\\\Tbps_DLSLS_20251010\\\\cfg_FullCal\\\\FullCal_UMa_Config3_7GHz_HandheldB.cfg\")",
+      "WebSearch",
+      "WebFetch(domain:arxiv.org)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []

@@ -573,6 +573,7 @@ void MS::CQI_Update_CJT(void)
 	}
 }
 
+#if 0  // unused: Fourier_Transform_of_Channel — replaced by Fourier_Transform_of_Channel_Optimized
 void MS::Fourier_Transform_of_Channel(int ms_idx)
 {
 	if (CH_CAL == 1) //// runtime calc
@@ -665,6 +666,7 @@ void MS::Fourier_Transform_of_Channel(int ms_idx)
 		}
 	}
 }
+#endif  // unused: Fourier_Transform_of_Channel
 
 // ========================================================================================
 // OPTIMIZED VERSION: Fourier_Transform_of_Channel_Optimized
@@ -820,6 +822,7 @@ VectorXcReal MS::PowerIteration_DominantEigenvector(const MatrixXcReal& M, int m
 // Converts H_usn[cluster](totalRx, totalTx) → H_m_elem[rb](totalRx, totalTx)
 // ====================================================================
 
+#if 0  // unused: Fourier_Transform_H_usn — never called
 void MS::Fourier_Transform_H_usn(int ms_idx)
 {
 	if (CH_CAL != 1) return;
@@ -881,6 +884,7 @@ void MS::Fourier_Transform_H_usn(int ms_idx)
 	// Reset phasors for potential re-use
 	// (not strictly needed since this is called once per drop)
 }
+#endif  // unused: Fourier_Transform_H_usn
 
 // ====================================================================
 // Element-Level DFT + Beamforming Weights → H_m (port-level)
