@@ -134,6 +134,11 @@ class LINK
         int                 failed                = 0;
         int                 total_num_scheduled   = 0;
 
+        // Per-layer HARQ state (used when g_per_layer_mcs==1). Index = layer 0..num_layers_actual-1.
+        int                 per_layer_num_re_tx[4] = {0,0,0,0};
+        bool                per_layer_done[4]      = {false,false,false,false};
+        Real                per_layer_accum_esinr[4] = {0,0,0,0};  // IR/Chase: accumulated effective SINR (linear) across (re)tx
+
 	    bool                ACK                   = true;
         Real              geometry              = 0;
         int                 selected_a            = 0;

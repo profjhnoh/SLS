@@ -15,6 +15,7 @@ Real Get_distance(LOCATION, LOCATION);
 void CQI_Map_creation_Map_connection();
 void Schedule_Map_creation_Connection();
 void Type1_Codebook_Gen();
+void Type2_Codebook_Gen();
 void ClearMAPs2StartADrop();
 void Link_configuration();
 void Get_CouplingLoss();
@@ -283,7 +284,7 @@ void Set_Parameter(int scenario)
 
 			ms_height_in = 0;   /// in LOS prob part
 			ms_height_out = 1.5;
-			inter_site_distance = 500;
+			inter_site_distance = 200;   // Dense Urban-eMBB macro layer ISD=200m (TR 38.913 Table 6.1.4-1; agency 6G req 2026-06). Was 500m (generic UMa).
 			min_distance = 35.; // not decided in M.2412
 			ANGLE_tilt = 0.; // change by calibration config
 
@@ -539,6 +540,11 @@ void Set_Parameter(int scenario)
 	if (cfg_UE_antenna_element_gain > -9998) {
 		ue_antenna_element_gain = cfg_UE_antenna_element_gain;
 		ue_gain_overridden = true;
+	}
+
+	// cfg override for inter-site distance (e.g., UMa ISD 200 vs 500 m). -1 = use scenario default.
+	if (cfg_inter_site_distance > 0) {
+		inter_site_distance = cfg_inter_site_distance;
 	}
 	// Handheld mode default: force directional path unless cfg explicitly overrides
 	if (handheld_mode && !ue_gain_overridden) {
@@ -1014,6 +1020,7 @@ void InitializeSystem()
 	CQI_Map_creation_Map_connection();
 	Schedule_Map_creation_Connection();
 	Type1_Codebook_Gen();
+	Type2_Codebook_Gen();
 	//Codebook_Generation();
 }
 
@@ -1030,7 +1037,7 @@ void CQI_Map_creation_Map_connection()
 	ppppPMI_map        = new PMI_FEEDBACK ***[num_MS];
 	ppppCQI_Map        = new Real       ***[num_MS];
 	ppppCQI_comp_Map   = new Real       ***[num_MS];
-	ppppPMI_vector_map = new VectorXcReal    ***[num_MS];
+	ppppPMI_vector_map = new MatrixXcReal    ***[num_MS];
 	ppppCSI_matrix_map = new MatrixXcReal    ***[num_MS];  // TDD: Full channel matrices
 
 	for (int ue_idx = 0; ue_idx < num_MS; ue_idx++)
@@ -1039,7 +1046,7 @@ void CQI_Map_creation_Map_connection()
 		ppppPMI_map[ue_idx]        = new PMI_FEEDBACK     ** [num_compute_coef];
 		ppppCQI_Map[ue_idx]        = new Real           ** [num_compute_coef];
 		ppppCQI_comp_Map[ue_idx]   = new Real           ** [num_compute_coef];
-		ppppPMI_vector_map[ue_idx] = new VectorXcReal        ** [num_compute_coef];
+		ppppPMI_vector_map[ue_idx] = new MatrixXcReal        ** [num_compute_coef];
 		ppppCSI_matrix_map[ue_idx] = new MatrixXcReal        ** [num_compute_coef];
 
 		for (int coeff_idx = 0; coeff_idx < num_compute_coef; coeff_idx++ )
@@ -1048,7 +1055,7 @@ void CQI_Map_creation_Map_connection()
 			ppppPMI_map       [ue_idx][coeff_idx]        = new PMI_FEEDBACK     * [num_rb];
 			ppppCQI_Map       [ue_idx][coeff_idx]        = new Real           * [num_rb];
 			ppppCQI_comp_Map  [ue_idx][coeff_idx]        = new Real           * [num_rb];
-			ppppPMI_vector_map[ue_idx][coeff_idx]        = new VectorXcReal        * [num_rb];
+			ppppPMI_vector_map[ue_idx][coeff_idx]        = new MatrixXcReal        * [num_rb];
 			ppppCSI_matrix_map[ue_idx][coeff_idx]        = new MatrixXcReal        * [num_rb];
 			for (int freq_idx = 0; freq_idx < num_rb; freq_idx++)
 			{
@@ -1056,7 +1063,7 @@ void CQI_Map_creation_Map_connection()
 				ppppPMI_map       [ue_idx][coeff_idx][freq_idx]        = new PMI_FEEDBACK [cqi_history_length];
 				ppppCQI_Map       [ue_idx][coeff_idx][freq_idx]        = new       Real [cqi_history_length];
 				ppppCQI_comp_Map  [ue_idx][coeff_idx][freq_idx]        = new       Real [cqi_history_length];
-				ppppPMI_vector_map[ue_idx][coeff_idx][freq_idx]        = new    VectorXcReal [cqi_history_length];
+				ppppPMI_vector_map[ue_idx][coeff_idx][freq_idx]        = new    MatrixXcReal [cqi_history_length];
 				ppppCSI_matrix_map[ue_idx][coeff_idx][freq_idx]        = new    MatrixXcReal [cqi_history_length];
 
 				// Initialize CSI matrices with proper size (NUM_RX_Port × NUM_TX_Port)
@@ -1213,6 +1220,86 @@ void Type1_Codebook_Gen()
 	//cout << "[DEBUG-CB] Type1_Codebook_Gen completed successfully" << endl;
 }
 
+/*===================================================================
+FUNCTION: Type2_Codebook_Gen()
+
+DESCRIPTION:
+  Generates and caches the oversampled 2D DFT beam basis used by the
+  Type II codebook (TS 38.214 §5.2.2.2.3). The full Type II precoder
+  is assembled on-the-fly per UE / per subband during PMI selection
+  (see MS::Quantization_of_Ch_Type2), so this routine only builds the
+  shared beam dictionary:
+
+        v_(l,m) = u_m ⊗ u_l,
+        u_l[x] = exp(j 2π l x / (O1 N1)),   x = 0..N1-1
+        u_m[y] = exp(j 2π m y / (O2 N2)),   y = 0..N2-1
+
+  Beam layout expected by channel_update.cpp:
+    For a spatial-domain tx antenna element (x, y),
+    spatial index = N2 * x + y   (matches Type I convention).
+
+  Skipped when Type II is disabled (g_codebook_type != 2) or when
+  P_CSI_RS == 2 (uses the 2-port hardcoded book instead).
+===================================================================*/
+void Type2_Codebook_Gen()
+{
+	// BUG FIX 2026-05-25: eType II (g_codebook_type == 3) also uses the same
+	// oversampled DFT beam basis. Previously only Rel-15 Type II (=2) generated
+	// type2_beam_v, causing eType II runs to silently fall back to Quantization_of_Ch
+	// (Type I, rank 1). This wiped out the entire eType II quantization path.
+	if (g_codebook_type != 2 && g_codebook_type != 3) return;
+
+	const int N_1 = BS_Np;
+	const int N_2 = BS_Mp;
+	const int P_CSI_RS = 2 * N_1 * N_2;
+	if (P_CSI_RS == 2) {
+		cout << "[Type II] P_CSI_RS=2, skipping (2-port book used instead)" << endl;
+		return;
+	}
+
+	const int O_1 = 4;
+	const int O_2 = (N_2 == 1) ? 1 : 4;
+
+	type2_N1 = N_1;
+	type2_N2 = N_2;
+	type2_O1 = O_1;
+	type2_O2 = O_2;
+
+	const ComplexReal j(0.0, 1.0);
+
+	// Free previous allocation (drop-boundary safety)
+	if (type2_beam_v != NULL) {
+		for (int l = 0; l < O_1 * N_1; l++) {
+			delete [] type2_beam_v[l];
+		}
+		delete [] type2_beam_v;
+		type2_beam_v = NULL;
+	}
+
+	type2_beam_v = new VectorXcReal * [O_1 * N_1];
+	for (int l = 0; l < O_1 * N_1; l++) {
+		type2_beam_v[l] = new VectorXcReal[O_2 * N_2];
+		for (int m = 0; m < O_2 * N_2; m++) {
+			VectorXcReal v_lm = VectorXcReal::Zero(N_1 * N_2);
+			for (int x = 0; x < N_1; x++) {
+				ComplexReal ul_x = exp(j * (Real)2.0 * pi * (Real)l * (Real)x / (Real)(O_1 * N_1));
+				for (int y = 0; y < N_2; y++) {
+					ComplexReal um_y = exp(j * (Real)2.0 * pi * (Real)m * (Real)y / (Real)(O_2 * N_2));
+					v_lm(N_2 * x + y) = ul_x * um_y;
+				}
+			}
+			type2_beam_v[l][m] = v_lm;  // length N1*N2, not yet normalized
+		}
+	}
+
+	cout << "[Type II] Codebook beams cached: (N1,N2)=(" << N_1 << "," << N_2
+	     << "), (O1,O2)=(" << O_1 << "," << O_2
+	     << "), total DFT beams = " << (O_1 * N_1 * O_2 * N_2)
+	     << ", L=" << g_type2_L
+	     << ", phase=" << g_type2_phase_alphabet
+	     << ", SA=" << g_type2_subband_amplitude << endl;
+}
+
 void ClearMAPs2StartADrop()
 {
 	for (int ue_idx = 0; ue_idx < num_MS; ue_idx++)
@@ -1226,7 +1313,7 @@ void ClearMAPs2StartADrop()
 					ppppCQI_Map[ue_idx][coeff_idx][freq_idx][time_idx]        = 0.;
 					ppppCQI_comp_Map[ue_idx][coeff_idx][freq_idx][time_idx]   = 0.;
 					ppppPMI_map[ue_idx][coeff_idx][freq_idx][time_idx]        = {0,0,0};
-					ppppPMI_vector_map[ue_idx][coeff_idx][freq_idx][time_idx] = VectorXcReal::Zero(NUM_TX_Port);
+					ppppPMI_vector_map[ue_idx][coeff_idx][freq_idx][time_idx] = MatrixXcReal::Zero(NUM_TX_Port, g_type2_rank);
 				}
 			}
 		}

@@ -61,7 +61,7 @@ const int MAX_BS_P = 2;              // Maximum P (polarization) dimension
 const int MAX_BS_Mg = 2;             // Maximum Mg (panel group M) dimension
 const int MAX_BS_Ng = 2;             // Maximum Ng (panel group N) dimension
 
-const int MAX_MS_M = 4;              // Maximum M dimension for MS antenna
+const int MAX_MS_M = 16;             // Maximum M dimension for MS antenna (raised 2026-05-25 for big-UE experiments)
 const int MAX_MS_N = 8;              // Maximum N dimension for MS antenna
 const int MAX_MS_P = 2;              // Maximum P dimension for MS antenna
 const int MAX_MS_Mg = 2;             // Maximum Mg dimension for MS antenna
@@ -105,6 +105,7 @@ typedef struct
 	int cqi_selected;
 	Real capacity;
 	int temp_cqi;
+	int layer_idx;       // For multi-layer per UE (eType II rank R): 0..R-1 (initialized to 0 in init paths)
 } SCHEDULE_DECISION;
 
 typedef struct

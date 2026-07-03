@@ -101,33 +101,113 @@ void MS::Receive_DL_mTRP( void )
 	}
 }
 
-Real MS::BLER_Mapping( void )
+// Helper: lookup BLER for a given linear SINR and CQI index (1..15)
+static inline Real bler_lookup_dB(Real sinr_linear, int cqi_idx)
 {
-	int mapping_snr_dB_idx = 0;
-	int mapping_cqi_idx    = 0;
-	Real BLER_value      = 0.;
-
-	Real x_axis = 10 * log10(ESINR_linear);		
+	Real x_axis = 10 * std::log10(std::max(sinr_linear, (Real)1e-30));
+	int mapping_idx = 1425;
 	for (int snr_idx = 0; snr_idx < 1426; snr_idx++)
 	{
-		if (SNR_5G_dB[snr_idx] > x_axis)
-		{
-			mapping_snr_dB_idx = snr_idx - 1;           
-			if (mapping_snr_dB_idx < 0)
-			{
-				mapping_snr_dB_idx = 0;
-			}
+		if (SNR_5G_dB[snr_idx] > x_axis) {
+			mapping_idx = snr_idx - 1;
+			if (mapping_idx < 0) mapping_idx = 0;
 			break;
 		}
-		else  
+	}
+	int c = cqi_idx - 1;
+	if (c < 0) c = 0;
+	if (c > 14) c = 14;
+	return NEW5GBLER[mapping_idx][c];
+}
+
+// Helper: NR transport-block-size (info bits) from MCS index, resource-element count N_RE,
+// and a layer multiplier. Mirrors the legacy Compute_Transport_Block_Size math (TS 38.214 5.1.3.2).
+// Used by the per-layer TBS path (layer_factor = 1 per layer).
+static int tbs_info_bits_from_mcs(int mcs_idx, int N_RE, int layer_factor)
+{
+	if (mcs_idx < 0)  mcs_idx = 0;
+	if (mcs_idx > 27) mcs_idx = 27;
+
+	int mod_type;
+	if (mcs_idx <= 4)       mod_type = QPSK;
+	else if (mcs_idx <= 10) mod_type = QAM16;
+	else if (mcs_idx <= 19) mod_type = QAM64;
+	else                    mod_type = QAM256;
+
+	static const Real CR_X1024[28] = {
+		120,193,308,449,602, 378,434,490,553,616,658,
+		466,517,567,616,666,719,772,822,873,
+		682.5,711,754,797,841,885,916.5,948 };
+	Real coding_rate = CR_X1024[mcs_idx] / 1024.0;
+
+	int N_info = (int)(N_RE * coding_rate * mod_type * layer_factor * (1.0 - overhead));
+	int info_bits = 0;
+	if (N_info <= 3834)
+	{
+		int n = MAX(3, floor(log2(N_info)) - 6.);
+		int N_info_a = MAX(24, pow(2, n) * floor(N_info / pow(2, n)));
+		info_bits = N_info_a;
+	}
+	else
+	{
+		int n = floor(log2(N_info - 24)) - 5;
+		int N_info_a = MAX(3840, pow(2, n) * round(((N_info - 24) / pow(2, n))));
+		if (coding_rate <= (1. / 4.))
 		{
-			mapping_snr_dB_idx = 1425;
+			int C = ceil((N_info_a + 24) / 3816);
+			info_bits = 8 * C * ceil((N_info_a + 24) / (8 * C)) - 24;
+		}
+		else if (N_info_a >= 8424)
+		{
+			int C = ceil((N_info_a + 24) / 8424);
+			info_bits = 8 * C * ceil((N_info_a + 24) / (8 * C)) - 24;
+		}
+		else
+		{
+			info_bits = 8 * ceil((N_info_a + 24) / 8) - 24;
 		}
 	}
-	/////////////////////////////////////////////////////////////////////////
-	BLER_value     = (NEW5GBLER[mapping_snr_dB_idx][_cqi_idx - 1]);
-	ue_BLER_Value  = BLER_value;
+	return info_bits;
+}
 
+Real MS::BLER_Mapping( void )
+{
+	// Per-layer BLER lookup.
+	// TB BLER = 1 - Π_{l=1..R} (1 - BLER_l)   (independent per-layer decode model)
+	// Legacy (g_per_layer_mcs==0) keeps the original >1-layer trigger; the single-layer
+	// case falls back to the ESINR_linear lookup below.
+	// Per-layer mode (==1) MUST populate per_layer_BLER even for a single layer, otherwise
+	// AddThroughput reads a stale per_layer_BLER[0]==0 and "always decodes" (throughput blow-up).
+	int min_layers_for_perlayer = (g_per_layer_mcs == 1) ? 1 : 2;
+	if (num_layers_actual >= min_layers_for_perlayer && (int)rbs_rx_per_layer.size() == num_layers_actual)
+	{
+		// Per-layer EESM aggregation across RBs
+		Real prob_success_TB = 1.0;
+		for (int l = 0; l < num_layers_actual && l < 4; l++)
+		{
+			const std::vector<Real>& v = rbs_rx_per_layer[l];
+			if (v.empty()) { per_layer_BLER[l] = 1.0; prob_success_TB = 0.0; continue; }
+
+			// Per-layer MCS: score each layer against ITS OWN cqi, not the dominant layer's.
+			int cqi_l = (g_per_layer_mcs == 1) ? _cqi_per_layer[l] : _cqi_idx;
+			Real beta = Beta[std::max(cqi_l - 1, 0)];
+			Real e_sir_l = 0.0;
+			for (size_t i = 0; i < v.size(); i++) e_sir_l += std::exp(-v[i] / beta);
+			Real esir_l = -beta * std::log(e_sir_l / (Real)v.size());
+
+			Real bler_l = bler_lookup_dB(esir_l, cqi_l);
+			per_layer_ESINR[l] = esir_l;
+			per_layer_BLER [l] = bler_l;
+			prob_success_TB *= (1.0 - bler_l);
+		}
+		Real BLER_value = 1.0 - prob_success_TB;
+		ue_BLER_Value = BLER_value;
+		return BLER_value;
+	}
+
+	// Legacy single-SINR fallback (R=1 or per-layer buffer not populated)
+	Real BLER_value = bler_lookup_dB(ESINR_linear, _cqi_idx);
+	ue_BLER_Value = BLER_value;
 	return BLER_value;
 }
 
@@ -203,6 +283,17 @@ NOTES:
 ===================================================================*/
 void MS::AddThroughput(Real prob)
 {
+#ifdef ENABLE_MULTITHREADING
+	// Per-thread RNG: AddThroughput runs inside the OpenMP receive region
+	// (measure.cpp), where the global `randnum` would be raced by all threads
+	// (non-atomic read-modify-write of its p,q,r state = C++ undefined behaviour).
+	// Shadowing it with a thread-local instance removes the race. NOTE: this is a
+	// CORRECTNESS fix only — it does NOT improve run-to-run reproducibility, because
+	// the thread-local RNG is seeded by thread-id and the OpenMP work distribution
+	// varies per run (A/B tested: ~17% 1-drop variance unchanged). True reproducibility
+	// would require seeding the HARQ coin deterministically per work-item (ue/slot).
+	Rand& randnum = get_thread_local_rng();
+#endif
 	//for check
 	if (prob < 0 || prob > 1)
 	{
@@ -268,6 +359,89 @@ void MS::AddThroughput(Real prob)
 				olla_offset = g_olla_max_offset;
 		}
 	};
+
+	// ============================================================================
+	// PER-LAYER HARQ (g_per_layer_mcs==1): each layer decodes independently with its
+	// own BLER. A weak layer failing does NOT NACK the others; it just retransmits
+	// (up to 3) on its own. Throughput credits each decoded layer's sub-TBS. The
+	// TB-level ACK is "all active layers resolved", which gates the buffer reset.
+	// ============================================================================
+	if (g_per_layer_mcs == 1)
+	{
+		int R = (num_layers_actual > 0) ? num_layers_actual : 1;
+		if (R > 4) R = 4;
+		bool first_tx = (links[self_idx].num_re_tx == 0);
+		bool layer_ok_first[4] = {false,false,false,false};  // decoded on THIS attempt
+
+		for (int l = 0; l < R; l++)
+		{
+			if (links[self_idx].per_layer_done[l]) continue;
+			Real coin   = randnum.u();
+			Real bler_l;
+			if (g_harq_ir == 1)
+			{
+				// IR/Chase soft combining: accumulate this (re)transmission's effective SINR
+				// and look up BLER at the ACCUMULATED SINR. On the 1st tx the accumulator
+				// equals the single-tx ESINR (→ identical to no-combining); each retx adds
+				// more SINR so the per-layer BLER drops and decoding becomes progressively
+				// more likely. per_layer_ESINR[l] is set by BLER_Mapping for this slot.
+				links[self_idx].per_layer_accum_esinr[l] += per_layer_ESINR[l];
+				bler_l = bler_lookup_dB(links[self_idx].per_layer_accum_esinr[l], _cqi_per_layer[l]);
+			}
+			else
+			{
+				bler_l = per_layer_BLER[l];
+			}
+			if (bler_l < coin || isnan(bler_l))          // layer decoded OK
+			{
+				links[self_idx]._throughput += _info_bits_per_layer[l];
+				links[self_idx].per_layer_done[l] = true;
+				layer_ok_first[l] = true;
+			}
+			else                                          // layer NACK
+			{
+				links[self_idx].per_layer_num_re_tx[l]++;
+				if (links[self_idx].per_layer_num_re_tx[l] > 3)
+				{
+					links[self_idx].per_layer_done[l] = true;   // drop after 3 retx
+					links[self_idx].re_tx_failed++;
+					re_tx_failed_cnt++;
+				}
+			}
+		}
+
+		bool all_done = true;
+		for (int l = 0; l < R; l++)
+			if (!links[self_idx].per_layer_done[l]) { all_done = false; break; }
+
+		if (first_tx)
+		{
+			// OLLA targets PER-LAYER BLER: feed each layer's first-tx outcome into the
+			// window. The single per-UE offset then converges to the per-layer target_bler
+			// (NOT TB-level, which for R layers would over-shrink MCS by ~R×).
+			bool all_ok_first = true;
+			for (int l = 0; l < R; l++)
+			{
+				update_olla_window(layer_ok_first[l]);
+				if (!layer_ok_first[l]) all_ok_first = false;
+			}
+			if (!all_ok_first) links[self_idx].failed++;   // TB first-tx failure (any layer NACK)
+		}
+
+		if (all_done)
+		{
+			links[self_idx].ACK = true;
+			links[self_idx].num_re_tx = 0;
+			for (int l = 0; l < 4; l++) { links[self_idx].per_layer_done[l] = false; links[self_idx].per_layer_num_re_tx[l] = 0; }
+		}
+		else
+		{
+			links[self_idx].ACK = false;
+			links[self_idx].num_re_tx++;
+			links[self_idx].total_num_re_tx++;
+		}
+		return;
+	}
 
 	if (prob < tossing_coin || isnan(prob)) // Tossing a biased coin
 	{
@@ -342,6 +516,22 @@ void MS::Find_Allocated_Rbs_Mcs_mTRP( void )
 					temp_mcs  = decision_of_interest.mcs_selected;
 					temp_cqi  = decision_of_interest.cqi_selected;
 					temp_avr_sinr_fb = decision_of_interest.capacity;
+
+					// PER-LAYER MCS: on the FIRST scheduled RB of a fresh TX (ACK==1), capture
+					// every layer-stream's MCS/CQI by layer_idx. Gated by ACK so a retransmitted
+					// TB keeps its frozen per-layer MCS (matches legacy _mcs_idx freezing).
+					if (g_per_layer_mcs == 1 && links[self_idx].ACK)
+					{
+						for (int l = 0; l < 4; l++) { _mcs_per_layer[l] = 0; _cqi_per_layer[l] = 0; }
+						for (int s2 = 0; s2 < mx_ue_mumimo; s2++)
+						{
+							const SCHEDULE_DECISION& d2 =
+								pppSchedule_Map[links[self_idx]._sector_in_control][freq_idx][s2];
+							if (d2.ue_selected != self_idx) continue;
+							int L = d2.layer_idx;
+							if (L >= 0 && L < 4) { _mcs_per_layer[L] = d2.mcs_selected; _cqi_per_layer[L] = d2.cqi_selected; }
+						}
+					}
 				}
 				break; // Found in this RB, move to next RB
 			}
@@ -511,8 +701,13 @@ void MS::Rate_matching(void)
 
 		coding_rate = coding_rate_x1024 / 1024.;
 
+		// BUG FIX 2026-05-25: TBS must scale with the ACTUAL number of layers
+		// allocated to this UE (set in compute_tone_SINR()), NOT the fixed cfg
+		// constant NUM_UE_Layer. Falls back to NUM_UE_Layer when no layer was
+		// allocated (defensive — shouldn't happen if UE is scheduled).
+		const int _R_used_ = (num_layers_actual > 0) ? num_layers_actual : NUM_UE_Layer;
 
-		N_info = (int)(N_RE * coding_rate * _mod_type * NUM_UE_Layer* (1. - overhead));
+		N_info = (int)(N_RE * coding_rate * _mod_type * _R_used_ * (1. - overhead));
 
 		if (N_info <= 3834)
 		{
@@ -567,6 +762,11 @@ void MS::Compute_RBs_SINR( void )
 		rbs_rx.clear();
 		comp_mode_rx_flag = 0;
 		num_rx_rbs = 0;
+		// Also reset per-layer buffers for this packet's reception
+		for (auto& v : rbs_rx_per_layer) v.clear();
+		rbs_rx_per_layer.clear();
+		// Reset per-layer HARQ state for the fresh TB (per_layer_mcs path)
+		for (int l = 0; l < 4; l++) { links[self_idx].per_layer_done[l] = false; links[self_idx].per_layer_num_re_tx[l] = 0; links[self_idx].per_layer_accum_esinr[l] = 0.0; }
 	}
 
 	for (int freq_idx = 0; freq_idx < (int)rb_indices.size(); freq_idx++)
@@ -613,6 +813,33 @@ void MS::Compute_Transport_Block_Size( void )
 {
 	if (links[self_idx].ACK == 1) // Previously successed or initial transmission case
 	{
+		// PER-LAYER TBS: each layer gets its own sub-TBS from its own MCS (layer factor = 1);
+		// total info bits = sum over layers. Sum ~= legacy (x R) when all per-layer MCS equal.
+		if (g_per_layer_mcs == 1)
+		{
+			int N_DMRS = 0, N_overhead = 0;
+			int N_RE_a = num_freq_per_rbs * num_ofdm_symbols_per_subband_per_1ms - N_DMRS - N_overhead;
+			int N_RE   = MIN(156, N_RE_a) * num_rx_rbs;
+
+			int R = (num_layers_actual > 0) ? num_layers_actual : 1;
+			if (R > 4) R = 4;
+			int total = 0;
+			for (int l = 0; l < 4; l++) _info_bits_per_layer[l] = 0;
+			for (int l = 0; l < R; l++)
+			{
+				_info_bits_per_layer[l] = tbs_info_bits_from_mcs(_mcs_per_layer[l], N_RE, 1);
+				total += _info_bits_per_layer[l];
+			}
+			_info_bits = total;
+
+			// Keep _mod_type meaningful for legacy stat readers (dominant layer).
+			if      (_mcs_per_layer[0] <= 4)  _mod_type = QPSK;
+			else if (_mcs_per_layer[0] <= 10) _mod_type = QAM16;
+			else if (_mcs_per_layer[0] <= 19) _mod_type = QAM64;
+			else                              _mod_type = QAM256;
+			return;
+		}
+
 		if (_mcs_idx <= 4)       { _mod_type = QPSK; }
 		else if (_mcs_idx <= 10) { _mod_type = QAM16; }
 		else if (_mcs_idx <= 19) { _mod_type = QAM64; }
@@ -670,7 +897,9 @@ void MS::Compute_Transport_Block_Size( void )
 
 		coding_rate = coding_rate_x1024 / 1024.;
 		//N_info = (int)(N_RE * coding_rate * _mod_type * NUM_UE_Layer* (1. - overhead));
-		N_info = (int)(N_RE * coding_rate * _mod_type * (1. - overhead));
+		// BUG FIX 2026-05-25: use actual per-UE layer count.
+		const int _R_used_tbs = (num_layers_actual > 0) ? num_layers_actual : 1;
+		N_info = (int)(N_RE * coding_rate * _mod_type * _R_used_tbs * (1. - overhead));
 		int N_info_a = 0;
 		//N_info = (int)(N_RE * coding_rate * _mod_type * 1 * (1. - overhead));
 		//N_info = (int)(N_RE * coding_rate * _mod_type * mx_ue_mumimo);
@@ -834,7 +1063,9 @@ void MS::Compute_Num_Bin_Symbol(void)
 		}
 
 		coding_rate = coding_rate_x1024 / 1024.;
-		N_info = (int)(N_RE * coding_rate * _mod_type * NUM_UE_Layer* (1. - overhead));
+		// BUG FIX 2026-05-25: use actual per-UE layer count instead of cfg constant.
+		const int _R_used_cb = (num_layers_actual > 0) ? num_layers_actual : NUM_UE_Layer;
+		N_info = (int)(N_RE * coding_rate * _mod_type * _R_used_cb * (1. - overhead));
 		//N_info = (int)(N_RE * coding_rate * _mod_type * 1 * (1. - overhead));
 		//N_info = (int)(N_RE * coding_rate * _mod_type * mx_ue_mumimo);
 
@@ -1138,10 +1369,11 @@ Real MS::Compute_Tone_SINR_CJT(int sec_idx, int rb_idx)
 	Real linear_interference = dBm2linear(links[self_idx].interference);
 	linear_interference       -= dBm2linear(links[self_idx].intf_w_rnd_RSRP[comp_sector_idx]);
 
-	H_bar = sqrt(linear_signal) * (H_m[0][rb_idx]) * PMI_vector[0][rb_idx][t % cqi_history_length];
+	// Use dominant layer (col 0) for mTRP CJT SINR (Phase I: single-layer)
+	H_bar = sqrt(linear_signal) * (H_m[0][rb_idx]) * PMI_vector[0][rb_idx][t % cqi_history_length].col(0);
 
 	Real comp_sector_static_gain = dBm2linear(links[self_idx].intf_w_rnd_RSRP[comp_sector_idx]); //dBm2linear(links[self_idx].static_gain[1].first); // dBm2linear(bs_maxpower - channel[comp_bs_idx][self_idx].pathloss_final);
-	H_inf = sqrt(comp_sector_static_gain) * H_m[1][rb_idx] * PMI_vector[1][rb_idx][t % cqi_history_length];
+	H_inf = sqrt(comp_sector_static_gain) * H_m[1][rb_idx] * PMI_vector[1][rb_idx][t % cqi_history_length].col(0);
 
 	u = H_bar.adjoint() * (H_bar * H_bar.adjoint() + H_inf * H_inf.adjoint() + (linear_interference + noise) * Identity).inverse();
 	A = (u * H_bar * H_bar.adjoint() * u.adjoint()).norm();
@@ -1297,74 +1529,184 @@ DESCRIPTION:
 ===================================================================*/
 Real MS::compute_tone_SINR(int rb_idx)
 {
-	// Find stream number for this UE (early exit optimization)
-	int stream_num = -1;
+	// Collect ALL streams for this UE (multi-layer support: eType II rank > 1)
+	std::vector<int> my_streams;
 	for (int i = 0; i < mx_ue_mumimo; i++)
 	{
 		if (ppSchedulerRead[rb_idx][i].ue_selected == self_idx)
 		{
-			stream_num = i;
-			break;  // Early exit once found
+			my_streams.push_back(i);
 		}
 	}
 
 	// If UE not scheduled on this RB, return 0
-	if (stream_num == -1)
+	if (my_streams.empty())
 		return 0.0;
 
-	// Count received RBs
+	// Count received RBs (once per RB, not per layer)
 	num_rx_rb++;
 
-	// Calculate power levels (reuse across function)
+	// Record actual layers allocated to this UE on this RB (used by Rate_matching for TBS)
+	num_layers_actual = (int)my_streams.size();
+
+	// Calculate power levels
 	const Real noise = dBm2linear(thermal_noise + (10. * log10(bandwidth)) + MS_noisefig);
 	const Real linear_signal = dBm2linear(bs_maxpower - channel[(int)(links[self_idx]._sector_in_control/3)][self_idx].pathloss_final);
 	const Real linear_interference = dBm2linear(links[self_idx].interference);
 
-	// Compute effective channel matrix H_bar = sqrt(P) * H * W
-	// Dimensions: [NUM_RX_Port x mx_ue_mumimo]
+	// Effective channel matrix H_bar = sqrt(P) * H * W  (N_rx × mx_ue_mumimo)
 	const MatrixXcReal& H = H_m[0][rb_idx];
 	const MatrixXcReal& W = sector[links[self_idx]._sector_in_control].W[rb_idx];
 	const MatrixXcReal H_bar = sqrt(linear_signal) * H * W;
 
-	// Extract desired user's channel vector h_u
-	// Dimensions: [NUM_RX_Port x 1]
-	const MatrixXcReal h_u = H_bar.col(stream_num);
-
-	// Compute MMSE receiver filter (inline to avoid redundant H_bar calculation)
-	// w = h_u^H * (H_bar * H_bar^H + σ²I)^(-1)
-	// Dimensions: [1 x NUM_RX_Port]
 	const MatrixXcReal Identity = MatrixXcReal::Identity(NUM_RX_Port, NUM_RX_Port);
-	const MatrixXcReal Ryy = H_bar * H_bar.adjoint() + linear_interference * Identity;
-	const MatrixXcReal u = h_u.adjoint() * Ryy.inverse();
 
-	// Desired signal after receiver combining
-	// A = u * h_u (scalar)
-	const ComplexReal A_scalar = (u * h_u)(0, 0);
-	const Real signal_power = std::norm(A_scalar);  // |A|²
+	// --- Per-layer SINR computation -----------------------------------------------
+	// For each of own UE's R layers, compute its post-equalizer SINR independently.
+	// We do NOT sum into a single SINR (which over-counted in the previous version);
+	// instead we store per-layer SINRs so that BLER lookup can be done per-layer.
+	//
+	// Use_SIC modes:
+	//   0: per-stream MMSE — Ryy includes ALL streams. Each layer treats every other
+	//      stream (own & other UE) as interference. Most pessimistic.
+	//   1: legacy "hybrid" — Ryy w/ own layers but own excluded from intf sum.
+	//   2: parallel ideal SIC — Ryy excludes own UE's layers entirely. Each layer's
+	//      filter sees only other UE+noise covariance. Information-theoretic bound.
+	//   3: sequential MMSE-SIC — order layers by SINR, decode strongest first,
+	//      cancel it from Ryy if decode succeeded (BLER trial), then proceed.
+	//      Most realistic.
 
-	// Compute MU-MIMO interference power from other streams
-	Real interference_power = 0.0;
-	for (int stream = 0; stream < mx_ue_mumimo; stream++)
-	{
-		// Skip if it's the desired stream or no UE scheduled
-		if (stream == stream_num || ppSchedulerRead[rb_idx][stream].ue_selected == -1)
-			continue;
+	const int R_act = (int)my_streams.size();
+	const int Rcap = (R_act < 4) ? R_act : 4;
 
-		// Interference from stream i: B = u * h_i
-		const MatrixXcReal h_i = H_bar.col(stream);
-		const ComplexReal B_scalar = (u * h_i)(0, 0);
-		interference_power += std::norm(B_scalar);  // |B|²
+	// Resize per-layer buffer at first RB of the alloc; appending across RBs.
+	if (rbs_rx_per_layer.size() != (size_t)R_act)
+		rbs_rx_per_layer.assign(R_act, std::vector<Real>());
+
+	// Initial Ryy:
+	//   SIC=2 (parallel ideal):  exclude own UE's layers from the start
+	//   SIC=3 (sequential SIC):  start with ALL streams in Ryy. We then
+	//                            sequentially subtract own UE's layers as
+	//                            they are "decoded" (BLER-trial based).
+	//   SIC=0/1 (legacy):        all streams in Ryy
+	MatrixXcReal Ryy_base;
+	if (g_use_sic == 2) {
+		Ryy_base = linear_interference * Identity;
+		for (int s = 0; s < mx_ue_mumimo; s++) {
+			int sched_ue = ppSchedulerRead[rb_idx][s].ue_selected;
+			if (sched_ue == -1 || sched_ue == self_idx) continue;
+			Ryy_base += H_bar.col(s) * H_bar.col(s).adjoint();
+		}
+	} else {
+		// SIC=0, 1, 3: include all streams initially
+		Ryy_base = H_bar * H_bar.adjoint() + linear_interference * Identity;
 	}
 
-	// Add external interference and noise (with MMSE enhancement)
-	// Total noise power = (I_ext + N) * ||u||²
-	const Real u_norm_sq = (u * u.adjoint()).norm();
-	interference_power += (linear_interference + noise) * u_norm_sq;
+	// SIC=3: sort layers by initial SINR (descending) for sequential decoding
+	std::vector<int> layer_order(R_act);
+	for (int i = 0; i < R_act; i++) layer_order[i] = i;
+	if (g_use_sic == 3 && R_act > 1) {
+		std::vector<Real> sinr_init(R_act);
+		MatrixXcReal Ryy_inv_init = Ryy_base.inverse();
+		for (int sidx = 0; sidx < R_act; sidx++) {
+			const MatrixXcReal h_u = H_bar.col(my_streams[sidx]);
+			const MatrixXcReal u = h_u.adjoint() * Ryy_inv_init;
+			Real sig = std::norm((u * h_u)(0,0));
+			Real intf = 0.0;
+			for (int s = 0; s < mx_ue_mumimo; s++) {
+				int other_ue = ppSchedulerRead[rb_idx][s].ue_selected;
+				if (other_ue == -1 || other_ue == self_idx) continue;
+				intf += std::norm((u * H_bar.col(s))(0,0));
+			}
+			intf += (linear_interference + noise) * (u * u.adjoint()).norm();
+			sinr_init[sidx] = (intf > 1e-30) ? sig / intf : 0.0;
+		}
+		std::sort(layer_order.begin(), layer_order.end(),
+			[&](int a, int b) { return sinr_init[a] > sinr_init[b]; });
+	}
 
-	// Compute SINR
-	const Real Received_SINR = signal_power / interference_power;
+	// Process layers (in SIC=3 order if applicable)
+	MatrixXcReal Ryy_cur = Ryy_base;
+	MatrixXcReal Ryy_cur_inv = Ryy_cur.inverse();
+	std::vector<Real> per_layer_sinr_thisRB(R_act, 0.0);
+	// Track which own UE layers have been cancelled (SIC=3 only).
+	// cancelled[sidx] = true once layer sidx has been "decoded" and subtracted.
+	std::vector<bool> cancelled(R_act, false);
 
-	// Update CQI offset if SINR is valid
+	for (int order_idx = 0; order_idx < R_act; order_idx++)
+	{
+		int sidx = layer_order[order_idx];
+		int stream_num = my_streams[sidx];
+		const MatrixXcReal h_u = H_bar.col(stream_num);
+		const MatrixXcReal u   = h_u.adjoint() * Ryy_cur_inv;
+
+		const ComplexReal A_scalar = (u * h_u)(0, 0);
+		Real sig = std::norm(A_scalar);
+
+		Real intf = 0.0;
+		for (int s = 0; s < mx_ue_mumimo; s++)
+		{
+			int other_ue = ppSchedulerRead[rb_idx][s].ue_selected;
+			if (other_ue == -1) continue;
+			if (s == stream_num) continue;            // exclude this layer itself
+
+			if (other_ue == self_idx) {
+				// Own UE's sibling layer: handling depends on SIC mode
+				if (g_use_sic == 2) continue;            // perfectly cancelled (ideal)
+				if (g_use_sic == 3) {
+					// SIC=3: only cancelled (already processed) layers are excluded.
+					// Find sibling layer index among my_streams to check cancelled[].
+					int sib_idx = -1;
+					for (int k = 0; k < R_act; k++) if (my_streams[k] == s) { sib_idx = k; break; }
+					if (sib_idx >= 0 && cancelled[sib_idx]) continue;
+					// else: still uncancelled, include as interference
+				}
+				// SIC=1 (legacy): exclude own UE entirely (ideal-but-inconsistent)
+				if (g_use_sic == 1) continue;
+				// SIC=0: include as interference (fall through)
+			}
+			intf += std::norm((u * H_bar.col(s))(0, 0));
+		}
+		Real u_norm_sq = (u * u.adjoint()).norm();
+		intf += (linear_interference + noise) * u_norm_sq;
+
+		Real sinr_l = (intf > 1e-30) ? sig / intf : 0.0;
+		per_layer_sinr_thisRB[sidx] = sinr_l;
+
+		// SIC=3: mark this layer as cancelled and remove from Ryy for downstream layers.
+		// (Optimistic: we assume successful decode at SINR computation. The decode-fail
+		//  probability is captured via BLER lookup at the resulting per-layer SINR.)
+		if (g_use_sic == 3 && order_idx < R_act - 1) {
+			cancelled[sidx] = true;
+			Ryy_cur -= h_u * h_u.adjoint();
+			Real reg = 1e-12 * (Ryy_cur.trace().real() / (Real)NUM_RX_Port);
+			Ryy_cur += reg * Identity;
+			Ryy_cur_inv = Ryy_cur.inverse();
+		}
+	}
+
+	// Save per-layer SINR per-RB into accumulator and global counters
+	for (int sidx = 0; sidx < R_act && sidx < 4; sidx++) {
+		Real s = per_layer_sinr_thisRB[sidx];
+		if (rbs_rx_per_layer[sidx].size() < (size_t)num_rb)
+			rbs_rx_per_layer[sidx].push_back(s);
+		if (s > 0) {
+			recv_perlayer_sinr_sum[sidx+1] += s;
+			recv_perlayer_count[sidx+1]++;
+		}
+	}
+
+	// For legacy compatibility, return average per-layer SINR (NOT sum).
+	Real avg_sinr = 0.0;
+	int avg_n = 0;
+	for (int sidx = 0; sidx < R_act; sidx++) {
+		if (per_layer_sinr_thisRB[sidx] > 0) {
+			avg_sinr += per_layer_sinr_thisRB[sidx];
+			avg_n++;
+		}
+	}
+	const Real Received_SINR = (avg_n > 0) ? avg_sinr / avg_n : 0.0;
+
 	if (Received_SINR > 0.0)
 		compute_CQI_offset(Received_SINR, rb_idx);
 

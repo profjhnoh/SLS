@@ -148,6 +148,7 @@ Real bs_height;
 Real cfg_BS_Tx_Power;
 Real cfg_UT_Noise_Figure;
 Real cfg_UE_antenna_element_gain = -9999;  // -9999 = use scenario default
+Real cfg_inter_site_distance = -1;         // -1 = use scenario default ISD; >0 overrides (m)
 
 Real macro_bs_height;
 Real micro_bs_height;
@@ -174,7 +175,7 @@ void Initialdrop();
 
 // 220815 jhnoh
 PMI_FEEDBACK      **** ppppPMI_map;
-VectorXcReal      **** ppppPMI_vector_map;
+MatrixXcReal      **** ppppPMI_vector_map;
 MatrixXcReal      **** ppppCSI_matrix_map;  // TDD: Full channel matrices
 Real              **** ppppCQI_Map;
 Real              **** ppppCQI_comp_Map;
@@ -202,6 +203,28 @@ Vector4cReal code_word[64];
 MatrixXcReal *** codebook_W;
 MatrixXcReal cb_W_csirs_2_layer_1[4];
 MatrixXcReal cb_W_csirs_2_layer_2[2];
+
+// Type II Codebook parameters (TS 38.214 §5.2.2.2.3 / §5.2.2.2.5)
+int  g_codebook_type           = 1;     // 1 = Type I, 2 = Type II (Rel-15), 3 = eType II (Rel-16)
+int  g_type2_L                 = 4;     // L = 2/3/4
+int  g_type2_phase_alphabet    = 8;     // 4 = QPSK, 8 = 8-PSK, 16 = 16-PSK
+int  g_type2_subband_amplitude = 1;     // 0 = off, 1 = on
+int  g_type2_rank              = 1;     // MAX rank cap R_max (1..4)
+int  g_etype2_param_comb       = 3;     // ParameterCombination: 3 → L=4, p_v=1/4, β=1/4
+Real g_etype2_pv               = 0.25;  // FD basis ratio
+Real g_etype2_beta             = 0.25;  // Sparsity ratio
+int  g_rank_adaptive           = 0;     // 0 = fixed, 1 = per-UE RI
+int  g_su_fallback             = 0;     // 0 = always MU, 1 = SU vs MU metric comparison
+int  g_use_sic                 = 1;     // 0 = per-stream MMSE, 1 = ideal SIC for own UE's layers (historical default)
+int  g_per_layer_mcs           = 0;     // 0 = legacy single-MCS/TB-HARQ, 1 = per-layer MCS + per-layer HARQ
+int  g_harq_ir                 = 0;     // 0 = HARQ Type I (no combining), 1 = IR/Chase SINR accumulation
+
+// Type II cached DFT beams
+VectorXcReal ** type2_beam_v   = NULL;  // [O1*N1][O2*N2]
+int type2_N1 = 0;
+int type2_N2 = 0;
+int type2_O1 = 0;
+int type2_O2 = 0;
 
 // simulation run variables
 int t;

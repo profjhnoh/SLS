@@ -23,6 +23,9 @@ class MS
 		void   Channel_Update_MIMO(int);
 		void   Quantization_of_Ch(void);
 		void   Quantization_of_Ch_CSIRS_2(void);
+		void   Quantization_of_Ch_Type2(void);    // TS 38.214 §5.2.2.2.3 Type II (Rel-15, rank 1)
+		void   Quantization_of_Ch_EType2(void);   // TS 38.214 §5.2.2.2.5 eType II (Rel-16, rank 1..4)
+		void   Compute_RI(void);                  // Rank Indicator selection (SVD capacity)
 		void   Store_CSI_for_TDD(void);  // TDD: Store full channel matrix for reciprocity-based precoding
 		void   CQI_Update(void);
 		void   Received_SINR(void);
@@ -85,9 +88,14 @@ class MS
 		long unsigned int sum_mcs_type        = 0;
 		long double       total_esinr         = 0;
 		long double       total_estimate_sinr = 0;
-		int               _info_bits          = 0;	
+		int               _info_bits          = 0;
 		int               _mcs_idx            = 0;
 		int               _cqi_idx            = 0;
+		// Per-layer MCS/CQI/TBS (used when g_per_layer_mcs==1). Index = layer (0..num_layers_actual-1),
+		// matching rbs_rx_per_layer ordering. Legacy path uses _mcs_idx/_cqi_idx (= layer 0).
+		int               _mcs_per_layer[4]       = {0,0,0,0};
+		int               _cqi_per_layer[4]       = {0,0,0,0};
+		int               _info_bits_per_layer[4] = {0,0,0,0};
 		Real             _avr_sinr           = 0;
 		int               _mod_type           = 0;
 		int               num_rx_rb           = 0;
@@ -124,13 +132,45 @@ class MS
 		int               pmi_m               = 0;
 		int               pmi_n               = 0;
 
+		// Rank Indicator (RI): UE-selected rank for eType II when g_rank_adaptive=1.
+		// Default 1. Updated in Compute_RI() each time slot.
+		int               self_RI             = 1;
+		Real              su_capacity         = 0.0;   // Best SU Shannon capacity for scheduler SU-vs-MU
+
+		// Actual number of layers allocated to this UE on the most recent scheduled RB.
+		// Set inside compute_tone_SINR() as my_streams.size(). Used by Rate_matching to
+		// compute the correct N_info (transport-block size scales linearly with layers).
+		int               num_layers_actual   = 1;
+
+		// Per-layer reception buffers (used when num_layers_actual > 1).
+		// rbs_rx_per_layer[l] = vector of post-equalizer SINR (linear) for layer l across scheduled RBs.
+		// per_layer_ESINR[l]  = EESM-aggregated per-layer effective SINR.
+		// per_layer_BLER[l]   = looked-up BLER per layer.
+		// TB ACK = AND of all layer ACKs (Bernoulli trials).
+		std::vector< std::vector<Real> > rbs_rx_per_layer;   // [layer][rb_in_alloc]
+		Real              per_layer_ESINR[4]    = {0,0,0,0};
+		Real              per_layer_BLER[4]     = {0,0,0,0};
+
+		// PMI quality / channel-rank statistics, accumulated in Quantization_of_Ch_EType2().
+		// Used to diagnose RI selection (σ-spread) and PMI codebook quantization loss.
+		Real              pmi_sigma2_sum[5]     = {0,0,0,0,0};  // σ_l² (index 1..4)
+		Real              pmi_overlap_sum[5]    = {0,0,0,0,0};  // |w_l^H v_l|² per column (legacy)
+		Real              pmi_cos2_sum[5]       = {0,0,0,0,0};  // cos²(θ_l): principal angles
+		Real              pmi_chordal_sum       = 0.0;          // R − Σ cos²(θ_l) per sample
+		int               pmi_quality_count     = 0;            // # (subband × time) samples
+
+		// Per-layer SINR comparison (predicted vs received)
+		Real              pred_perlayer_se_sum[5]  = {0,0,0,0,0};  // Compute_RI's estimated log2(1+sv²·ρ_norm) (bits/s/Hz)
+		Real              recv_perlayer_sinr_sum[5]= {0,0,0,0,0};  // Receiver's actual per-layer SINR (linear)
+		int               recv_perlayer_count[5]   = {0,0,0,0,0};
+
 		Real ***            CQI             = NULL;
 		Real ***            CQI_comp        = NULL;
 
 		MatrixXcReal **          H_m             = NULL;
 		MatrixXcReal *           H_m_elem        = NULL;  // Element-level freq-domain channel [rb_idx](totalRx, totalTx)
 		PMI_FEEDBACK ***      PMI             = NULL;
-		VectorXcReal ***      PMI_vector      = NULL;
+		MatrixXcReal ***      PMI_vector      = NULL;   // N_tx × R (rank 1 default). col 0 = dominant layer.
 		MatrixXcReal ***      CSI_matrix      = NULL;  // TDD: Full channel matrix (NUM_RX_Port × NUM_TX_Port) for reciprocity-based precoding
 		SCHEDULE_DECISION **  ppSchedulerRead = NULL;
 		//LOCATION *            pos             = NULL;

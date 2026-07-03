@@ -50,7 +50,7 @@ public:
 	                                         const vector<VectorXcReal>& eigenvector_cache);
 	void SUS_procedure_threadsafe_cached(int rb_idx, vector<int>& local_selected_ue, vector<int>& local_scheduled_ue,
 	                                       vector<int>& local_user_set, const vector<VectorXcReal>& eigenvector_cache);
-	void Transmit_Precoding(int rb_idx);
+	void Transmit_Precoding(int rb_idx, const vector<int>& local_scheduled_ue);  // FDD: PMI-based RZF precoding (thread-safe)
 	void Transmit_Precoding_TDD(int rb_idx, const vector<int>& local_scheduled_ue);  // TDD: Reciprocity-based precoding using full channel matrices
 	void SU_MIMO_Precoding(int, int);
 	void Set_Min_Cqi(void);
@@ -76,7 +76,7 @@ public:
 	Real **              METRIC                    =  NULL;
 	int    **            MCS_decision              =  NULL;
 	int    **            CQIndex_decision          =  NULL;
-	VectorXcReal **      PMI_vector_read           =  NULL;
+	MatrixXcReal **      PMI_vector_read           =  NULL;   // N_tx × R per UE per RB
 	MatrixXcReal **      CSI_matrix_read           =  NULL;  // TDD: Full channel matrices from UEs
 	MatrixXcReal *       W                         =  NULL;
 	SCHEDULE_DECISION **   ppschedulewrite           =  NULL;

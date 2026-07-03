@@ -186,7 +186,9 @@ void Sector::Scheduling_NCJT( int ms_idx )
 
 void Sector::SU_MIMO_Precoding( int scheduled_ue, int rb_idx )
 {
-	W[rb_idx] = PMI_vector_read[scheduled_ue][rb_idx];
+	// Use dominant layer for Scheduling_Type=2 (mTRP NCJT). For rank > 1 a
+	// multi-layer variant could use all R columns of PMI_vector_read.
+	W[rb_idx] = PMI_vector_read[scheduled_ue][rb_idx].col(0);
 }
 
 
@@ -567,7 +569,7 @@ void Sector::Read_Ch_Feedback(void)
 		CQIndex_decision = new int          * [fixed_mem];  //[ue_in_control.size() + ue_in_comp.size()];
 		CQI_AVR          = new Real       * [fixed_mem];  //[ue_in_control.size() + ue_in_comp.size()];
 		METRIC           = new Real       * [fixed_mem];  //[ue_in_control.size() + ue_in_comp.size()];
-		PMI_vector_read  = new VectorXcReal    * [fixed_mem];  //[ue_in_control.size() + ue_in_comp.size()];
+		PMI_vector_read  = new MatrixXcReal    * [fixed_mem];  //[ue_in_control.size() + ue_in_comp.size()];
 
 		//for (int ue_idx = 0; ue_idx < (int)ue_in_control.size() + ue_in_comp.size(); ue_idx++)
 		for (int ue_idx = 0; ue_idx < fixed_mem; ue_idx++)
@@ -579,7 +581,7 @@ void Sector::Read_Ch_Feedback(void)
 			CQIndex_decision[ue_idx] = new       int [num_rb];
 			CQI_AVR[ue_idx]          = new    Real [num_rb];
 			METRIC[ue_idx]           = new    Real [num_rb];
-			PMI_vector_read[ue_idx]  = new VectorXcReal [num_rb];
+			PMI_vector_read[ue_idx]  = new MatrixXcReal [num_rb];
 		}
 
 		// Initialize all allocated memory (fixed_mem, not just 40!)
@@ -594,7 +596,7 @@ void Sector::Read_Ch_Feedback(void)
 				CQIndex_decision[ue_idx][rb_idx] = 0;
 				CQI_AVR         [ue_idx][rb_idx] = 0;
 				METRIC          [ue_idx][rb_idx] = 0;
-				PMI_vector_read [ue_idx][rb_idx] = VectorXcReal::Zero(NUM_TX_Port);
+				PMI_vector_read [ue_idx][rb_idx] = MatrixXcReal::Zero(NUM_TX_Port, g_type2_rank);
 			}
 		}
 	}
@@ -617,7 +619,7 @@ void Sector::Read_Ch_Feedback(void)
 				CQIndex_decision[ue_idx][rb_idx] = 0;
 				CQI_AVR         [ue_idx][rb_idx] = 0;
 				METRIC          [ue_idx][rb_idx] = 0;
-				PMI_vector_read [ue_idx][rb_idx] = VectorXcReal::Zero(NUM_TX_Port);
+				PMI_vector_read [ue_idx][rb_idx] = MatrixXcReal::Zero(NUM_TX_Port, g_type2_rank);
 			}
 		}
 	}
@@ -983,7 +985,7 @@ void Sector::Read_CSI_Feedback(void)
 		CQIndex_decision = new int          * [fixed_mem];  //[ue_in_control.size() + ue_in_comp.size()];
 		CQI_AVR          = new Real         * [fixed_mem];  //[ue_in_control.size() + ue_in_comp.size()];
 		METRIC           = new Real         * [fixed_mem];  //[ue_in_control.size() + ue_in_comp.size()];
-		PMI_vector_read  = new VectorXcReal    * [fixed_mem];  //[ue_in_control.size() + ue_in_comp.size()];
+		PMI_vector_read  = new MatrixXcReal    * [fixed_mem];  //[ue_in_control.size() + ue_in_comp.size()];
 
 		//for (int ue_idx = 0; ue_idx < (int)ue_in_control.size() + ue_in_comp.size(); ue_idx++)
 		for (int ue_idx = 0; ue_idx < fixed_mem; ue_idx++)
@@ -995,7 +997,7 @@ void Sector::Read_CSI_Feedback(void)
 			CQIndex_decision[ue_idx] = new       int [num_rb];
 			CQI_AVR[ue_idx]          = new      Real [num_rb];
 			METRIC[ue_idx]           = new      Real [num_rb];
-			PMI_vector_read[ue_idx]  = new VectorXcReal [num_rb];
+			PMI_vector_read[ue_idx]  = new MatrixXcReal [num_rb];
 		}
 
 		// Initialize all allocated memory (fixed_mem, not just 40!)
@@ -1010,7 +1012,7 @@ void Sector::Read_CSI_Feedback(void)
 				CQIndex_decision[ue_idx][rb_idx] = 0;
 				CQI_AVR         [ue_idx][rb_idx] = 0;
 				METRIC          [ue_idx][rb_idx] = 0;
-				PMI_vector_read [ue_idx][rb_idx] = VectorXcReal::Zero(NUM_TX_Port);
+				PMI_vector_read [ue_idx][rb_idx] = MatrixXcReal::Zero(NUM_TX_Port, g_type2_rank);
 			}
 		}
 	}
@@ -1317,6 +1319,84 @@ void Sector::Set_AVR_Cqi_Precoding_Based(void)
 		const Real noise = dBm2linear(thermal_noise + (10. * log10(bandwidth)) + MS_noisefig);
 		const Real linear_signal = dBm2linear(bs_maxpower - channel[(int)(self_idx/3)][ms_idx].pathloss_final);
 		const Real linear_interference = dBm2linear(links[ms_idx].interference) * interference_margin_linear;
+
+		// ============================================================================
+		// PER-LAYER MCS (g_per_layer_mcs==1): give each of the UE's layer-streams its
+		// own MCS from its own post-MMSE SINR, instead of the dominant-layer MCS for all.
+		// Indexed by SCHEDULE_DECISION.layer_idx (0..R-1), matching the receiver side.
+		// ============================================================================
+		if (g_per_layer_mcs == 1)
+		{
+			Real sum_sinr_l[4] = {0,0,0,0};
+			Real min_sinr_l[4] = {INFINITY,INFINITY,INFINITY,INFINITY};
+			int  cnt_l[4]      = {0,0,0,0};
+
+			for (int subband_idx = 0; subband_idx < num_subband; subband_idx++)
+			{
+				int rb_start = subband_idx * subband_size;
+				int rb_end   = rb_start + subband_size;
+				if (rb_end > num_rb) rb_end = num_rb;
+				const int rb_idx = rb_start + (rb_end - rb_start) / 2;
+
+				// Is this UE scheduled in this subband?
+				bool present = false;
+				for (int stream = 0; stream < mx_ue_mumimo; stream++)
+					if (ppschedulewrite[rb_idx][stream].ue_selected == ms_idx) { present = true; break; }
+				if (!present) continue;
+
+				// H_bar and Ryy^-1 are shared across this UE's layers (depend only on all streams).
+				const MatrixXcReal& H     = ms[ms_idx].H_m[0][rb_idx];
+				const MatrixXcReal& W_rb  = W[rb_idx];
+				const MatrixXcReal  H_bar = sqrt(linear_signal) * H * W_rb;
+				const MatrixXcReal  Ryy_inv = (H_bar * H_bar.adjoint() + linear_interference * Identity).inverse();
+
+				for (int stream = 0; stream < mx_ue_mumimo; stream++)
+				{
+					if (ppschedulewrite[rb_idx][stream].ue_selected != ms_idx) continue;
+					int L = ppschedulewrite[rb_idx][stream].layer_idx;
+					if (L < 0 || L >= 4) L = 0;
+
+					const MatrixXcReal h_u = H_bar.col(stream);
+					const MatrixXcReal u   = h_u.adjoint() * Ryy_inv;
+					const Real signal_power = std::norm((u * h_u)(0, 0));
+					Real interference_power = 0.0;
+					for (int s2 = 0; s2 < mx_ue_mumimo; s2++)
+					{
+						if (s2 == stream || ppschedulewrite[rb_idx][s2].ue_selected == -1) continue;
+						interference_power += std::norm((u * H_bar.col(s2))(0, 0));
+					}
+					interference_power += (linear_interference + noise) * (u * u.adjoint()).norm();
+					const Real sinr = signal_power / interference_power;
+					if (isnan(sinr) || isinf(sinr) || sinr <= 0) continue;
+
+					sum_sinr_l[L] += sinr;
+					if (sinr < min_sinr_l[L]) min_sinr_l[L] = sinr;
+					cnt_l[L]++;
+				}
+			}
+
+			for (int L = 0; L < 4; L++)
+			{
+				if (cnt_l[L] == 0) continue;
+				Real sel = (g_use_min_sinr_for_mcs == 1) ? min_sinr_l[L] : sum_sinr_l[L] / (Real)cnt_l[L];
+				Real dB  = 10.0 * log10(sel);
+				if (g_olla_enable) dB += ms[ms_idx].olla_offset;
+				int mcs = determine_MCS(dB);
+				if (mcs > 27) mcs = 27; else if (mcs < 0) mcs = 0;
+				int cqi = determine_CQI(dB);
+
+				for (int rb2 = 0; rb2 < num_rb; rb2++)
+					for (int stream = 0; stream < mx_ue_mumimo; stream++)
+						if (ppschedulewrite[rb2][stream].ue_selected == ms_idx &&
+						    ppschedulewrite[rb2][stream].layer_idx == L)
+						{
+							ppschedulewrite[rb2][stream].mcs_selected = mcs;
+							ppschedulewrite[rb2][stream].cqi_selected = cqi;
+							ppschedulewrite[rb2][stream].capacity     = sel;
+						}
+			}
+			continue;  // per-layer path done for this UE; skip the legacy single-MCS block
+		}
 
 		// Process each subband independently
 		for (int subband_idx = 0; subband_idx < num_subband; subband_idx++)
@@ -1718,8 +1798,9 @@ void Sector::Get_User_Set(int rb_idx)
 					B = es_candidate.eigenvectors().col(es_candidate.eigenvectors().cols() - 1);
 				} else {
 					// FDD mode: Use PMI vectors (already optimal precoding vectors)
-					A = PMI_vector_read[selected_ue[j]][rb_idx];
-					B = PMI_vector_read[ue_idx        ][rb_idx];
+					// For multi-layer PMI, use dominant layer (col 0) for pairing correlation.
+					A = PMI_vector_read[selected_ue[j]][rb_idx].col(0);
+					B = PMI_vector_read[ue_idx        ][rb_idx].col(0);
 				}
 
 				// Normalize vectors
@@ -1798,7 +1879,7 @@ void Sector::Filter_User_Set(int rb_idx, int newly_selected_ue)
 		SelfAdjointEigenSolver<MatrixXcReal> es_new(HH_new);
 		A_new = es_new.eigenvectors().col(es_new.eigenvectors().cols() - 1);
 	} else {
-		A_new = PMI_vector_read[newly_selected_ue][rb_idx];
+		A_new = PMI_vector_read[newly_selected_ue][rb_idx].col(0);  // dominant layer
 	}
 
 	// Normalize
@@ -1835,7 +1916,7 @@ void Sector::Filter_User_Set(int rb_idx, int newly_selected_ue)
 			SelfAdjointEigenSolver<MatrixXcReal> es_candidate(HH_candidate);
 			B = es_candidate.eigenvectors().col(es_candidate.eigenvectors().cols() - 1);
 		} else {
-			B = PMI_vector_read[candidate_ue][rb_idx];
+			B = PMI_vector_read[candidate_ue][rb_idx].col(0);  // dominant layer
 		}
 
 		// Normalize
@@ -1930,8 +2011,9 @@ void Sector::Get_User_Set_threadsafe(int rb_idx, vector<int>& local_selected_ue,
 				// Use pre-computed vectors (both TDD and FDD)
 				// TDD: PMI_vector_read contains dominant eigenvectors (from Store_CSI_for_TDD)
 				// FDD: PMI_vector_read contains quantized PMI vectors (from Quantization_of_Ch)
-				VectorXcReal A = PMI_vector_read[local_selected_ue[j]][rb_idx];
-				VectorXcReal B = PMI_vector_read[ue_idx][rb_idx];
+				// For multi-layer PMI, pairing is based on dominant layer (col 0).
+				VectorXcReal A = PMI_vector_read[local_selected_ue[j]][rb_idx].col(0);
+				VectorXcReal B = PMI_vector_read[ue_idx][rb_idx].col(0);
 
 				Real norm_A = A.norm();
 				Real norm_B = B.norm();
@@ -1973,7 +2055,8 @@ void Sector::Filter_User_Set_threadsafe(int rb_idx, int newly_selected_ue, vecto
 	// Use pre-computed vectors (both TDD and FDD)
 	// TDD: PMI_vector_read contains dominant eigenvectors (from Store_CSI_for_TDD)
 	// FDD: PMI_vector_read contains quantized PMI vectors (from Quantization_of_Ch)
-	VectorXcReal A_new = PMI_vector_read[newly_selected_ue][rb_idx];
+	// For multi-layer PMI, use dominant layer (col 0) for pairing correlation.
+	VectorXcReal A_new = PMI_vector_read[newly_selected_ue][rb_idx].col(0);
 
 	Real norm_A = A_new.norm();
 	if (norm_A < 1e-12) {
@@ -1990,8 +2073,8 @@ void Sector::Filter_User_Set_threadsafe(int rb_idx, int newly_selected_ue, vecto
 		if (candidate_ue == newly_selected_ue) continue;
 		if (candidate_ue < 0 || candidate_ue >= 80) continue;
 
-		// Use pre-computed vectors (both TDD and FDD)
-		VectorXcReal B = PMI_vector_read[candidate_ue][rb_idx];
+		// Use pre-computed vectors (both TDD and FDD) — dominant layer for pairing
+		VectorXcReal B = PMI_vector_read[candidate_ue][rb_idx].col(0);
 
 		Real norm_B = B.norm();
 		if (norm_B < 1e-12) continue;
@@ -2200,193 +2283,98 @@ FUNCTION: Sector::Transmit_Precoding( int )
 
 DESCRIPTION:
 ===================================================================*/
-void Sector::Transmit_Precoding(int rb_idx)
+void Sector::Transmit_Precoding(int rb_idx, const vector<int>& local_scheduled_ue)
 {
 	MatrixXcReal Identity = Matrix2cReal::Identity();
 
-	// Count valid scheduled UEs (those with index > -1)
-	int num_valid_ue = 0;
-	for (int i = 0; i < (int)scheduled_ue.size(); i++) {
-		if (scheduled_ue[i] > -1) {
-			num_valid_ue++;
+	// Per-UE rank. For eType II with rank-adaptive, each UE contributes self_RI
+	// stream-layers; otherwise the global g_type2_rank. Cap at mx_ue_mumimo.
+	auto per_ue_rank = [&](int ms_idx) -> int {
+		if (g_codebook_type != 3) return 1;
+		int R = (g_rank_adaptive == 1) ? ms[ms_idx].self_RI : g_type2_rank;
+		if (R < 1) R = 1;
+		return R;
+	};
+
+	// Count total valid streams capped at mx_ue_mumimo
+	int num_valid_streams = 0;
+	for (int i = 0; i < (int)local_scheduled_ue.size(); i++) {
+		if (local_scheduled_ue[i] > -1) {
+			int ms_idx = ue_in_control[local_scheduled_ue[i]];
+			num_valid_streams += per_ue_rank(ms_idx);
+			if (num_valid_streams >= mx_ue_mumimo) {
+				num_valid_streams = mx_ue_mumimo;
+				break;
+			}
 		}
 	}
 
-	// Early exit if no valid UEs scheduled
-	if (num_valid_ue == 0) {
+	if (num_valid_streams == 0) {
+		W[rb_idx] = MatrixXcReal::Zero(NUM_TX_Port, mx_ue_mumimo);
 		return;
 	}
 
-	// Create Lambda matrix with correct size (only valid UEs)
-	MatrixXcReal Lambda = MatrixXcReal::Zero(num_valid_ue, NUM_TX_Port);
+	// Create Lambda matrix — one row per (UE, layer) stream
+	MatrixXcReal Lambda = MatrixXcReal::Zero(num_valid_streams, NUM_TX_Port);
 
-	// Fill Lambda matrix - only add rows for valid scheduled UEs
-	int valid_ue_idx = 0;
-	for (int i = 0; i < (int)scheduled_ue.size(); i++)
+	// Fill Lambda: for each scheduled UE, stack R_ue rows (col 0..R_ue-1 of PMI_W)
+	int stream_row = 0;
+	for (int i = 0; i < (int)local_scheduled_ue.size() && stream_row < num_valid_streams; i++)
 	{
-		if (scheduled_ue[i] > -1)
+		if (local_scheduled_ue[i] < 0) continue;
+		int ms_idx = ue_in_control[local_scheduled_ue[i]];
+		int R_ue  = per_ue_rank(ms_idx);
+		const MatrixXcReal& PMIm = PMI_vector_read[local_scheduled_ue[i]][rb_idx];
+		int R_avail = (int)PMIm.cols();
+		int R_use   = (R_avail < R_ue) ? R_avail : R_ue;
+		for (int r = 0; r < R_use && stream_row < num_valid_streams; r++)
 		{
-			RowVectorXcReal v_hat = PMI_vector_read[scheduled_ue[i]][rb_idx].transpose();  //// 1xT
-			Lambda.row(valid_ue_idx) = v_hat;
-			valid_ue_idx++;
+			Lambda.row(stream_row) = PMIm.col(r).transpose();
+			stream_row++;
 		}
 	}
+	num_valid_streams = stream_row;
+	if (num_valid_streams == 0) {
+		W[rb_idx] = MatrixXcReal::Zero(NUM_TX_Port, mx_ue_mumimo);
+		return;
+	}
+	Lambda.conservativeResize(num_valid_streams, Eigen::NoChange);
+	int num_valid_ue = num_valid_streams;
 
-	// Check What is the optimal value for the regularized channel inversion ?
+	// Regularized Zero-Forcing precoder for the selected UEs
 	if ( num_valid_ue > 0 )
 	{
-		// === DEBUG: Check for NaN/Inf in Lambda matrix ===
-		bool lambda_has_nan = false;
-		for (int i = 0; i < Lambda.rows(); i++) {
-			for (int j = 0; j < Lambda.cols(); j++) {
-				if (std::isnan(Lambda(i,j).real()) || std::isnan(Lambda(i,j).imag()) ||
-				    std::isinf(Lambda(i,j).real()) || std::isinf(Lambda(i,j).imag())) {
-					lambda_has_nan = true;
-					printf("[ERROR] Lambda(%d,%d) has NaN/Inf: (%f, %f) at rb_idx=%d, sector=%d\n",
-					       i, j, Lambda(i,j).real(), Lambda(i,j).imag(), rb_idx, self_idx);
-				}
-			}
-		}
-
-		if (lambda_has_nan) {
-			printf("[ERROR] Lambda matrix contains NaN/Inf. scheduled_ue.size()=%d\n", (int)scheduled_ue.size());
-			for (int i = 0; i < (int)scheduled_ue.size(); i++) {
-				printf("  scheduled_ue[%d] = %d\n", i, scheduled_ue[i]);
-			}
-		}
-
 		// Compute Lambda * Lambda^H
 		MatrixXcReal LambdaLambdaH = Lambda * Lambda.adjoint();
-
-		// === DEBUG: Check determinant and condition number ===
 		Real det = LambdaLambdaH.determinant().real();
-		printf("[DEBUG] rb_idx=%d, det(Lambda*Lambda^H) = %e, size=%dx%d\n",
-		       rb_idx, det, LambdaLambdaH.rows(), LambdaLambdaH.cols());
-
-		// Check if matrix is nearly singular (small determinant)
 		const Real EPSILON = 1e-10;
-		if (std::abs(det) < EPSILON) {
-			printf("[WARNING] Matrix is nearly singular (det=%e). Adding regularization.\n", det);
 
-			// === DEBUG: Print scheduled_ue info ===
-			printf("[DEBUG] rb_idx=%d, sector=%d, scheduled_ue.size()=%d, num_valid_ue=%d\n",
-			       rb_idx, self_idx, (int)scheduled_ue.size(), num_valid_ue);
-			printf("[DEBUG] scheduled_ue contents: ");
-			for (int i = 0; i < (int)scheduled_ue.size(); i++) {
-				printf("scheduled_ue[%d]=%d ", i, scheduled_ue[i]);
-			}
-			printf("\n");
+		// Add Tikhonov regularization (Regularized Zero-Forcing, MU-MIMO)
+		Real alpha_reg = (std::abs(det) < EPSILON) ? 1e-4 : 1e-6;
+		MatrixXcReal Identity_reg = MatrixXcReal::Identity(LambdaLambdaH.rows(), LambdaLambdaH.cols());
+		LambdaLambdaH += alpha_reg * Identity_reg;
 
-			// === DEBUG: Check for duplicate/parallel vectors in Lambda ===
-			printf("[DEBUG] Checking Lambda matrix rows (PMI vectors):\n");
-			printf("[DEBUG] Lambda size: %lldx%lld\n", (long long)Lambda.rows(), (long long)Lambda.cols());
+		// RZF precoder: (NUM_TX_Port × num_valid_ue)
+		MatrixXcReal W_valid = Lambda.adjoint() * LambdaLambdaH.inverse();
 
-			// Print each row norm
-			for (int i = 0; i < Lambda.rows(); i++) {
-				Real row_norm = Lambda.row(i).norm();
-				printf("  Lambda.row(%d).norm() = %e", i, row_norm);
-				if (i < (int)scheduled_ue.size() && scheduled_ue[i] > -1 &&
-				    scheduled_ue[i] < (int)ue_in_control.size()) {
-					printf(" (MS_idx=%d)", ue_in_control[scheduled_ue[i]]);
-				}
-				printf("\n");
-			}
-
-			// Check correlation between all pairs of rows
-			printf("[DEBUG] Row correlation matrix (|<v_i, v_j>| / (||v_i|| * ||v_j||)):\n");
-			for (int i = 0; i < Lambda.rows(); i++) {
-				for (int j = i+1; j < Lambda.rows(); j++) {
-					// Compute correlation coefficient between row i and row j
-					RowVectorXcReal row_i = Lambda.row(i);
-					RowVectorXcReal row_j = Lambda.row(j);
-
-					Real norm_i = row_i.norm();
-					Real norm_j = row_j.norm();
-
-					if (norm_i > 1e-12 && norm_j > 1e-12) {
-						// Inner product (conjugate for complex vectors)
-						std::complex<Real> inner_prod = row_i.dot(row_j.conjugate());
-						Real correlation = std::abs(inner_prod) / (norm_i * norm_j);
-
-						printf("  corr(row%d, row%d) = %.6f", i, j, correlation);
-						if (correlation > 0.99) {
-							printf(" <-- NEARLY IDENTICAL!");
-						} else if (correlation > 0.95) {
-							printf(" <-- HIGH CORRELATION");
-						}
-
-						if (i < (int)scheduled_ue.size() && j < (int)scheduled_ue.size() &&
-						    scheduled_ue[i] > -1 && scheduled_ue[j] > -1 &&
-						    scheduled_ue[i] < (int)ue_in_control.size() &&
-						    scheduled_ue[j] < (int)ue_in_control.size()) {
-							printf(" (MS %d vs MS %d)",
-							       ue_in_control[scheduled_ue[i]],
-							       ue_in_control[scheduled_ue[j]]);
-						}
-						printf("\n");
-					} else {
-						printf("  corr(row%d, row%d) = N/A (zero norm)\n", i, j);
-					}
-				}
-			}
-
-			// Print first few elements of each row for manual inspection
-			printf("[DEBUG] Lambda matrix first 4 elements of each row:\n");
-			int num_cols_to_print = std::min(4, (int)Lambda.cols());
-			for (int i = 0; i < Lambda.rows(); i++) {
-				printf("  row%d: ", i);
-				for (int j = 0; j < num_cols_to_print; j++) {
-					printf("(%6.3f%+6.3fi) ", Lambda(i,j).real(), Lambda(i,j).imag());
-				}
-				printf("...\n");
-			}
-
-			// Add regularization term (Tikhonov regularization)
-			Real alpha = 1e-6;  // Regularization parameter
-			MatrixXcReal Identity_reg = MatrixXcReal::Identity(LambdaLambdaH.rows(), LambdaLambdaH.cols());
-			LambdaLambdaH += alpha * Identity_reg;
-			printf("[INFO] After regularization, det = %e\n", LambdaLambdaH.determinant().real());
-		}
-
-		// Use stable inverse computation
-		W[rb_idx] = Lambda.adjoint() * LambdaLambdaH.inverse();
-
-		// === DEBUG: Check for NaN in W ===
-		bool w_has_nan = false;
-		for (int i = 0; i < W[rb_idx].rows(); i++) {
-			for (int j = 0; j < W[rb_idx].cols(); j++) {
-				if (std::isnan(W[rb_idx](i,j).real()) || std::isnan(W[rb_idx](i,j).imag()) ||
-				    std::isinf(W[rb_idx](i,j).real()) || std::isinf(W[rb_idx](i,j).imag())) {
-					w_has_nan = true;
-					printf("[ERROR] W[%d](%d,%d) has NaN/Inf after inverse: (%f, %f)\n",
-					       rb_idx, i, j, W[rb_idx](i,j).real(), W[rb_idx](i,j).imag());
-				}
-			}
-		}
-
+		// Per-column power normalization
 		VectorXReal sqrt_p = VectorXReal::Zero(num_valid_ue);
-
 		for (int i = 0; i < num_valid_ue; i++)
 		{
-			Real col_norm = (W[rb_idx].col(i)).norm();
-			if (col_norm < EPSILON || std::isnan(col_norm) || std::isinf(col_norm)) {
-				printf("[ERROR] W[%d].col(%d).norm() = %e is invalid\n", rb_idx, i, col_norm);
-				sqrt_p(i) = 1.0;  // Fallback value
-			} else {
-				sqrt_p(i) = 1/col_norm;
-			}
+			Real col_norm = W_valid.col(i).norm();
+			sqrt_p(i) = (col_norm < EPSILON || std::isnan(col_norm) || std::isinf(col_norm))
+			            ? 1.0 : (1.0 / col_norm);
 		}
-		W[rb_idx] = W[rb_idx] * sqrt_p.asDiagonal();
+		W_valid = W_valid * sqrt_p.asDiagonal();
 
-		// === DEBUG: Final check for NaN in W ===
-		for (int i = 0; i < W[rb_idx].rows(); i++) {
-			for (int j = 0; j < W[rb_idx].cols(); j++) {
-				if (std::isnan(W[rb_idx](i,j).real()) || std::isnan(W[rb_idx](i,j).imag())) {
-					printf("[ERROR] FINAL W[%d](%d,%d) has NaN: (%f, %f)\n",
-					       rb_idx, i, j, W[rb_idx](i,j).real(), W[rb_idx](i,j).imag());
-				}
-			}
-		}
+		// Pad to full mx_ue_mumimo columns (consumer code expects uniform width).
+		// With multi-layer UEs the stream layout matches ppschedulewrite:
+		//   stream 0..R-1 = UE0's R layers, stream R..2R-1 = UE1's R layers, ...
+		// W_valid columns are in that exact order already (as they came from Lambda rows).
+		MatrixXcReal W_full = MatrixXcReal::Zero(NUM_TX_Port, mx_ue_mumimo);
+		int ncopy = (num_valid_ue < mx_ue_mumimo) ? num_valid_ue : mx_ue_mumimo;
+		W_full.leftCols(ncopy) = W_valid.leftCols(ncopy);
+		W[rb_idx] = W_full;
 	}
 }
 
@@ -2619,8 +2607,51 @@ void Sector::Scheduling_algorithm_module_MU_MIMO(void)
 		}
 
 		/*===================================================================
-		Write selected UEs to schedule map for all RBs in this subband
-		OUTPUT : ppschedulewrite[rb_idx][stream].ue_selected
+		SU-vs-MU decision (g_su_fallback=1): compare best single-UE SU metric
+		against the MU group metric. If SU wins, override local_scheduled_ue
+		with just that single UE.
+
+		SU metric per UE u: M_SU(u) = self_RI(u) · METRIC[u]
+			(dominant-layer PF metric times its optimal rank approximates
+			 the per-UE rate at R layers, divided by long-term avg rate)
+		MU metric: sum of METRIC[u] across local_scheduled_ue.
+		===================================================================*/
+		if (g_su_fallback == 1 && g_codebook_type == 3 && TDD_mode == 0) {
+			// MU group metric (current selection)
+			Real mu_metric_sum = 0.0;
+			for (int ui = 0; ui < (int)local_scheduled_ue.size(); ui++) {
+				int sel = local_scheduled_ue[ui];
+				if (sel < 0) continue;
+				mu_metric_sum += METRIC[sel][schedule_RB];
+			}
+
+			// Best SU candidate across ue_in_control
+			Real best_su_metric = 0.0;
+			int  best_su_ue    = -1;
+			for (int ue_idx = 0; ue_idx < (int)ue_in_control.size(); ue_idx++) {
+				int ms_idx = ue_in_control[ue_idx];
+				int R_ue = (g_rank_adaptive == 1) ? ms[ms_idx].self_RI : g_type2_rank;
+				if (R_ue < 1) R_ue = 1;
+				Real su_m = (Real)R_ue * METRIC[ue_idx][schedule_RB];
+				if (su_m > best_su_metric) {
+					best_su_metric = su_m;
+					best_su_ue    = ue_idx;
+				}
+			}
+
+			if (best_su_ue >= 0 && best_su_metric > mu_metric_sum) {
+				// Override: schedule the best single UE alone
+				local_scheduled_ue.clear();
+				local_scheduled_ue.push_back(best_su_ue);
+			}
+		}
+
+		/*===================================================================
+		Write selected UEs to schedule map for all RBs in this subband.
+		Each UE occupies R_ue consecutive streams (R_ue = ms[u].self_RI when
+		rank-adaptive, else g_type2_rank for eType II, else 1).
+		Stream budget capped at mx_ue_mumimo.
+		OUTPUT : ppschedulewrite[rb_idx][stream].ue_selected / .layer_idx
 		===================================================================*/
 		for (int rb_idx = rb_start; rb_idx < rb_end; rb_idx++)
 		{
@@ -2628,24 +2659,39 @@ void Sector::Scheduling_algorithm_module_MU_MIMO(void)
 			for (int stream = 0; stream < mx_ue_mumimo; stream++)
 			{
 				ppschedulewrite[rb_idx][stream].ue_selected = -1;
+				ppschedulewrite[rb_idx][stream].layer_idx   = 0;
 			}
 
-			// Write selected UEs
-			for (int ue_idx = 0; ue_idx < local_scheduled_ue.size(); ue_idx++)
+			// Write selected UEs — each UE occupies R_ue consecutive slots
+			int stream_w = 0;
+			for (int ue_idx = 0; ue_idx < (int)local_scheduled_ue.size(); ue_idx++)
 			{
-				if (local_scheduled_ue[ue_idx] > -1)
-				{
-					ppschedulewrite[rb_idx][ue_idx].ue_selected  = ue_in_control[local_scheduled_ue[ue_idx]];
-					ppschedulewrite[rb_idx][ue_idx].mcs_selected = MCS_decision[local_scheduled_ue[ue_idx]][rb_idx];
-					ppschedulewrite[rb_idx][ue_idx].cqi_selected = CQIndex_decision[local_scheduled_ue[ue_idx]][rb_idx];
+				if (local_scheduled_ue[ue_idx] < 0) continue;
+				int ms_idx = ue_in_control[local_scheduled_ue[ue_idx]];
+
+				int R_ue;
+				if (TDD_mode == 0 && g_codebook_type == 3) {
+					R_ue = (g_rank_adaptive == 1) ? ms[ms_idx].self_RI : g_type2_rank;
+				} else {
+					R_ue = 1;
 				}
+				if (R_ue < 1) R_ue = 1;
+
+				for (int layer = 0; layer < R_ue && stream_w < mx_ue_mumimo; layer++, stream_w++)
+				{
+					ppschedulewrite[rb_idx][stream_w].ue_selected  = ms_idx;
+					ppschedulewrite[rb_idx][stream_w].layer_idx    = layer;
+					ppschedulewrite[rb_idx][stream_w].mcs_selected = MCS_decision[local_scheduled_ue[ue_idx]][rb_idx];
+					ppschedulewrite[rb_idx][stream_w].cqi_selected = CQIndex_decision[local_scheduled_ue[ue_idx]][rb_idx];
+				}
+				if (stream_w >= mx_ue_mumimo) break;
 			}
 
 			// TDD mode: Use channel-based precoding, FDD mode: Use PMI-based precoding
 			if (TDD_mode == 1) {
 				Transmit_Precoding_TDD(rb_idx, local_scheduled_ue);
 			} else {
-				Transmit_Precoding(rb_idx);
+				Transmit_Precoding(rb_idx, local_scheduled_ue);
 			}
 		}
 	}
@@ -2732,21 +2778,23 @@ DESCRIPTION:
 
 INPUT:
   P_projection - Projection matrix of previously selected channels (P_o * P_o^H)
-  H_candidate  - Channel matrix of candidate user (N_rx x N_tx)
+  H_candidate  - Candidate user's subspace basis source, N_tx x k (columns span
+                 the candidate subspace). FDD: PMI precoder (N_tx x R). TDD:
+                 the caller passes the transposed channel (N_tx x N_rx).
+                 NOTE: callers must hand in the N_tx-row form; this function does
+                 NOT transpose internally (keeps it consistent with P_projection,
+                 which is also built from N_tx-row bases).
 
 OUTPUT:
   Returns the Chordal Distance (Real)
 ===================================================================*/
 Real Sector::Compute_Chordal_Distance(const MatrixXcReal& P_projection, const MatrixXcReal& H_candidate)
 {
-	// Get orthonormal basis for candidate channel using QR decomposition
-	// G_k = H_k^T, so we need column space of H^T (= row space of H)
-	MatrixXcReal H_T = H_candidate.transpose();  // N_tx x N_rx
-
-	// QR decomposition to get orthonormal basis
-	Eigen::HouseholderQR<MatrixXcReal> qr(H_T);
-	int rank = min((int)H_T.rows(), (int)H_T.cols());
-	MatrixXcReal Q = qr.householderQ() * MatrixXcReal::Identity(H_T.rows(), rank);
+	// QR decomposition to get an orthonormal basis for the candidate subspace.
+	// H_candidate is already N_tx x k (columns = subspace), so use it directly.
+	Eigen::HouseholderQR<MatrixXcReal> qr(H_candidate);
+	int rank = min((int)H_candidate.rows(), (int)H_candidate.cols());
+	MatrixXcReal Q = qr.householderQ() * MatrixXcReal::Identity(H_candidate.rows(), rank);
 
 	// Compute projection matrix for candidate: G_{k,o} * G_{k,o}^H
 	MatrixXcReal G_projection = Q * Q.adjoint();
@@ -2850,8 +2898,8 @@ void Sector::ChordalDistance_Scheduling_threadsafe(int rb_idx, vector<int>& loca
 		MatrixXcReal H_first = CSI_matrix_read[first_user][rb_idx];
 		P_combined = H_first.transpose();  // N_tx x N_rx
 	} else {
-		VectorXcReal v_first = PMI_vector_read[first_user][rb_idx];
-		P_combined = v_first;  // N_tx x 1
+		// For multi-layer PMI, use all R layers as the subspace representation
+		P_combined = PMI_vector_read[first_user][rb_idx];  // N_tx x R
 	}
 
 	// ===================================================================
@@ -2879,10 +2927,11 @@ void Sector::ChordalDistance_Scheduling_threadsafe(int rb_idx, vector<int>& loca
 			// Get candidate channel
 			MatrixXcReal H_candidate;
 			if (TDD_mode == 1) {
-				H_candidate = CSI_matrix_read[ue_idx][rb_idx];
+				// Transpose to N_tx x N_rx so it matches the N_tx-row form that
+				// Compute_Chordal_Distance and P_combined expect.
+				H_candidate = CSI_matrix_read[ue_idx][rb_idx].transpose();
 			} else {
-				VectorXcReal v = PMI_vector_read[ue_idx][rb_idx];
-				H_candidate = v;  // Treat vector as N_tx x 1 matrix
+				H_candidate = PMI_vector_read[ue_idx][rb_idx];  // N_tx x R
 			}
 
 			// Compute Chordal Distance
@@ -2919,10 +2968,10 @@ void Sector::ChordalDistance_Scheduling_threadsafe(int rb_idx, vector<int>& loca
 			P_new << P_combined, H_new_T;
 			P_combined = P_new;
 		} else {
-			VectorXcReal v_new = PMI_vector_read[best_user][rb_idx];
+			MatrixXcReal v_new = PMI_vector_read[best_user][rb_idx];  // N_tx x R
 
 			// Horizontally concatenate
-			MatrixXcReal P_new(P_combined.rows(), P_combined.cols() + 1);
+			MatrixXcReal P_new(P_combined.rows(), P_combined.cols() + v_new.cols());
 			P_new << P_combined, v_new;
 			P_combined = P_new;
 		}

@@ -220,6 +220,13 @@ void PerDropStatistics(int drop_idx)
     OutputFile << "    " << "    " << "Min : " << min_thru                      / ((run_times-SCHEDULE_DELAY)*slot_duration) * 1e-6 << endl;
 	OutputFile << "    " << endl;
 
+	// Sector spectral efficiency (bits/s/Hz)
+	OutputFile << "  - " << "Sector_SE:" << endl;
+    OutputFile << "    " << "    " << "Avg : " << avg_thru / num_active_sectors / ((run_times-SCHEDULE_DELAY)*slot_duration) / (double)bandwidth << endl;
+    OutputFile << "    " << "    " << "Max : " << max_thru                      / ((run_times-SCHEDULE_DELAY)*slot_duration) / (double)bandwidth << endl;
+    OutputFile << "    " << "    " << "Min : " << min_thru                      / ((run_times-SCHEDULE_DELAY)*slot_duration) / (double)bandwidth << endl;
+	OutputFile << "    " << endl;
+
 	Total_Avr += avg_thru / num_active_sectors / ((run_times-SCHEDULE_DELAY)*slot_duration) * 1e-6;
 
 	//compute ue thru 
@@ -267,7 +274,29 @@ void PerDropStatistics(int drop_idx)
 	<< "sector_idx"<<","               // 15
 	<< "comp_sector_idx"<<","          // 16
 	<< "ue_x"<<","                     // 17
-	<< "ue_y"                          // 18
+	<< "ue_y"<<","                     // 18
+	<< "self_RI" <<","                 // 19 (per-UE Rank Indicator from Compute_RI; eType II only)
+	<< "sigma1_sq" <<","               // 20 σ₁² avg across subbands × time
+	<< "sigma2_sq" <<","               // 21 σ₂²
+	<< "sigma3_sq" <<","               // 22 σ₃²
+	<< "sigma4_sq" <<","               // 23 σ₄²
+	<< "pmi_overlap1" <<","            // 24 |w_1^H v_1|² (per-column, legacy)
+	<< "pmi_overlap2" <<","            // 25
+	<< "pmi_overlap3" <<","            // 26
+	<< "pmi_overlap4" <<","            // 27
+	<< "pmi_cos2_1" <<","              // 28 cos²(θ_1): principal angle, PMI subspace vs true SVD
+	<< "pmi_cos2_2" <<","              // 29
+	<< "pmi_cos2_3" <<","              // 30
+	<< "pmi_cos2_4" <<","              // 31
+	<< "pmi_chordal_dist" <<","        // 32 chordal subspace distance (avg)
+	<< "pred_se1" <<","                // 33 Compute_RI predicted per-layer SE (b/s/Hz)
+	<< "pred_se2" <<","                // 34
+	<< "pred_se3" <<","                // 35
+	<< "pred_se4" <<","                // 36
+	<< "recv_sinr1" <<","              // 37 receiver per-layer SINR (linear)
+	<< "recv_sinr2" <<","              // 38
+	<< "recv_sinr3" <<","              // 39
+	<< "recv_sinr4"                    // 40
 	<< endl;
 
 	for (int ue_idx = 0; ue_idx < num_MS; ue_idx++)
@@ -276,9 +305,15 @@ void PerDropStatistics(int drop_idx)
 		int ue_idx_in_sector = getIndex( sector[links[ue_idx]._sector_in_control].ue_in_control , ue_idx );
 
 		double avr_cqi = 0;
-		for (int rb_idx = 0; rb_idx < num_rb; rb_idx++)
+		// Guard: UEs not in this sector's control list (e.g. non-center cells in single_cell_mode,
+		// or after a per-drop Reset2Default) make getIndex() return -1, and CQI_AVR may be NULL.
+		// Indexing CQI_AVR[-1][rb] dereferences a wild pointer -> nondeterministic SIGSEGV (exit 139).
+		if (ue_idx_in_sector >= 0 && sector[links[ue_idx]._sector_in_control].CQI_AVR != NULL)
 		{
-			avr_cqi += sector[links[ue_idx]._sector_in_control].CQI_AVR[ue_idx_in_sector][rb_idx]/num_rb;
+			for (int rb_idx = 0; rb_idx < num_rb; rb_idx++)
+			{
+				avr_cqi += sector[links[ue_idx]._sector_in_control].CQI_AVR[ue_idx_in_sector][rb_idx]/num_rb;
+			}
 		}
 
 		Througput
@@ -299,7 +334,34 @@ void PerDropStatistics(int drop_idx)
 		<< links[ue_idx]._sector_in_control <<","                                     // 15
 		<< links[ue_idx].comp_sector_idx <<","                                        // 16
 		<< ms[ue_idx].loc.x <<","                                                     // 17
-		<< ms[ue_idx].loc.y                                                           // 18
+		<< ms[ue_idx].loc.y <<","                                                     // 18
+		<< ms[ue_idx].self_RI <<","                                                   // 19
+		// PMI quality stats (cols 20-32). Divide by sample count.
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_sigma2_sum[1] / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_sigma2_sum[2] / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_sigma2_sum[3] / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_sigma2_sum[4] / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_overlap_sum[1] / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_overlap_sum[2] / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_overlap_sum[3] / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_overlap_sum[4] / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_cos2_sum[1]    / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_cos2_sum[2]    / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_cos2_sum[3]    / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_cos2_sum[4]    / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pmi_chordal_sum    / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		// Per-layer predicted SE (cols 33-36). pred_perlayer_se_sum normalized by Compute_RI samples.
+		// Compute_RI runs once per UE per slot (sample_count was incremented per RB stride).
+		// Here we just divide by pmi_quality_count as a proxy for the per-call avg.
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pred_perlayer_se_sum[1] / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pred_perlayer_se_sum[2] / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pred_perlayer_se_sum[3] / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		<< ((ms[ue_idx].pmi_quality_count > 0) ? ms[ue_idx].pred_perlayer_se_sum[4] / ms[ue_idx].pmi_quality_count : 0.0) <<","
+		// Per-layer received SINR (cols 37-40)
+		<< ((ms[ue_idx].recv_perlayer_count[1] > 0) ? ms[ue_idx].recv_perlayer_sinr_sum[1] / ms[ue_idx].recv_perlayer_count[1] : 0.0) <<","
+		<< ((ms[ue_idx].recv_perlayer_count[2] > 0) ? ms[ue_idx].recv_perlayer_sinr_sum[2] / ms[ue_idx].recv_perlayer_count[2] : 0.0) <<","
+		<< ((ms[ue_idx].recv_perlayer_count[3] > 0) ? ms[ue_idx].recv_perlayer_sinr_sum[3] / ms[ue_idx].recv_perlayer_count[3] : 0.0) <<","
+		<< ((ms[ue_idx].recv_perlayer_count[4] > 0) ? ms[ue_idx].recv_perlayer_sinr_sum[4] / ms[ue_idx].recv_perlayer_count[4] : 0.0)
 		<< endl;
 		ue_statistics[ue_idx] = per_ue_thru[ue_idx];
 	}
@@ -353,6 +415,33 @@ void PerDropStatistics(int drop_idx)
 	OutputFile << "    " << "    " << "Avg : " << avg_ue_thru / num_MS / ((run_times-SCHEDULE_DELAY)*slot_duration) * 1e-6 << endl;
 	OutputFile << "    " << "    " << "Max : " << max_ue_thru          / ((run_times-SCHEDULE_DELAY)*slot_duration) * 1e-6 << endl;
 	OutputFile << "    " << "    " << "Min : " << min_ue_thru          / ((run_times-SCHEDULE_DELAY)*slot_duration) * 1e-6 << endl;
+	OutputFile << endl;
+
+	// UE spectral efficiency (bits/s/Hz); Min = 5%-tile cell-edge UE
+	OutputFile << "    " << "UE_SE:" << endl;
+	OutputFile << "    " << "    " << "Avg : " << avg_ue_thru / num_MS / ((run_times-SCHEDULE_DELAY)*slot_duration) / (double)bandwidth << endl;
+	OutputFile << "    " << "    " << "Max : " << max_ue_thru          / ((run_times-SCHEDULE_DELAY)*slot_duration) / (double)bandwidth << endl;
+	OutputFile << "    " << "    " << "Min : " << min_ue_thru          / ((run_times-SCHEDULE_DELAY)*slot_duration) / (double)bandwidth << endl;
+	OutputFile << endl;
+
+	// self_RI distribution (per-UE Rank Indicator from Compute_RI)
+	int ri_count[5] = {0, 0, 0, 0, 0};   // index 1..4 used
+	double ri_sum = 0.0;
+	int ri_valid = 0;
+	for (int ue_idx = 0; ue_idx < num_MS; ue_idx++) {
+		int ri = ms[ue_idx].self_RI;
+		if (ri >= 1 && ri <= 4) {
+			ri_count[ri]++;
+			ri_sum += (double)ri;
+			ri_valid++;
+		}
+	}
+	OutputFile << "    " << "Rank_distribution:" << endl;
+	OutputFile << "    " << "    " << "R=1  : " << ri_count[1] << endl;
+	OutputFile << "    " << "    " << "R=2  : " << ri_count[2] << endl;
+	OutputFile << "    " << "    " << "R=3  : " << ri_count[3] << endl;
+	OutputFile << "    " << "    " << "R=4  : " << ri_count[4] << endl;
+	OutputFile << "    " << "    " << "Avg  : " << ((ri_valid > 0) ? (ri_sum / (double)ri_valid) : 0.0) << endl;
 	OutputFile << endl;
 
 	//OutputFile << " Initial Packet Erro = " << avg_initial_pe << endl;	

@@ -118,6 +118,45 @@ void Set_simul_param(int argc, char *argv[])
 		g_mumimo_scheduling_algorithm = int(Get_parameter(infile, "mumimo_scheduling_algorithm", 0));
 		g_chordal_alpha               = Get_parameter(infile, "chordal_alpha", 0.22);
 
+		// Type II Codebook (TS 38.214 §5.2.2.2.3 / §5.2.2.2.5)
+		g_codebook_type           = int(Get_parameter(infile, "Codebook_Type", 1));            // 1=Type I, 2=Type II, 3=eType II
+		g_type2_L                 = int(Get_parameter(infile, "Type2_L", 4));                  // 2/3/4 (overridden by ParamComb if eType II)
+		g_type2_phase_alphabet    = int(Get_parameter(infile, "Type2_PhaseAlphabet", 8));      // 4, 8, or 16 (for eType II)
+		g_type2_subband_amplitude = int(Get_parameter(infile, "Type2_SubbandAmplitude", 1));
+		g_type2_rank              = int(Get_parameter(infile, "Type2_Rank", 1));               // MAX rank cap 1..4
+		g_etype2_param_comb       = int(Get_parameter(infile, "eType2_ParamComb", 3));          // 1..8
+		g_rank_adaptive           = int(Get_parameter(infile, "Rank_Adaptive", 0));             // 0 = fixed, 1 = per-UE RI
+		g_su_fallback             = int(Get_parameter(infile, "SU_Fallback", 0));               // 0 = always MU, 1 = SU vs MU
+		g_use_sic                 = int(Get_parameter(infile, "Use_SIC", 1));                    // 0 = per-stream MMSE, 1 = ideal SIC (historical default)
+		g_per_layer_mcs           = int(Get_parameter(infile, "per_layer_mcs", 0));              // 0 = legacy single-MCS/TB-HARQ, 1 = per-layer MCS + HARQ
+		g_harq_ir                 = int(Get_parameter(infile, "harq_ir", 0));                    // 0 = HARQ Type I, 1 = IR/Chase SINR combining
+
+		if (g_type2_rank < 1) g_type2_rank = 1;
+		if (g_type2_rank > 4) g_type2_rank = 4;
+
+		// ParameterCombination (TR 38.214 Table 5.2.2.2.5-1 + simplification): (L, p_v, β)
+		// Combinations 1-8, with different L values. L overrides Type2_L when eType II is on.
+		if (g_codebook_type == 3) {
+			switch (g_etype2_param_comb) {
+				case 1: g_type2_L = 2; g_etype2_pv = 0.25; g_etype2_beta = 0.25; break;
+				case 2: g_type2_L = 2; g_etype2_pv = 0.25; g_etype2_beta = 0.50; break;
+				case 3: g_type2_L = 4; g_etype2_pv = 0.25; g_etype2_beta = 0.25; break;
+				case 4: g_type2_L = 4; g_etype2_pv = 0.25; g_etype2_beta = 0.50; break;
+				case 5: g_type2_L = 4; g_etype2_pv = 0.25; g_etype2_beta = 0.75; break;
+				case 6: g_type2_L = 4; g_etype2_pv = 0.50; g_etype2_beta = 0.50; break;
+				case 7: g_type2_L = 6; g_etype2_pv = 0.25; g_etype2_beta = 0.50; break;
+				case 8: g_type2_L = 6; g_etype2_pv = 0.25; g_etype2_beta = 0.75; break;
+				default: g_type2_L = 4; g_etype2_pv = 0.25; g_etype2_beta = 0.25; break;
+			}
+		}
+
+		if (g_type2_L < 2) g_type2_L = 2;
+		if (g_type2_L > 6) g_type2_L = 6;
+		if (g_type2_phase_alphabet != 4 && g_type2_phase_alphabet != 8 && g_type2_phase_alphabet != 16) {
+			cout << "[WARNING] Type2_PhaseAlphabet must be 4, 8, or 16, got " << g_type2_phase_alphabet << ", using 16" << endl;
+			g_type2_phase_alphabet = 16;
+		}
+
 		// Singular Value CDF Collection
 		g_collect_singular_values = int(Get_parameter(infile, "collect_singular_values", 0));
 
@@ -135,6 +174,12 @@ void Set_simul_param(int argc, char *argv[])
 		handheld_port_indices[1] = int(Get_parameter(infile, "handheld_port_2", 7));
 		handheld_port_indices[2] = int(Get_parameter(infile, "handheld_port_3", 3));
 		handheld_port_indices[3] = int(Get_parameter(infile, "handheld_port_4", 5));
+		// Ports 5-8 (for 8-port handheld): default to the 4 edge-center positions (2,4,6,8),
+		// complementing the 4 corner positions (1,3,5,7) used by the 4-port config.
+		handheld_port_indices[4] = int(Get_parameter(infile, "handheld_port_5", 2));
+		handheld_port_indices[5] = int(Get_parameter(infile, "handheld_port_6", 4));
+		handheld_port_indices[6] = int(Get_parameter(infile, "handheld_port_7", 6));
+		handheld_port_indices[7] = int(Get_parameter(infile, "handheld_port_8", 8));
 
 		// BS-side Spatial Non-Stationarity (SNS)
 		// Default values: UMi (Table 7.6.14.1.2-1/2/3)
@@ -150,6 +195,7 @@ void Set_simul_param(int argc, char *argv[])
 		cfg_BS_Tx_Power      = Real(Get_parameter(infile, "BS_Tx_Power", -9999));
 		cfg_UT_Noise_Figure  = Real(Get_parameter(infile, "UT_Noise_Figure", -9999));
 		cfg_UE_antenna_element_gain = Real(Get_parameter(infile, "ue_antenna_element_gain", -9999));
+		cfg_inter_site_distance = Real(Get_parameter(infile, "inter_site_distance", -1));
 
 		num_mTRP = simple_num_BS*3;
 
@@ -367,6 +413,25 @@ void Set_simul_param(int argc, char *argv[])
 		if (g_mumimo_scheduling_algorithm == 1) {
 			cout << "  └─ chordal_alpha      : " << g_chordal_alpha << endl;
 		}
+	}
+	cout << "Codebook_Type           : " << g_codebook_type << " (1=Type I, 2=Type II, 3=eType II)" << endl;
+	if (g_codebook_type == 2) {
+		cout << "  ├─ L                  : " << g_type2_L << endl;
+		cout << "  ├─ PhaseAlphabet      : " << g_type2_phase_alphabet << " (" << (g_type2_phase_alphabet==4?"QPSK":"8-PSK") << ")" << endl;
+		cout << "  └─ SubbandAmplitude   : " << g_type2_subband_amplitude << endl;
+	}
+	if (g_codebook_type == 3) {
+		const char* phase_name = (g_type2_phase_alphabet==4) ? "QPSK" :
+		                         (g_type2_phase_alphabet==8) ? "8-PSK" : "16-PSK";
+		cout << "  ├─ Rank_max (R)       : " << g_type2_rank << endl;
+		cout << "  ├─ ParamComb          : " << g_etype2_param_comb << " (L=" << g_type2_L
+		     << ", p_v=" << g_etype2_pv << ", β=" << g_etype2_beta << ")" << endl;
+		cout << "  ├─ PhaseAlphabet      : " << g_type2_phase_alphabet << " (" << phase_name << ")" << endl;
+		cout << "  ├─ Rank_Adaptive      : " << g_rank_adaptive << " (0=fixed, 1=per-UE RI)" << endl;
+		cout << "  ├─ SU_Fallback        : " << g_su_fallback << " (0=always MU, 1=SU vs MU)" << endl;
+		cout << "  ├─ Use_SIC            : " << g_use_sic << " (0=per-stream MMSE, 1=ideal SIC)" << endl;
+		cout << "  ├─ per_layer_mcs      : " << g_per_layer_mcs << " (0=legacy single-MCS, 1=per-layer MCS+HARQ)" << endl;
+		cout << "  └─ harq_ir            : " << g_harq_ir << " (0=Type I no-combining, 1=IR/Chase SINR accumulation)" << endl;
 	}
 	if (channel_param_legacy)
 		cout << "channel_param_legacy    : " << channel_param_legacy << " (old TR 38.901 pre-V19)" << endl;

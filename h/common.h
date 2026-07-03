@@ -152,6 +152,7 @@ extern Real Total_BS_Tx_power;
 extern Real cfg_BS_Tx_Power;
 extern Real cfg_UT_Noise_Figure;
 extern Real cfg_UE_antenna_element_gain;
+extern Real cfg_inter_site_distance;
 
 extern int num_floor;
 extern int num_propagation_condition;
@@ -175,7 +176,7 @@ extern int cqi_history_length;
 extern Real            **** ppppCQI_Map;
 extern Real            **** ppppCQI_comp_Map;
 extern PMI_FEEDBACK    **** ppppPMI_map;
-extern VectorXcReal               **** ppppPMI_vector_map;
+extern MatrixXcReal               **** ppppPMI_vector_map;   // N_tx × R (R=g_type2_rank), col 0 is dominant layer
 extern MatrixXcReal               **** ppppCSI_matrix_map;  // TDD: Full channel matrices for reciprocity-based precoding
 //extern int SCHEDULE_TYPE;
 extern int    mcs_decision;
@@ -290,6 +291,45 @@ extern int handheld_mode;            // 0=off, 1=handheld
 extern int handheld_num_ports;       // active ports (e.g., 4 for Config B)
 extern int handheld_port_indices[8]; // 1-based antenna position indices
 extern Real handheld_beta_deg;       // UT β angle (degrees)
+
+// Type II Codebook (TS 38.214 §5.2.2.2.3) parameters
+// Codebook_Type: 1 = Type I (default), 2 = Type II (Rel-15, rank 1 only), 3 = Enhanced Type II (Rel-16, rank 1-4)
+extern int  g_codebook_type;
+extern int  g_type2_L;                  // Number of selected beams per rotation (2/3/4)
+extern int  g_type2_phase_alphabet;     // Phase alphabet size (4 = QPSK, 8 = 8-PSK, 16 = 16-PSK for eType II)
+extern int  g_type2_subband_amplitude;  // 0 = WB amplitude only, 1 = SB amplitude enabled (Rel-15)
+
+// Rel-16 Enhanced Type II parameters (TS 38.214 §5.2.2.2.5)
+extern int  g_type2_rank;               // MAX rank cap R_max (1..4). Per-UE rank may be lower.
+extern int  g_etype2_param_comb;        // ParameterCombination index (1..8): determines (L, p_v, β)
+extern Real g_etype2_pv;                // FD basis ratio p_v (e.g. 1/4, 1/2)
+extern Real g_etype2_beta;              // Sparsity ratio β (e.g. 1/4, 1/2, 3/4)
+
+// Rank-adaptive RI selection (per-UE rank decision at MS side)
+extern int  g_rank_adaptive;            // 0 = fixed rank = g_type2_rank, 1 = per-UE RI from SVD capacity
+extern int  g_su_fallback;              // 0 = always MU-MIMO, 1 = compare SU metric vs MU and pick max
+
+// Receiver-side SIC option for own UE's multiple layers
+//   0 = per-stream MMSE (own UE's other layers counted as interference)
+//   1 = ideal SIC (own UE's other layers cancelled; current historical behavior)
+extern int  g_use_sic;
+
+// Per-layer MCS + per-layer HARQ (each of a UE's rank-R layers gets its own MCS,
+// sub-TBS, EESM BLER and independent decode/retx).
+//   0 = legacy single-MCS / single-TB HARQ (all layers share one MCS)
+//   1 = per-layer MCS + per-layer HARQ
+extern int  g_per_layer_mcs;
+
+// HARQ soft combining (per-layer). Requires g_per_layer_mcs=1.
+//   0 = no combining (HARQ Type I): each retx is an independent trial at the same BLER
+//   1 = IR/Chase: accumulate per-layer effective SINR across (re)transmissions, look up
+//       BLER at the accumulated SINR → retransmissions progressively more likely to decode
+extern int  g_harq_ir;
+
+// Type II codebook cached DFT beams (cleared in Type2_Codebook_Gen)
+//   type2_beam_v[l][m] = u_m ⊗ u_l  (length N1*N2)
+extern VectorXcReal ** type2_beam_v;
+extern int type2_N1, type2_N2, type2_O1, type2_O2;
 
 // BS-side Spatial Non-Stationarity (SNS) parameters
 extern int  g_sns_bs_enabled;
