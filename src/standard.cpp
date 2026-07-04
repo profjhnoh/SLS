@@ -1,5 +1,6 @@
 #include "standard.h"
 #include "common.h"
+#include "nr_l2sm.h"
 #include <iostream>
 #include <fstream>
 
@@ -74,11 +75,45 @@ void StandardInitialization()
 	table_setting_Threshold();//for MCS decision
 	table_setting_RBIR();
 
-	//// vienna BLER curve 
+	//// vienna BLER curve
 	//Load_BLER_vienna_file();
 	Load_5G_BLER_vienna_file();
 
-
+	// MATLAB L2SM BLER tables (code-rate + TBS aware). The legacy table above
+	// stays loaded so matlab_bler=0 runs are untouched (side-by-side A/B).
+	if (g_matlab_bler || g_matlab_cqi_thresholds || g_matlab_bler_selftest)
+	{
+		if (!Load_Matlab_L2SM_BLER("matlab_l2sm_bler.dat"))
+		{
+			cout << "=== matlab_l2sm_bler.dat missing/corrupt: run export_matlab_bler.m first ===" << endl;
+			getchar();
+		}
+	}
+	if ((g_matlab_bler && g_matlab_rbir) || g_matlab_bler_selftest)
+	{
+		if (!Load_RBIR_ESM("rbir_esm.dat"))
+		{
+			cout << "=== rbir_esm.dat missing/corrupt: run export_rbir_esm.m first ===" << endl;
+			getchar();
+		}
+	}
+	if (g_matlab_bler_selftest)
+	{
+		Matlab_BLER_selftest("bler_compare/matlab_reference_tuples.csv");
+		Matlab_RBIR_selftest("bler_compare/rbir_reference_tuples.csv");
+	}
+	if (g_matlab_cqi_thresholds)
+	{
+		Regenerate_SINR_thresholds_from_matlab();
+	}
+	if (g_matlab_bler && g_matlab_tput_mcs)
+	{
+		// Reference per-UE allocation for the MCS decision grid: with ~mx/RI
+		// UEs sharing the band each slot, a UE typically gets ~num_rb/3 RBs.
+		int ref_rbs = (g_tput_mcs_ref_rbs > 0) ? g_tput_mcs_ref_rbs : (num_rb / 3 > 0 ? num_rb / 3 : 1);
+		int n_re_ref = MIN(156, num_freq_per_rbs * num_ofdm_symbols_per_subband_per_1ms) * ref_rbs;
+		Build_TputMCS_Grid(n_re_ref);
+	}
 
 	SNR = new Real[95];
 	for (int i = 0; i < 95; i++)

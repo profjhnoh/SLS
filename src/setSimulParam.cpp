@@ -130,6 +130,13 @@ void Set_simul_param(int argc, char *argv[])
 		g_use_sic                 = int(Get_parameter(infile, "Use_SIC", 1));                    // 0 = per-stream MMSE, 1 = ideal SIC (historical default)
 		g_per_layer_mcs           = int(Get_parameter(infile, "per_layer_mcs", 0));              // 0 = legacy single-MCS/TB-HARQ, 1 = per-layer MCS + HARQ
 		g_harq_ir                 = int(Get_parameter(infile, "harq_ir", 0));                    // 0 = HARQ Type I, 1 = IR/Chase SINR combining
+		g_matlab_bler             = int(Get_parameter(infile, "matlab_bler", 0));                // 0 = legacy BLER_5G.dat, 1 = MATLAB L2SM (code rate + TBS aware)
+		g_matlab_cqi_thresholds   = int(Get_parameter(infile, "matlab_cqi_thresholds", 0));      // 1 = regenerate SINR_threshold_dB from MATLAB tables
+		g_matlab_bler_selftest    = int(Get_parameter(infile, "matlab_bler_selftest", 0));       // 1 = validate lookup vs oracle CSV at startup
+		g_matlab_rbir             = int(Get_parameter(infile, "matlab_rbir", 1));                // 1 = RBIR eff-SINR (curves' axis) when matlab_bler=1; 0 = EESM (diagnostic)
+		g_matlab_tput_mcs         = int(Get_parameter(infile, "matlab_tput_mcs", 0));            // 1 = throughput-max MCS over all 28 MCS (needs matlab_bler=1)
+		g_tput_mcs_ref_rbs        = int(Get_parameter(infile, "tput_mcs_ref_rbs", 0));           // reference per-UE RBs for the MCS grid; 0 = auto num_rb/3
+		g_matlab_esinr_fb         = int(Get_parameter(infile, "matlab_esinr_fb", 0));            // 1 = realized-ESINR feedback correction (needs matlab_bler=1, per_layer_mcs=1)
 
 		if (g_type2_rank < 1) g_type2_rank = 1;
 		if (g_type2_rank > 4) g_type2_rank = 4;
@@ -431,7 +438,11 @@ void Set_simul_param(int argc, char *argv[])
 		cout << "  ├─ SU_Fallback        : " << g_su_fallback << " (0=always MU, 1=SU vs MU)" << endl;
 		cout << "  ├─ Use_SIC            : " << g_use_sic << " (0=per-stream MMSE, 1=ideal SIC)" << endl;
 		cout << "  ├─ per_layer_mcs      : " << g_per_layer_mcs << " (0=legacy single-MCS, 1=per-layer MCS+HARQ)" << endl;
-		cout << "  └─ harq_ir            : " << g_harq_ir << " (0=Type I no-combining, 1=IR/Chase SINR accumulation)" << endl;
+		cout << "  ├─ harq_ir            : " << g_harq_ir << " (0=Type I no-combining, 1=IR/Chase SINR accumulation)" << endl;
+		cout << "  └─ matlab_bler        : " << g_matlab_bler << " (0=legacy SINRxCQI table, 1=MATLAB L2SM CR+TBS)"
+		     << "  [rbir=" << g_matlab_rbir << " tput_mcs=" << g_matlab_tput_mcs << " esinr_fb=" << g_matlab_esinr_fb
+		     << " cqi_thresholds=" << g_matlab_cqi_thresholds
+		     << " selftest=" << g_matlab_bler_selftest << "]" << endl;
 	}
 	if (channel_param_legacy)
 		cout << "channel_param_legacy    : " << channel_param_legacy << " (old TR 38.901 pre-V19)" << endl;

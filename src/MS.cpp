@@ -228,6 +228,10 @@ void MS::Reset2Default()
 		olla_history_idx    = 0;
 		olla_nack_count     = 0;  // All ACKs initially, so NACK count is 0
 
+		// Realized-ESINR feedback state
+		matlab_sinr_corr    = 0.0;
+		for (int l = 0; l < 4; l++) _est_sinr_per_layer[l] = 0;
+
 		pmi_l               = 0;
 		pmi_m               = 0;
 		pmi_n               = 0;

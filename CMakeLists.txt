@@ -162,8 +162,9 @@ SET (SRC_FILES
     src/Link.cpp 
     src/Logging_Point.cpp 
     src/measure.cpp 
-    src/MS.cpp 
-    src/scheduling.cpp 
+    src/MS.cpp
+    src/nr_l2sm.cpp
+    src/scheduling.cpp
     src/paramFastfading.cpp 
     src/PerdropStatistics.cpp 
     src/Print.cpp 

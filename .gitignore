@@ -45,3 +45,8 @@ reference_code/
 *.asv
 *.txt
 
+
+# MathWorks-proprietary exported data (research repo only, never distribute/commit)
+matlab_l2sm_bler.dat
+rbir_esm.dat
+bler_compare/

@@ -1,5 +1,6 @@
 #include "common.h"
 #include "const.h"
+#include "nr_l2sm.h"
 #include <iostream>
 #include <fstream>
 #include <cmath>
@@ -125,49 +126,12 @@ static inline Real bler_lookup_dB(Real sinr_linear, int cqi_idx)
 // Used by the per-layer TBS path (layer_factor = 1 per layer).
 static int tbs_info_bits_from_mcs(int mcs_idx, int N_RE, int layer_factor)
 {
-	if (mcs_idx < 0)  mcs_idx = 0;
-	if (mcs_idx > 27) mcs_idx = 27;
-
-	int mod_type;
-	if (mcs_idx <= 4)       mod_type = QPSK;
-	else if (mcs_idx <= 10) mod_type = QAM16;
-	else if (mcs_idx <= 19) mod_type = QAM64;
-	else                    mod_type = QAM256;
-
-	static const Real CR_X1024[28] = {
-		120,193,308,449,602, 378,434,490,553,616,658,
-		466,517,567,616,666,719,772,822,873,
-		682.5,711,754,797,841,885,916.5,948 };
-	Real coding_rate = CR_X1024[mcs_idx] / 1024.0;
-
-	int N_info = (int)(N_RE * coding_rate * mod_type * layer_factor * (1.0 - overhead));
-	int info_bits = 0;
-	if (N_info <= 3834)
-	{
-		int n = MAX(3, floor(log2(N_info)) - 6.);
-		int N_info_a = MAX(24, pow(2, n) * floor(N_info / pow(2, n)));
-		info_bits = N_info_a;
-	}
-	else
-	{
-		int n = floor(log2(N_info - 24)) - 5;
-		int N_info_a = MAX(3840, pow(2, n) * round(((N_info - 24) / pow(2, n))));
-		if (coding_rate <= (1. / 4.))
-		{
-			int C = ceil((N_info_a + 24) / 3816);
-			info_bits = 8 * C * ceil((N_info_a + 24) / (8 * C)) - 24;
-		}
-		else if (N_info_a >= 8424)
-		{
-			int C = ceil((N_info_a + 24) / 8424);
-			info_bits = 8 * C * ceil((N_info_a + 24) / (8 * C)) - 24;
-		}
-		else
-		{
-			info_bits = 8 * ceil((N_info_a + 24) / 8) - 24;
-		}
-	}
-	return info_bits;
+	// Math lives in nr_l2sm.cpp (single source shared with the CQI-threshold
+	// regeneration). Bit-identity vs. old binaries is NOT a constraint here:
+	// the codebase has a layout-sensitive read (adding ANY translation unit
+	// perturbs a few UEs' trajectories — verified with a dummy-TU experiment),
+	// so regression is judged by same-binary determinism + statistics.
+	return nr_tbs_info_bits_from_mcs(mcs_idx, N_RE, layer_factor);
 }
 
 Real MS::BLER_Mapping( void )
@@ -183,6 +147,8 @@ Real MS::BLER_Mapping( void )
 	{
 		// Per-layer EESM aggregation across RBs
 		Real prob_success_TB = 1.0;
+		Real fb_err_sum = 0.0;   // realized-ESINR feedback: innovation accumulator (dB)
+		int  fb_err_cnt = 0;
 		for (int l = 0; l < num_layers_actual && l < 4; l++)
 		{
 			const std::vector<Real>& v = rbs_rx_per_layer[l];
@@ -190,23 +156,83 @@ Real MS::BLER_Mapping( void )
 
 			// Per-layer MCS: score each layer against ITS OWN cqi, not the dominant layer's.
 			int cqi_l = (g_per_layer_mcs == 1) ? _cqi_per_layer[l] : _cqi_idx;
-			Real beta = Beta[std::max(cqi_l - 1, 0)];
-			Real e_sir_l = 0.0;
-			for (size_t i = 0; i < v.size(); i++) e_sir_l += std::exp(-v[i] / beta);
-			Real esir_l = -beta * std::log(e_sir_l / (Real)v.size());
+			int mcs_l = (g_per_layer_mcs == 1) ? _mcs_per_layer[l] : _mcs_idx;
 
-			Real bler_l = bler_lookup_dB(esir_l, cqi_l);
+			// Effective SINR over this layer's RBs.
+			// MATLAB mode uses the RBIR ESM — the AWGN curves are tabulated against an
+			// RBIR-effective SINR, and feeding them EESM(legacy Beta) biases the steep
+			// LDPC waterfalls (verified: BLER stuck ~0.2, SE collapse). Legacy keeps EESM.
+			Real esir_l;
+			if (g_matlab_bler && g_matlab_rbir)
+			{
+				int  qm_l;
+				Real rr_l;
+				nr_mcs_to_qm_r(mcs_l, qm_l, rr_l);
+				esir_l = rbir_effective_sinr_linear(v, qm_l);
+			}
+			else
+			{
+				Real beta = Beta[std::max(cqi_l - 1, 0)];
+				Real e_sir_l = 0.0;
+				for (size_t i = 0; i < v.size(); i++) e_sir_l += std::exp(-v[i] / beta);
+				esir_l = -beta * std::log(e_sir_l / (Real)v.size());
+			}
+
+			Real bler_l;
+			if (g_matlab_bler)
+			{
+				// (code rate, TBS)-aware lookup. Per-layer mode has its own MCS/TBS;
+				// legacy multi-layer shares _mcs_idx and splits _info_bits evenly
+				// (approximation: TBS only sets BGN/Zc/C — low sensitivity).
+				int tbs_l = (g_per_layer_mcs == 1) ? _info_bits_per_layer[l]
+				                                   : (int)(_info_bits / MAX(num_layers_actual, 1));
+				bler_l = bler_lookup_matlab(esir_l, mcs_l, tbs_l);
+			}
+			else
+			{
+				bler_l = bler_lookup_dB(esir_l, cqi_l);
+			}
 			per_layer_ESINR[l] = esir_l;
 			per_layer_BLER [l] = bler_l;
 			prob_success_TB *= (1.0 - bler_l);
+
+			// Realized-ESINR feedback innovation: realized (RBIR) vs scheduler estimate.
+			// Uses the raw pre-OLLA estimate so the correction's fixpoint is exactly the
+			// estimate-vs-realized bias (OLLA stays the residual BLER-level regulator).
+			if (g_matlab_bler && g_matlab_esinr_fb && g_per_layer_mcs == 1 &&
+			    _est_sinr_per_layer[l] > 0 && esir_l > 0)
+			{
+				fb_err_sum += 10.0 * std::log10(esir_l) - 10.0 * std::log10(_est_sinr_per_layer[l]);
+				fb_err_cnt++;
+			}
 		}
+
+		// Integral update of the per-UE correction: corr -> EWMA of (realized - estimate) dB.
+		// Gain 0.1/slot converges in tens of scheduled slots; clamp keeps outliers bounded.
+		if (fb_err_cnt > 0)
+		{
+			Real err = fb_err_sum / (Real)fb_err_cnt;
+			matlab_sinr_corr += (Real)0.1 * (err - matlab_sinr_corr);
+			if (matlab_sinr_corr < (Real)-15.0) matlab_sinr_corr = (Real)-15.0;
+			if (matlab_sinr_corr > (Real)5.0)   matlab_sinr_corr = (Real)5.0;
+		}
+
 		Real BLER_value = 1.0 - prob_success_TB;
 		ue_BLER_Value = BLER_value;
 		return BLER_value;
 	}
 
 	// Legacy single-SINR fallback (R=1 or per-layer buffer not populated)
-	Real BLER_value = bler_lookup_dB(ESINR_linear, _cqi_idx);
+	Real esinr_fb = ESINR_linear;   // EESM value from Compute_Effective_SINR
+	if (g_matlab_bler && g_matlab_rbir && rbs_rx.size() > 0)
+	{
+		int  qm_fb;
+		Real rr_fb;
+		nr_mcs_to_qm_r(_mcs_idx, qm_fb, rr_fb);
+		esinr_fb = rbir_effective_sinr_linear(rbs_rx, qm_fb);
+	}
+	Real BLER_value = g_matlab_bler ? bler_lookup_matlab(esinr_fb, _mcs_idx, (int)_info_bits)
+	                                : bler_lookup_dB(ESINR_linear, _cqi_idx);
 	ue_BLER_Value = BLER_value;
 	return BLER_value;
 }
@@ -234,32 +260,12 @@ void MS::Receive_DL(int _ms_idx)
 		Rate_matching();
 		Compute_Num_Bin_Symbol();
 		Compute_Effective_SINR();
-		////////// Vienna BLER mapping //////////////////
-		int mapping_snr_dB_idx = 0;
-		int mapping_cqi_idx    = 0;
-		Real BLER_value      = 0.;
-
-		Real x_axis = 10 * log10(ESINR_linear);		
-		for (int snr_idx = 0; snr_idx < 1426; snr_idx++)
-		{
-			if (SNR_5G_dB[snr_idx] > x_axis)
-			{
-				mapping_snr_dB_idx = snr_idx - 1;           
-
-				if (mapping_snr_dB_idx < 0)
-				{
-					mapping_snr_dB_idx = 0;
-				}
-
-				break;
-			}
-			else  
-			{
-				mapping_snr_dB_idx = 1425;
-			}
-		}
-		/////////////////////////////////////////////////////////////////////////
-		BLER_value     = (NEW5GBLER[mapping_snr_dB_idx][_cqi_idx - 1]);
+		////////// BLER mapping //////////////////
+		// (the legacy scan below was inlined; bler_lookup_dB is scan-identical,
+		//  so matlab_bler=0 stays bit-identical)
+		int mapping_cqi_idx = 0;
+		Real BLER_value = g_matlab_bler ? bler_lookup_matlab(ESINR_linear, _mcs_idx, (int)_info_bits)
+		                                : bler_lookup_dB(ESINR_linear, _cqi_idx);
 		ue_BLER_Value  = BLER_value;
 
 
@@ -385,8 +391,16 @@ void MS::AddThroughput(Real prob)
 				// equals the single-tx ESINR (→ identical to no-combining); each retx adds
 				// more SINR so the per-layer BLER drops and decoding becomes progressively
 				// more likely. per_layer_ESINR[l] is set by BLER_Mapping for this slot.
+				// NOTE: _info_bits_per_layer is frozen during retx (recomputed only on
+				// ACK), so the segmentation (BGN/Zc/C) is stable across combining. The
+				// scheduler may still refresh _mcs_per_layer mid-HARQ — same semantics
+				// as the legacy _cqi_per_layer lookup (future hardening: freeze at 1st tx).
 				links[self_idx].per_layer_accum_esinr[l] += per_layer_ESINR[l];
-				bler_l = bler_lookup_dB(links[self_idx].per_layer_accum_esinr[l], _cqi_per_layer[l]);
+				if (g_matlab_bler)
+					bler_l = bler_lookup_matlab(links[self_idx].per_layer_accum_esinr[l],
+					                            _mcs_per_layer[l], _info_bits_per_layer[l]);
+				else
+					bler_l = bler_lookup_dB(links[self_idx].per_layer_accum_esinr[l], _cqi_per_layer[l]);
 			}
 			else
 			{
@@ -522,14 +536,19 @@ void MS::Find_Allocated_Rbs_Mcs_mTRP( void )
 					// TB keeps its frozen per-layer MCS (matches legacy _mcs_idx freezing).
 					if (g_per_layer_mcs == 1 && links[self_idx].ACK)
 					{
-						for (int l = 0; l < 4; l++) { _mcs_per_layer[l] = 0; _cqi_per_layer[l] = 0; }
+						for (int l = 0; l < 4; l++) { _mcs_per_layer[l] = 0; _cqi_per_layer[l] = 0; _est_sinr_per_layer[l] = 0; }
 						for (int s2 = 0; s2 < mx_ue_mumimo; s2++)
 						{
 							const SCHEDULE_DECISION& d2 =
 								pppSchedule_Map[links[self_idx]._sector_in_control][freq_idx][s2];
 							if (d2.ue_selected != self_idx) continue;
 							int L = d2.layer_idx;
-							if (L >= 0 && L < 4) { _mcs_per_layer[L] = d2.mcs_selected; _cqi_per_layer[L] = d2.cqi_selected; }
+							if (L >= 0 && L < 4)
+							{
+								_mcs_per_layer[L]      = d2.mcs_selected;
+								_cqi_per_layer[L]      = d2.cqi_selected;
+								_est_sinr_per_layer[L] = d2.capacity;   // scheduler's linear SINR estimate (pre-OLLA)
+							}
 						}
 					}
 				}
@@ -641,13 +660,6 @@ void MS::Rate_matching(void)
 
 		int _mod_type_;
 
-		if (_mcs_idx <= 4)       { _mod_type_ = QPSK; }
-		else if (_mcs_idx <= 10) { _mod_type_ = QAM16; }
-		else if (_mcs_idx <= 19) { _mod_type_ = QAM64; }
-		else if (_mcs_idx <= 28) { _mod_type_ = QAM256; }
-		else                      { cerr << "Something Wrong - rate matching" << endl; }
-
-
 		int N_DMRS = 0;
 		int N_overhead = 0;
 
@@ -664,40 +676,8 @@ void MS::Rate_matching(void)
 		Real coding_rate;
 		int TB_Size_bits = 0;
 
-		///////
-		if (_mcs_idx == 0)        { coding_rate_x1024 = 120; }
-		else if (_mcs_idx == 1)   { coding_rate_x1024 = 193; }
-		else if (_mcs_idx == 2)   { coding_rate_x1024 = 308; }
-		else if (_mcs_idx == 3)   { coding_rate_x1024 = 449; }
-		else if (_mcs_idx == 4)   { coding_rate_x1024 = 602; }
-		else if (_mcs_idx == 5)   { coding_rate_x1024 = 378; }
-		else if (_mcs_idx == 6)   { coding_rate_x1024 = 434; }
-		else if (_mcs_idx == 7)   { coding_rate_x1024 = 490; }
-		else if (_mcs_idx == 8)   { coding_rate_x1024 = 553; }
-		else if (_mcs_idx == 9)   { coding_rate_x1024 = 616; }
-		else if (_mcs_idx == 10)  { coding_rate_x1024 = 658; }
-		else if (_mcs_idx == 11)  { coding_rate_x1024 = 466; }
-		else if (_mcs_idx == 12)  { coding_rate_x1024 = 517; }
-		else if (_mcs_idx == 13)  { coding_rate_x1024 = 567; }
-		else if (_mcs_idx == 14)  { coding_rate_x1024 = 616; }
-		else if (_mcs_idx == 15)  { coding_rate_x1024 = 666; }
-		else if (_mcs_idx == 16)   { coding_rate_x1024 = 719; }
-		else if (_mcs_idx == 17)   { coding_rate_x1024 = 772; }
-		else if (_mcs_idx == 18)   { coding_rate_x1024 = 822; }
-		else if (_mcs_idx == 19)   { coding_rate_x1024 = 873; }
-		else if (_mcs_idx == 20)   { coding_rate_x1024 = 682.5; }
-		else if (_mcs_idx == 21)   { coding_rate_x1024 = 711; }
-		else if (_mcs_idx == 22)   { coding_rate_x1024 = 754; }
-		else if (_mcs_idx == 23)   { coding_rate_x1024 = 797; }
-		else if (_mcs_idx == 24)   { coding_rate_x1024 = 841; }
-		else if (_mcs_idx == 25)  { coding_rate_x1024 = 885; }
-		else if (_mcs_idx == 26)  { coding_rate_x1024 = 916.5; }
-		else if (_mcs_idx == 27)  { coding_rate_x1024 = 948; }
-		else
-		{
-			cout << "Something Wrong rate matching" << endl;
-			getchar();
-		}
+		// MCS -> (Qm, CR) via the shared table (was a duplicated if/else chain)
+		nr_mcs_to_qm_r(_mcs_idx, _mod_type_, coding_rate_x1024);
 
 		coding_rate = coding_rate_x1024 / 1024.;
 
@@ -840,12 +820,6 @@ void MS::Compute_Transport_Block_Size( void )
 			return;
 		}
 
-		if (_mcs_idx <= 4)       { _mod_type = QPSK; }
-		else if (_mcs_idx <= 10) { _mod_type = QAM16; }
-		else if (_mcs_idx <= 19) { _mod_type = QAM64; }
-		else if (_mcs_idx <= 28) { _mod_type = QAM256; }
-		else                     { cerr << "Something Wrong - rate matching" << endl; }
-
 		int N_DMRS = 0;
 		int N_overhead = 0;
 
@@ -860,40 +834,8 @@ void MS::Compute_Transport_Block_Size( void )
 		Real coding_rate;
 		int TB_Size_bits = 0;
 
-		///////
-		if (_mcs_idx == 0)        { coding_rate_x1024 = 120; }
-		else if (_mcs_idx == 1)   { coding_rate_x1024 = 193; }
-		else if (_mcs_idx == 2)   { coding_rate_x1024 = 308; }
-		else if (_mcs_idx == 3)   { coding_rate_x1024 = 449; }
-		else if (_mcs_idx == 4)   { coding_rate_x1024 = 602; }
-		else if (_mcs_idx == 5)   { coding_rate_x1024 = 378; }
-		else if (_mcs_idx == 6)   { coding_rate_x1024 = 434; }
-		else if (_mcs_idx == 7)   { coding_rate_x1024 = 490; }
-		else if (_mcs_idx == 8)   { coding_rate_x1024 = 553; }
-		else if (_mcs_idx == 9)   { coding_rate_x1024 = 616; }
-		else if (_mcs_idx == 10)  { coding_rate_x1024 = 658; }
-		else if (_mcs_idx == 11)  { coding_rate_x1024 = 466; }
-		else if (_mcs_idx == 12)  { coding_rate_x1024 = 517; }
-		else if (_mcs_idx == 13)  { coding_rate_x1024 = 567; }
-		else if (_mcs_idx == 14)  { coding_rate_x1024 = 616; }
-		else if (_mcs_idx == 15)  { coding_rate_x1024 = 666; }
-		else if (_mcs_idx == 16)  { coding_rate_x1024 = 719; }
-		else if (_mcs_idx == 17)  { coding_rate_x1024 = 772; }
-		else if (_mcs_idx == 18)  { coding_rate_x1024 = 822; }
-		else if (_mcs_idx == 19)  { coding_rate_x1024 = 873; }
-		else if (_mcs_idx == 20)  { coding_rate_x1024 = 682.5;}
-		else if (_mcs_idx == 21)  { coding_rate_x1024 = 711; }
-		else if (_mcs_idx == 22)  { coding_rate_x1024 = 754; }
-		else if (_mcs_idx == 23)  { coding_rate_x1024 = 797; }
-		else if (_mcs_idx == 24)  { coding_rate_x1024 = 841; }
-		else if (_mcs_idx == 25)  { coding_rate_x1024 = 885; }
-		else if (_mcs_idx == 26)  { coding_rate_x1024 = 916.5; }
-		else if (_mcs_idx == 27)  { coding_rate_x1024 = 948; }
-		else
-		{
-			cout << "Something Wrong rate matching" << endl;
-			getchar();
-		}
+		// MCS -> (Qm, CR) via the shared table (was a duplicated if/else chain)
+		nr_mcs_to_qm_r(_mcs_idx, _mod_type, coding_rate_x1024);
 
 		coding_rate = coding_rate_x1024 / 1024.;
 		//N_info = (int)(N_RE * coding_rate * _mod_type * NUM_UE_Layer* (1. - overhead));
@@ -1119,6 +1061,12 @@ int getIndex(vector<int> v, int K);
 
 int determine_MCS(Real sinr_estimate)
 {
+	// Throughput-maximizing selection over all 28 MCS (TBS/segmentation aware),
+	// precomputed as a dB-grid at init. Bypasses the CQI->MCS map (which reaches
+	// only 15 of 28 MCS). sinr_estimate is in dB at every call site.
+	if (g_matlab_bler && g_matlab_tput_mcs && TputMCS_Grid_ready())
+		return nr_mcs_maxtput_from_dB(sinr_estimate);
+
 	if (false)  //// TS 38.214 , Table 5.1.3.1-2:, use spectral efficiency
 	{
 		int _MCS_decision = 0;

@@ -218,6 +218,13 @@ int  g_su_fallback             = 0;     // 0 = always MU, 1 = SU vs MU metric co
 int  g_use_sic                 = 1;     // 0 = per-stream MMSE, 1 = ideal SIC for own UE's layers (historical default)
 int  g_per_layer_mcs           = 0;     // 0 = legacy single-MCS/TB-HARQ, 1 = per-layer MCS + per-layer HARQ
 int  g_harq_ir                 = 0;     // 0 = HARQ Type I (no combining), 1 = IR/Chase SINR accumulation
+int  g_matlab_bler             = 0;     // 0 = legacy BLER_5G.dat (SINRxCQI), 1 = MATLAB L2SM curves (code rate + TBS aware)
+int  g_matlab_cqi_thresholds   = 0;     // 1 = regenerate SINR_threshold_dB[15] from the MATLAB tables at startup
+int  g_matlab_bler_selftest    = 0;     // 1 = validate C++ lookup vs bler_compare/matlab_reference_tuples.csv at startup
+int  g_matlab_rbir             = 1;     // 1 = RBIR effective SINR (curves' native axis) when matlab_bler=1; 0 = keep EESM (biased, diagnostic only)
+int  g_matlab_tput_mcs         = 0;     // 1 = throughput-maximizing MCS (argmax TBSx(1-BLER) over all 28 MCS); requires matlab_bler=1
+int  g_tput_mcs_ref_rbs        = 0;     // reference per-UE RB allocation for the MCS decision grid; 0 = auto (num_rb/3)
+int  g_matlab_esinr_fb         = 0;     // 1 = realized-ESINR feedback: per-UE dB correction from (realized RBIR eff-SINR - scheduler estimate)
 
 // Type II cached DFT beams
 VectorXcReal ** type2_beam_v   = NULL;  // [O1*N1][O2*N2]

@@ -96,6 +96,15 @@ class MS
 		int               _mcs_per_layer[4]       = {0,0,0,0};
 		int               _cqi_per_layer[4]       = {0,0,0,0};
 		int               _info_bits_per_layer[4] = {0,0,0,0};
+		// Scheduler's per-layer SINR estimate at decision time (SCHEDULE_DECISION.capacity,
+		// linear, pre-OLLA). Used by the realized-ESINR feedback (g_matlab_esinr_fb).
+		Real              _est_sinr_per_layer[4]  = {0,0,0,0};
+		// Realized-ESINR feedback: per-UE dB correction added to the scheduler's SINR
+		// input, driven by EWMA of (realized RBIR eff-SINR - scheduler estimate).
+		// Same role as olla_offset but measurement-driven (real-valued innovation per
+		// slot instead of a 1-bit ACK), so it converges much faster and tracks the
+		// estimate-vs-realized bias that steep MATLAB curves punish.
+		Real              matlab_sinr_corr        = 0.0;
 		Real             _avr_sinr           = 0;
 		int               _mod_type           = 0;
 		int               num_rx_rb           = 0;

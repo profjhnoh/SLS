@@ -326,6 +326,16 @@ extern int  g_per_layer_mcs;
 //       BLER at the accumulated SINR → retransmissions progressively more likely to decode
 extern int  g_harq_ir;
 
+// MATLAB 5G Toolbox L2SM BLER tables (code-rate + TBS aware; see h/nr_l2sm.h).
+// Both tables stay loaded so runs are A/B comparable; flags default OFF.
+extern int  g_matlab_bler;            // BLER coin from MATLAB curves instead of NEW5GBLER
+extern int  g_matlab_cqi_thresholds;  // regenerate SINR_threshold_dB from MATLAB curves
+extern int  g_matlab_bler_selftest;   // startup oracle validation
+extern int  g_matlab_rbir;            // RBIR effective SINR (curves' native axis) when matlab_bler=1
+extern int  g_matlab_tput_mcs;        // throughput-maximizing MCS over all 28 MCS (requires matlab_bler=1)
+extern int  g_tput_mcs_ref_rbs;       // reference per-UE RBs for the MCS grid; 0 = auto (num_rb/3)
+extern int  g_matlab_esinr_fb;        // realized-ESINR feedback correction (measurement-driven link adaptation)
+
 // Type II codebook cached DFT beams (cleared in Type2_Codebook_Gen)
 //   type2_beam_v[l][m] = u_m ⊗ u_l  (length N1*N2)
 extern VectorXcReal ** type2_beam_v;

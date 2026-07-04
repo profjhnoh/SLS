@@ -1,7 +1,8 @@
 #include "common.h"
+#include "nr_l2sm.h"
 #include <numeric>
 #include <algorithm>
-#include <random> 
+#include <random>
 #include <Eigen/LU>
 
 /*===================================================================
@@ -781,6 +782,11 @@ void Sector::Read_Ch_Feedback(void)
 
 int Sector::determine_MCS(Real sinr_estimate)
 {
+	// Throughput-maximizing selection over all 28 MCS (TBS/segmentation aware);
+	// see the free determine_MCS in receive_downlink.cpp. Both copies hooked.
+	if (g_matlab_bler && g_matlab_tput_mcs && TputMCS_Grid_ready())
+		return nr_mcs_maxtput_from_dB(sinr_estimate);
+
 	if (false)  //// TS 38.214 , Table 5.1.3.1-2:, use spectral efficiency
 	{
 		int _MCS_decision = 0;
@@ -1255,6 +1261,10 @@ void Sector::Set_AVR_Cqi(void)   ////
 		if (g_olla_enable) {
 			avr_SINR += ms[ue_in_control[ue_idx]].olla_offset;
 		}
+		// Realized-ESINR feedback correction (measurement-driven, see MS.h)
+		if (g_matlab_bler && g_matlab_esinr_fb) {
+			avr_SINR += ms[ue_in_control[ue_idx]].matlab_sinr_corr;
+		}
 
 		determined_mcs = determine_MCS(avr_SINR);// + 3;
 		determined_cqi = determine_CQI(avr_SINR);// + 3;
@@ -1381,6 +1391,8 @@ void Sector::Set_AVR_Cqi_Precoding_Based(void)
 				Real sel = (g_use_min_sinr_for_mcs == 1) ? min_sinr_l[L] : sum_sinr_l[L] / (Real)cnt_l[L];
 				Real dB  = 10.0 * log10(sel);
 				if (g_olla_enable) dB += ms[ms_idx].olla_offset;
+				// Realized-ESINR feedback correction (measurement-driven, see MS.h)
+				if (g_matlab_bler && g_matlab_esinr_fb) dB += ms[ms_idx].matlab_sinr_corr;
 				int mcs = determine_MCS(dB);
 				if (mcs > 27) mcs = 27; else if (mcs < 0) mcs = 0;
 				int cqi = determine_CQI(dB);
@@ -1527,7 +1539,11 @@ void Sector::Set_AVR_Cqi_Precoding_Based(void)
 			if (g_olla_enable) {
 				avr_sinr_dB += ms[ms_idx].olla_offset;
 			}
-			
+			// Realized-ESINR feedback correction (measurement-driven, see MS.h)
+			if (g_matlab_bler && g_matlab_esinr_fb) {
+				avr_sinr_dB += ms[ms_idx].matlab_sinr_corr;
+			}
+
 			// Determine MCS and CQI based on adjusted SINR
 			int determined_mcs = determine_MCS(avr_sinr_dB);
 			int determined_cqi = determine_CQI(avr_sinr_dB);
