@@ -309,13 +309,21 @@ void Set_simul_param(int argc, char *argv[])
 				exit(1);
 			}
 			if (row_beam_max_cand < 1) row_beam_max_cand = 1;
+		}
+		// Zenith grid override validation runs regardless of row_beam_enable: the
+		// override itself is gated only on row_beam_num_zenith so that a baseline
+		// A/B arm (enable 0) can use the same grid as the allocation arms.
+		if (row_beam_num_zenith > 0) {
+			if (scenario == 11) {
+				cout << "ERROR: zenith grid override is not supported for InH scenarios" << endl;
+				exit(1);
+			}
 			if (row_beam_num_zenith > MAX_RSRP_SEC_ZENITH) {
 				cout << "ERROR: row_beam_num_zenith exceeds MAX_RSRP_SEC_ZENITH ("
 				     << MAX_RSRP_SEC_ZENITH << ")" << endl;
 				exit(1);
 			}
-			if (row_beam_num_zenith > 0 &&
-			    !(row_beam_zenith_min_deg < row_beam_zenith_max_deg)) {
+			if (!(row_beam_zenith_min_deg < row_beam_zenith_max_deg)) {
 				cout << "ERROR: zenith grid override needs min_deg < max_deg" << endl;
 				exit(1);
 			}

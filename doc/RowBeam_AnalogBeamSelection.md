@@ -89,7 +89,7 @@ gain_mix = (1/(V·H)) Σ_mi Σ_ni gain[z_row[mi]][a_col[ni]]   (az_mode 2)
 | `row_beam_x_db` | 3.0 | 투표 윈도우 X dB |
 | `row_beam_zenith_min_deg` | 0 | 그리드 오버라이드 하한 (deg) |
 | `row_beam_zenith_max_deg` | 0 | 그리드 오버라이드 상한 (deg) |
-| `row_beam_num_zenith` | 0 | 오버라이드 빔 수 B (0 = 기존 그리드 유지) |
+| `row_beam_num_zenith` | 0 | 오버라이드 빔 수 B (0 = 기존 그리드 유지). `row_beam_enable`과 **독립** — enable=0인 baseline arm도 동일 그리드에서 per-UE 빔 선택 가능 (A/B 공정성) |
 
 가드: `Calibration_mode==1` 또는 InH(TYPE==11) 조합은 시작 시 에러 종료.
 주의: cfg 주석에 파라미터명 토큰을 쓰지 말 것 (`Get_parameter`의 토큰 스캔 특성).
@@ -134,9 +134,61 @@ gain_mix = (1/(V·H)) Σ_mi Σ_ni gain[z_row[mi]][a_col[ni]]   (az_mode 2)
 | force_uniform / az_mode 2 | ✔ 단일 빔 전 행 / cols 배분 동작 확인 |
 | 방향성 | 스케줄 UE SINR: (i) 14.47 dB > (ii) 투표 14.12 dB (낙관 교정) · 커버리지 median geometry: (ii) 35 dB > (iii) 단일빔 32 dB, SIR 25 > 22 dB (행 다양성 기여) |
 
-### 본 A/B (장기 런)
+### 본 A/B (장기 런, 2026-07-10)
 
-(실행 후 추가 — 3-arm: (i) enable=0 / (ii) az_mode=0 / (iii) force_uniform=1, 동일 시드)
+**설정**: `EMIMO_SLS_DU_B.cfg` 기반 (DU-A 환경/UMa_B, BS 25m, 16×16×2pol, 포트 4×16,
+20 UE/sector, 50RB 20MHz, TDD). A/B용 조정: Calibration 0, 3 drops × 500 slots,
+단일셀 통계 + 7사이트 간섭(전셀 통계는 런타임 과다), 시드 333333 공통,
+zenith 그리드 오버라이드 60–120° B=4 (60/80/100/120°) **3 arm 공통**.
+동일 시드 + 결정론(RNG per-work-item) → drop별 페어드 비교, 차이 = 순수 모델 효과.
+
+> 그리드 오버라이드 게이트를 `row_beam_num_zenith > 0` 단독으로 완화 (기존
+> `row_beam_enable &&` 조건 제거). arm (i)이 동일 4-빔 그리드에서 per-UE 선택을
+> 하도록 하기 위함 — 종전에는 DU-A의 1×1 기본 그리드로 퇴화해 그리드 변경과 모델
+> 변경이 섞였다. 기본값 0이므로 레거시 cfg bit-identity는 유지.
+
+**셀 SE (bits/s/Hz, drop별 페어드)**:
+
+| drop | (i) per-UE 낙관 | (ii) 투표 배정 | (iii) 단일 빔 | (ii)−(iii) |
+|---|---:|---:|---:|---:|
+| 1 | 13.393 | 12.710 | 12.669 | +0.041 |
+| 2 | 12.495 | 11.474 | 11.240 | +0.234 |
+| 3 | 12.287 | 11.491 | 11.240 | +0.251 |
+| **평균** | **12.725** | **11.892** | **11.716** | **+0.175 (+1.5%)** |
+
+**보조 지표 (3-drop 평균 / median dB)**:
+
+| 지표 | (i) | (ii) | (iii) |
+|---|---:|---:|---:|
+| UE SE 평균 | 0.6363 | 0.5946 | 0.5858 |
+| 5%ile UE SE | 0.0451 | 0.0142 | 0.0162 |
+| Geometry median | 3.67 | 0.16 | 0.63 |
+| Wideband SIR median | 6.70 | 1.06 | 1.80 |
+| Precoding SINR median | 24.18 | 20.90 | 21.30 |
+
+**배정 히스토그램 (arm ii, 중심 3섹터 × 3 drops)**: 전 케이스에서 100° 빔 2~3행 +
+80° 빔 1~2행 (`alloc_z=[0,1,3,0]` 또는 `[0,2,2,0]`, drop/섹터별 적응 확인).
+60°/120° 빔은 0표 — BS 25m에서 UE 대부분이 zenith 80~100°에 분포하는 물리와 일치.
+arm (iii)은 전 케이스 100° 단일 빔(`[0,0,4,0]`).
+
+**판정**:
+1. **행 다양성 기여 (헤드라인, (ii)−(iii))**: 셀 SE **+1.5%**, 3 drop 모두 양수(페어드
+   일관) — 방향은 확인되나 크기는 작다. 이 환경(UMa 25m BS, zenith 분포 좁음)에서는
+   투표가 사실상 2빔(80/100°)에 수렴해 다양성의 여지가 제한적. UE 수직 분포가 넓은
+   환경(UMi 10m BS + 고층 실내, 혹은 zenith 그리드 세분화)에서 재평가 가치 있음.
+2. **낙관 모델 교정폭 ((i)−(ii))**: 셀 SE **−6.6%** — per-UE 아날로그 빔 가정의
+   낙관 크기. geometry median 차이(3.67→0.16 dB)가 보여주듯 기존 모델은 모든 UE에게
+   최적 빔 RSRP를 부여해 SINR을 체계적으로 부풀렸다.
+3. **주의 — cell-edge 트레이드오프**: 5%ile UE SE는 (ii) 0.0142 < (iii) 0.0162
+   (−12%). 소수 빔(80°)에 행 1~2개를 떼어주는 대가로 다수 빔(100°) UE의 유효 개구가
+   줄어 edge UE가 손해. 셀 평균과 edge가 반대로 움직이므로, edge 중시 평가에서는
+   force_uniform(또는 X dB/K 축소로 투표 집중)이 나을 수 있다.
+
+**운영 노트**: arm (i) 실행에서 cfg의 `file_name`만 파싱 실패해 출력이 기본 경로
+(`output.txt`, 루트 CDF)로 떨어진 사례 발생 — 파라미터 자체는 전부 정상 파싱.
+레거시 파서(`Get_character_time`)가 파라미터별로 파일을 재스캔하는 구조라 Dropbox
+동기화 잠금이 스치면 마지막 파싱 항목만 실패하는 패턴과 일치. 데이터는 회수해
+`RB_i/`로 이동(내용 완전). 재발 시 cfg를 Dropbox 외부 경로에 두고 실행 권장.
 
 ## 7. 알려진 한계 / 리스크
 

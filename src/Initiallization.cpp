@@ -1275,13 +1275,19 @@ void Link_configuration()
 			//cout << '\r'<< endl;
 			//cout << "Get RSRP : " << ms_idx + 1 << "/" << num_MS << endl;
 			links[ms_idx].Configuration(ms_idx);
-			sector[links[ms_idx]._sector_in_control].ue_in_control.push_back(ms_idx);
 			//sector[links[ms_idx].comp_sector_idx].ue_in_comp.push_back(ms_idx);
 		}
 	#if ENABLE_MULTITHREADING
 	}
 	#endif
 	cout << "DONE"<<endl;
+
+	// Fill ue_in_control serially AFTER the parallel loop: concurrent push_back on
+	// the same sector's vector inside the OMP region was a data race (intermittent
+	// heap corruption / crash) and left the element order thread-schedule dependent.
+	// A serial index-order scan is race-free and deterministic.
+	for (int ms_idx = 0; ms_idx < num_MS; ms_idx++)
+		sector[links[ms_idx]._sector_in_control].ue_in_control.push_back(ms_idx);
 
 	Assign_Row_Beams();  // no-op unless row_beam_enable
 
@@ -2509,9 +2515,13 @@ void Generate_bs_2D_DFT_beam_precoder()
 
 	// Row-beam zenith grid override: replace the scenario's hardcoded zenith beam
 	// set with B uniformly spaced beams in [min, max] deg. Azimuth grid unchanged.
-	// Only active with row_beam_enable, so the legacy grids above stay bit-exact.
+	// Gated on row_beam_num_zenith alone (default 0 → legacy grids stay bit-exact)
+	// so that an A/B baseline arm (row_beam_enable 0) can run per-UE beam selection
+	// over the SAME grid as the allocation arms — otherwise a 1x1-grid scenario
+	// (DU Config A) would degenerate the baseline to one fixed beam and the A/B
+	// would conflate grid and model changes.
 	// (InH is rejected at cfg parse time, so this only reaches the DU/Rural grids.)
-	if (row_beam_enable && row_beam_num_zenith > 0)
+	if (row_beam_num_zenith > 0)
 	{
 		int B = row_beam_num_zenith;
 		for (int zi = 0; zi < B; zi++)
