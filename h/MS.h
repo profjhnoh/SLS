@@ -67,7 +67,12 @@ class MS
 		int              self_sector_idx   = 0;
 		int              nearest_bs_idx    = 0;
 		LOCATION         loc               = {0,0};
-		LOCATION3D       d_rx[4][8][2][2][2];//  antenna element location vector [M][N][P][Mg][Ng] (increased for safety)
+		// Antenna element location vectors [M][N][P][Mg][Ng]. Dimensions MUST track the
+		// MAX_MS_* config limits: setSimulParam validates MS_M up to MAX_MS_M(=16) and the
+		// handheld path writes d_rx[port][0][0][0][0] for up to 8 ports, but this array was
+		// [4][...] — every 8-port / MS_M>4 run wrote past the array into the members below
+		// (alpha/beta/gamma UE orientation!), silently corrupting the channel geometry.
+		LOCATION3D       d_rx[MAX_MS_M][MAX_MS_N][MAX_MS_P][MAX_MS_Mg][MAX_MS_Ng];
 
 		// array antenna rotate angle
 		Real           alpha             = 0;
@@ -146,10 +151,20 @@ class MS
 		int               self_RI             = 1;
 		Real              su_capacity         = 0.0;   // Best SU Shannon capacity for scheduler SU-vs-MU
 
-		// Actual number of layers allocated to this UE on the most recent scheduled RB.
-		// Set inside compute_tone_SINR() as my_streams.size(). Used by Rate_matching to
-		// compute the correct N_info (transport-block size scales linearly with layers).
+		// Layer count of the IN-FLIGHT transport block (per-layer HARQ identity).
+		// Set on the FIRST transmission as the max my_streams.size() over that slot's
+		// scheduled RBs (compute_tone_SINR, ACK-gated) and FROZEN during retransmissions,
+		// so a mid-HARQ rank change (RI update or mx_ue_mumimo stream-budget truncation)
+		// can neither prematurely close the TB (stranded pending layers) nor inject
+		// phantom layers. Used by Rate_matching/TBS sizing and the AddThroughput HARQ loop.
 		int               num_layers_actual   = 1;
+
+		// Layer count actually RECEIVED this slot (max over this slot's RBs, reset every
+		// Compute_RBs_SINR call). During a retransmission the scheduler may allocate fewer
+		// layers than the frozen TB has pending; layers >= layers_rx_this_slot got no new
+		// energy this slot, so AddThroughput skips their decode trial and IR accumulation
+		// (they simply stay pending) instead of consuming stale ESINR.
+		int               layers_rx_this_slot = 0;
 
 		// Per-layer reception buffers (used when num_layers_actual > 1).
 		// rbs_rx_per_layer[l] = vector of post-equalizer SINR (linear) for layer l across scheduled RBs.

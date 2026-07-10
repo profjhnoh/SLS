@@ -85,16 +85,19 @@ void StandardInitialization()
 	{
 		if (!Load_Matlab_L2SM_BLER("matlab_l2sm_bler.dat"))
 		{
-			cout << "=== matlab_l2sm_bler.dat missing/corrupt: run export_matlab_bler.m first ===" << endl;
-			getchar();
+			// Abort: with the table missing every bler_lookup_matlab returns 1.0,
+			// so the run would "complete" with all-failing transport blocks. The
+			// old getchar() also hung headless/batch runs on a dead prompt.
+			cout << "=== FATAL: matlab_l2sm_bler.dat missing/corrupt: run export_matlab_bler.m first ===" << endl;
+			exit(1);
 		}
 	}
 	if ((g_matlab_bler && g_matlab_rbir) || g_matlab_bler_selftest)
 	{
 		if (!Load_RBIR_ESM("rbir_esm.dat"))
 		{
-			cout << "=== rbir_esm.dat missing/corrupt: run export_rbir_esm.m first ===" << endl;
-			getchar();
+			cout << "=== FATAL: rbir_esm.dat missing/corrupt: run export_rbir_esm.m first ===" << endl;
+			exit(1);
 		}
 	}
 	if (g_matlab_bler_selftest)

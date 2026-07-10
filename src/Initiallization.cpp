@@ -1206,7 +1206,16 @@ void Assign_Row_Beams()
 		links[u].link_RSRP    = rsrp_mix_dB;
 		links[u].link_antgain = rsrp_mix_dB;
 		links[u].str_signal   = bs_maxpower + rsrp_mix_dB - links[u].link_pathloss;
-		links[u].static_gain[flat].first = links[u].str_signal;
+		// static_gain was SORTED by gain in Get_adj_SECTORS (during Configuration),
+		// so it is no longer indexed by sector id — locate the serving sector's entry
+		// by its stored id. Writing static_gain[flat] here clobbered whatever sector
+		// happened to sit at rank position `flat` and left the serving entry stale.
+		for (int s = 0; s < num_SECTORS; s++)
+			if (links[u].static_gain[s].second == flat)
+			{
+				links[u].static_gain[s].first = links[u].str_signal;
+				break;
+			}
 	}
 }
 

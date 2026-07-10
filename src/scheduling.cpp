@@ -406,10 +406,13 @@ void Sector::Set_AVR_Cqi_NCJT( SCHEDULE_DECISION comp_schedule_info )
 				}
 			}
 
-			if (comp_mode_flag 
+			if (comp_mode_flag
 			    && ppschedulewrite[0][0].ue_selected == ue_in_control[ue_idx] )
 				//&& sector[comp_sec_idx].ppschedulewrite[0][0].ue_selected == ue_in_control[ue_idx])
 			{
+				// avr_capacity was read UNINITIALIZED here (compiler warned); pass the
+				// same linear SINR estimate this path stored in the schedule map.
+				avr_capacity = avr_SINR;
 				SCHEDULE_DECISION comp_info{ue_in_control[ue_idx],determined_mcs,determined_cqi,avr_capacity};
 				sector[comp_sec_idx].Set_AVR_Cqi_NCJT( comp_info );
 			}
@@ -427,7 +430,8 @@ void Sector::Set_AVR_Cqi_NCJT( SCHEDULE_DECISION comp_schedule_info )
 				{
 					ppschedulewrite[freq_idx][stream].mcs_selected = comp_schedule_info.mcs_selected;
 					ppschedulewrite[freq_idx][stream].cqi_selected = comp_schedule_info.cqi_selected;
-					ppschedulewrite[freq_idx][stream].cqi_selected = comp_schedule_info.capacity;
+					// was: cqi_selected = capacity (copy-paste bug clobbering the CQI)
+					ppschedulewrite[freq_idx][stream].capacity     = comp_schedule_info.capacity;
 				}
 			}
 		}
@@ -1254,6 +1258,12 @@ void Sector::Set_AVR_Cqi(void)   ////
 
 		avr_cqi = (sum / (Real)count);   //// <- linear average signal power
 		avr_cqi_interfer = 1.;
+		// capacity carries the scheduler's raw pre-OLLA LINEAR SINR estimate; the
+		// realized-ESINR feedback (matlab_esinr_fb) reads it as its reference via
+		// _est_sinr_per_layer. It was left at the 1.0 placeholder on this (feedback-CQI)
+		// path, so the feedback compared realized ESINR against a fixed 0 dB instead of
+		// the actual estimate — turning the bias corrector into an absolute tracker.
+		avr_capacity = avr_cqi;
 
 		Real avr_SINR = 10. * log10(avr_cqi);
 
@@ -2633,21 +2643,38 @@ void Sector::Scheduling_algorithm_module_MU_MIMO(void)
 		MU metric: sum of METRIC[u] across local_scheduled_ue.
 		===================================================================*/
 		if (g_su_fallback == 1 && g_codebook_type == 3 && TDD_mode == 0) {
-			// MU group metric (current selection)
+			// MU group metric (current selection). Weight each member by the layer count
+			// it will ACTUALLY transmit: rank capped by its fed-back PMI columns (same cap
+			// as the write loop below) and by the remaining mx_ue_mumimo stream budget in
+			// selection order. Using the raw self_RI here over-credited layers the write
+			// loop truncates, biasing the decision toward MU.
 			Real mu_metric_sum = 0.0;
-			for (int ui = 0; ui < (int)local_scheduled_ue.size(); ui++) {
+			int  mu_budget     = mx_ue_mumimo;
+			for (int ui = 0; ui < (int)local_scheduled_ue.size() && mu_budget > 0; ui++) {
 				int sel = local_scheduled_ue[ui];
 				if (sel < 0) continue;
-				mu_metric_sum += METRIC[sel][schedule_RB];
+				int ms_mu = ue_in_control[sel];
+				int R_mu = (g_rank_adaptive == 1) ? ms[ms_mu].self_RI : g_type2_rank;
+				if (R_mu < 1) R_mu = 1;
+				int R_pmi = (int)PMI_vector_read[sel][schedule_RB].cols();
+				if (R_pmi < R_mu) R_mu = R_pmi;
+				if (R_mu > mu_budget) R_mu = mu_budget;
+				if (R_mu <= 0) continue;
+				mu_budget -= R_mu;
+				mu_metric_sum += (Real)R_mu * METRIC[sel][schedule_RB];
 			}
 
-			// Best SU candidate across ue_in_control
+			// Best SU candidate across ue_in_control — same PMI cap as the write loop
+			// (an SU pick is also booked with min(self_RI, PMI cols) layers).
 			Real best_su_metric = 0.0;
 			int  best_su_ue    = -1;
 			for (int ue_idx = 0; ue_idx < (int)ue_in_control.size(); ue_idx++) {
 				int ms_idx = ue_in_control[ue_idx];
 				int R_ue = (g_rank_adaptive == 1) ? ms[ms_idx].self_RI : g_type2_rank;
 				if (R_ue < 1) R_ue = 1;
+				int R_pmi = (int)PMI_vector_read[ue_idx][schedule_RB].cols();
+				if (R_pmi < R_ue) R_ue = R_pmi;
+				if (R_ue <= 0) continue;
 				Real su_m = (Real)R_ue * METRIC[ue_idx][schedule_RB];
 				if (su_m > best_su_metric) {
 					best_su_metric = su_m;
@@ -2688,10 +2715,18 @@ void Sector::Scheduling_algorithm_module_MU_MIMO(void)
 				int R_ue;
 				if (TDD_mode == 0 && g_codebook_type == 3) {
 					R_ue = (g_rank_adaptive == 1) ? ms[ms_idx].self_RI : g_type2_rank;
+					if (R_ue < 1) R_ue = 1;
+					// Cap by the fed-back PMI rank: Transmit_Precoding stacks only
+					// min(PMI.cols(), R_ue) precoder columns per UE, so booking more
+					// streams than the (delayed) PMI provides shifts every subsequent
+					// UE's W column out of alignment with its schedule-map stream —
+					// the receiver then applies the WRONG precoder column per layer.
+					int R_avail = (int)PMI_vector_read[local_scheduled_ue[ue_idx]][rb_idx].cols();
+					if (R_avail < R_ue) R_ue = R_avail;
+					if (R_ue == 0) continue;   // no usable PMI feedback on this RB
 				} else {
 					R_ue = 1;
 				}
-				if (R_ue < 1) R_ue = 1;
 
 				for (int layer = 0; layer < R_ue && stream_w < mx_ue_mumimo; layer++, stream_w++)
 				{

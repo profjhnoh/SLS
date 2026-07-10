@@ -3954,6 +3954,15 @@ BeamSearchResult LINK::find_best_tx_beam(CHANNEL* ch, int bs_idx, int sector_idx
 	int L_ue = MS_N / MS_Np;
 	LOCATION3D ue_pos[8][8];
 	if (ue_antenna_element_gain != 0 && !handheld_mode) {
+		// Runtime guard: ue_pos and the ue_w/ue_v/ue_virtualization_weight_wv tables
+		// are 8-deep per dimension, but MAX_MS_M(16) admits larger subarrays. The
+		// scenario may resolve ue_antenna_element_gain after cfg validation, so the
+		// parse-time check cannot cover every path — enforce here where it matters.
+		if (K_ue > 8 || L_ue > 8) {
+			cout << "FATAL: directional UE subarray " << K_ue << "x" << L_ue
+			     << " exceeds the 8x8 beam-search buffers" << endl;
+			exit(1);
+		}
 		for (int k = 0; k < K_ue; k++)
 			for (int l = 0; l < L_ue; l++)
 				ue_pos[k][l] = ms[self_ms_idx].d_rx[k][l][0][0][0];  // panel 0

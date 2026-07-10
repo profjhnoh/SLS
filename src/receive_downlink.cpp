@@ -143,7 +143,9 @@ Real MS::BLER_Mapping( void )
 	// Per-layer mode (==1) MUST populate per_layer_BLER even for a single layer, otherwise
 	// AddThroughput reads a stale per_layer_BLER[0]==0 and "always decodes" (throughput blow-up).
 	int min_layers_for_perlayer = (g_per_layer_mcs == 1) ? 1 : 2;
-	if (num_layers_actual >= min_layers_for_perlayer && (int)rbs_rx_per_layer.size() == num_layers_actual)
+	// Buffer may exceed the frozen TB layer count when a retransmission slot allocated
+	// MORE streams than the in-flight TB has (extra streams are ignored), so >= not ==.
+	if (num_layers_actual >= min_layers_for_perlayer && (int)rbs_rx_per_layer.size() >= num_layers_actual)
 	{
 		// Per-layer EESM aggregation across RBs
 		Real prob_success_TB = 1.0;
@@ -200,6 +202,7 @@ Real MS::BLER_Mapping( void )
 			// Uses the raw pre-OLLA estimate so the correction's fixpoint is exactly the
 			// estimate-vs-realized bias (OLLA stays the residual BLER-level regulator).
 			if (g_matlab_bler && g_matlab_esinr_fb && g_per_layer_mcs == 1 &&
+			    l < layers_rx_this_slot &&   // only layers that received new energy this slot
 			    _est_sinr_per_layer[l] > 0 && esir_l > 0)
 			{
 				fb_err_sum += 10.0 * std::log10(esir_l) - 10.0 * std::log10(_est_sinr_per_layer[l]);
@@ -377,6 +380,11 @@ void MS::AddThroughput(Real prob)
 	// ============================================================================
 	if (g_per_layer_mcs == 1)
 	{
+		// R = the in-flight TB's FROZEN layer count (num_layers_actual is set at first
+		// tx and untouched during retx — see MS.h/compute_tone_SINR). Bounding the loop
+		// by the frozen R (not the current slot's allocation) prevents a mid-HARQ rank
+		// shrink from prematurely ACKing the TB with pending layers silently discarded,
+		// and a rank growth from injecting phantom layers with MCS0/TBS0.
 		int R = (num_layers_actual > 0) ? num_layers_actual : 1;
 		if (R > 4) R = 4;
 		bool first_tx = (links[self_idx].num_re_tx == 0);
@@ -385,6 +393,23 @@ void MS::AddThroughput(Real prob)
 		for (int l = 0; l < R; l++)
 		{
 			if (links[self_idx].per_layer_done[l]) continue;
+			// Pending layer that received no new energy this slot (retx allocated fewer
+			// streams than the TB has): no decode trial, no IR accumulation — it stays
+			// pending. Starvation is counted PER LAYER over consecutive unserved slots
+			// so an intermittently-served layer keeps its full per-layer retx budget
+			// (a TB-level slot cap would preempt its final combined attempt).
+			if (l >= layers_rx_this_slot)
+			{
+				links[self_idx].per_layer_starve[l]++;
+				if (links[self_idx].per_layer_starve[l] >= 8)
+				{
+					links[self_idx].per_layer_done[l] = true;   // starved: drop like retx-cap
+					links[self_idx].re_tx_failed++;
+					re_tx_failed_cnt++;
+				}
+				continue;
+			}
+			links[self_idx].per_layer_starve[l] = 0;
 			Real coin   = randnum.u();
 			Real bler_l;
 			if (g_harq_ir == 1)
@@ -449,7 +474,7 @@ void MS::AddThroughput(Real prob)
 		{
 			links[self_idx].ACK = true;
 			links[self_idx].num_re_tx = 0;
-			for (int l = 0; l < 4; l++) { links[self_idx].per_layer_done[l] = false; links[self_idx].per_layer_num_re_tx[l] = 0; }
+			for (int l = 0; l < 4; l++) { links[self_idx].per_layer_done[l] = false; links[self_idx].per_layer_num_re_tx[l] = 0; links[self_idx].per_layer_starve[l] = 0; }
 		}
 		else
 		{
@@ -534,24 +559,30 @@ void MS::Find_Allocated_Rbs_Mcs_mTRP( void )
 					temp_cqi  = decision_of_interest.cqi_selected;
 					temp_avr_sinr_fb = decision_of_interest.capacity;
 
-					// PER-LAYER MCS: on the FIRST scheduled RB of a fresh TX (ACK==1), capture
-					// every layer-stream's MCS/CQI by layer_idx. Gated by ACK so a retransmitted
-					// TB keeps its frozen per-layer MCS (matches legacy _mcs_idx freezing).
+					// PER-LAYER MCS: on a fresh TX (ACK==1), reset the per-layer capture.
+					// Gated by ACK so a retransmitted TB keeps its frozen per-layer MCS
+					// (matches legacy _mcs_idx freezing).
 					if (g_per_layer_mcs == 1 && links[self_idx].ACK)
-					{
 						for (int l = 0; l < 4; l++) { _mcs_per_layer[l] = 0; _cqi_per_layer[l] = 0; _est_sinr_per_layer[l] = 0; }
-						for (int s2 = 0; s2 < mx_ue_mumimo; s2++)
+				}
+				// PER-LAYER MCS: capture layer-stream MCS/CQI from EVERY scheduled RB, not
+				// just the first one. Under the mx_ue_mumimo stream-budget truncation the
+				// same UE can hold fewer layers in one subband than another; scanning only
+				// the first RB left the truncated layers at MCS0/est=0 for the whole TB
+				// (free-ACK pollution of the per-layer OLLA window + mis-sized sub-TBS).
+				if (g_per_layer_mcs == 1 && links[self_idx].ACK)
+				{
+					for (int s2 = 0; s2 < mx_ue_mumimo; s2++)
+					{
+						const SCHEDULE_DECISION& d2 =
+							pppSchedule_Map[links[self_idx]._sector_in_control][freq_idx][s2];
+						if (d2.ue_selected != self_idx) continue;
+						int L = d2.layer_idx;
+						if (L >= 0 && L < 4)
 						{
-							const SCHEDULE_DECISION& d2 =
-								pppSchedule_Map[links[self_idx]._sector_in_control][freq_idx][s2];
-							if (d2.ue_selected != self_idx) continue;
-							int L = d2.layer_idx;
-							if (L >= 0 && L < 4)
-							{
-								_mcs_per_layer[L]      = d2.mcs_selected;
-								_cqi_per_layer[L]      = d2.cqi_selected;
-								_est_sinr_per_layer[L] = d2.capacity;   // scheduler's linear SINR estimate (pre-OLLA)
-							}
+							_mcs_per_layer[L]      = d2.mcs_selected;
+							_cqi_per_layer[L]      = d2.cqi_selected;
+							_est_sinr_per_layer[L] = d2.capacity;   // scheduler's linear SINR estimate (pre-OLLA)
 						}
 					}
 				}
@@ -739,6 +770,10 @@ void MS::Rate_matching(void)
 
 void MS::Compute_RBs_SINR( void )
 {
+	// Per-slot: layers actually received this slot (max over RBs, filled in
+	// compute_tone_SINR). Only the Type-1 per-layer path consumes it.
+	layers_rx_this_slot = 0;
+
 	// initial condition
 	if (links[self_idx].ACK == 1) // Previously successed or initial transmission case
 	{
@@ -749,7 +784,12 @@ void MS::Compute_RBs_SINR( void )
 		for (auto& v : rbs_rx_per_layer) v.clear();
 		rbs_rx_per_layer.clear();
 		// Reset per-layer HARQ state for the fresh TB (per_layer_mcs path)
-		for (int l = 0; l < 4; l++) { links[self_idx].per_layer_done[l] = false; links[self_idx].per_layer_num_re_tx[l] = 0; links[self_idx].per_layer_accum_esinr[l] = 0.0; }
+		for (int l = 0; l < 4; l++) { links[self_idx].per_layer_done[l] = false; links[self_idx].per_layer_num_re_tx[l] = 0; links[self_idx].per_layer_accum_esinr[l] = 0.0; links[self_idx].per_layer_starve[l] = 0; }
+		// Fresh TB: re-derive the TB's layer count from THIS slot's allocation
+		// (max over RBs, set in compute_tone_SINR). Type-1 only — NCJT/RoundRobin
+		// paths never write num_layers_actual and rely on its default.
+		if (Scheduling_Type == 1)
+			num_layers_actual = 0;
 	}
 
 	for (int freq_idx = 0; freq_idx < (int)rb_indices.size(); freq_idx++)
@@ -1497,8 +1537,15 @@ Real MS::compute_tone_SINR(int rb_idx)
 	// Count received RBs (once per RB, not per layer)
 	num_rx_rb++;
 
-	// Record actual layers allocated to this UE on this RB (used by Rate_matching for TBS)
-	num_layers_actual = (int)my_streams.size();
+	// Layers received on this RB: track the slot max (per-RB counts differ under the
+	// mx_ue_mumimo stream-budget truncation). num_layers_actual is the TB's frozen
+	// layer identity: set only while the TB is fresh (ACK==1, reset in Compute_RBs_SINR)
+	// and left untouched on retransmission slots so a mid-HARQ rank change cannot
+	// shrink/grow the in-flight TB (see MS.h).
+	if ((int)my_streams.size() > layers_rx_this_slot)
+		layers_rx_this_slot = (int)my_streams.size();
+	if (links[self_idx].ACK && (int)my_streams.size() > num_layers_actual)
+		num_layers_actual = (int)my_streams.size();
 
 	// Calculate power levels
 	const Real noise = dBm2linear(thermal_noise + (10. * log10(bandwidth)) + MS_noisefig);
@@ -1530,9 +1577,13 @@ Real MS::compute_tone_SINR(int rb_idx)
 	const int R_act = (int)my_streams.size();
 	const int Rcap = (R_act < 4) ? R_act : 4;
 
-	// Resize per-layer buffer at first RB of the alloc; appending across RBs.
-	if (rbs_rx_per_layer.size() != (size_t)R_act)
-		rbs_rx_per_layer.assign(R_act, std::vector<Real>());
+	// Grow the per-layer buffer without wiping: assign() here used to destroy the
+	// SINRs already accumulated this slot from earlier subbands (per-RB layer counts
+	// differ under the stream-budget truncation) AND the chase-combining history that
+	// Compute_RBs_SINR deliberately preserves across retransmission slots whenever the
+	// retx allocation's layer count differed from the first transmission's.
+	if (rbs_rx_per_layer.size() < (size_t)R_act)
+		rbs_rx_per_layer.resize(R_act);
 
 	// Initial Ryy:
 	//   SIC=2 (parallel ideal):  exclude own UE's layers from the start

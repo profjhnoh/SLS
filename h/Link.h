@@ -138,6 +138,11 @@ class LINK
         int                 per_layer_num_re_tx[4] = {0,0,0,0};
         bool                per_layer_done[4]      = {false,false,false,false};
         Real                per_layer_accum_esinr[4] = {0,0,0,0};  // IR/Chase: accumulated effective SINR (linear) across (re)tx
+        // Consecutive scheduled slots in which this pending layer received no new
+        // energy (retx allocated fewer streams than the in-flight TB). Reset on
+        // service; at 8 the layer is declared starved and force-dropped so a rank
+        // that never recovers cannot hold the HARQ process open forever.
+        int                 per_layer_starve[4]    = {0,0,0,0};
 
 	    bool                ACK                   = true;
         Real              geometry              = 0;

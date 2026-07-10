@@ -260,6 +260,29 @@ void Set_simul_param(int argc, char *argv[])
 			cout << "ERROR: MS_Ng (" << MS_Ng << ") exceeds maximum allowed (" << MAX_MS_Ng << ")" << endl;
 			config_valid = false;
 		}
+		// Non-handheld DIRECTIONAL UEs: the beam-search subarray buffers are 8x8
+		// (ue_pos local in find_best_tx_beam; ue_w/ue_v/ue_virtualization_weight_wv
+		// globals), indexed by K_ue = MS_M/MS_Mp and L_ue = MS_N/MS_Np. MAX_MS_M(16)
+		// admits configs that would overflow them — reject here when the cfg makes the
+		// UE explicitly directional. (ue_antenna_element_gain may also come from the
+		// scenario default, resolved AFTER parsing — a runtime guard at the buffer
+		// fill in find_best_tx_beam covers that path.)
+		if (handheld_mode == 0 &&
+		    cfg_UE_antenna_element_gain != -9999 && cfg_UE_antenna_element_gain != 0.0) {
+			int K_ue = (MS_Mp > 0) ? MS_M / MS_Mp : MS_M;
+			int L_ue = (MS_Np > 0) ? MS_N / MS_Np : MS_N;
+			if (K_ue > 8 || L_ue > 8) {
+				cout << "ERROR: directional UE subarray " << K_ue << "x" << L_ue
+				     << " exceeds the 8x8 beam-search buffers (MS_M/MS_Mp, MS_N/MS_Np)" << endl;
+				config_valid = false;
+			}
+		}
+		// Handheld arrays (positions, port indices, per-port ray buffers) are 8-deep.
+		if (handheld_mode == 1 && (handheld_num_ports < 1 || handheld_num_ports > 8)) {
+			cout << "ERROR: handheld_num_ports (" << handheld_num_ports
+			     << ") must be in [1, 8]" << endl;
+			config_valid = false;
+		}
 
 		if (!config_valid) {
 			cout << "Configuration validation failed. Please adjust parameters or increase array limits in const.h" << endl;
@@ -300,7 +323,7 @@ void Set_simul_param(int argc, char *argv[])
 			// The row-beam path relies on the full-simulation flow (Assign_Row_Beams,
 			// W_tx build, Get_CouplingLoss DU branch) and on the 3-sector macro beam
 			// grid; calibration mode and InH are out of scope.
-			if (Calibration_mode == 1) {
+			if (Calibration_mode != 0) {  // any nonzero value runs calibration branches
 				cout << "ERROR: row-beam allocation is not supported in Calibration_mode" << endl;
 				exit(1);
 			}
@@ -314,6 +337,12 @@ void Set_simul_param(int argc, char *argv[])
 		// override itself is gated only on row_beam_num_zenith so that a baseline
 		// A/B arm (enable 0) can use the same grid as the allocation arms.
 		if (row_beam_num_zenith > 0) {
+			if (Calibration_mode != 0) {  // any nonzero value runs calibration branches
+				// 3GPP calibration relies on the scenario's fixed beam grids; a silent
+				// override would invalidate calibration results.
+				cout << "ERROR: zenith grid override is not supported in Calibration_mode" << endl;
+				exit(1);
+			}
 			if (scenario == 11) {
 				cout << "ERROR: zenith grid override is not supported for InH scenarios" << endl;
 				exit(1);
