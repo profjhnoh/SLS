@@ -289,17 +289,20 @@ NOTES:
 ===================================================================*/
 void MS::AddThroughput(Real prob)
 {
-#ifdef ENABLE_MULTITHREADING
-	// Per-thread RNG: AddThroughput runs inside the OpenMP receive region
-	// (measure.cpp), where the global `randnum` would be raced by all threads
-	// (non-atomic read-modify-write of its p,q,r state = C++ undefined behaviour).
-	// Shadowing it with a thread-local instance removes the race. NOTE: this is a
-	// CORRECTNESS fix only — it does NOT improve run-to-run reproducibility, because
-	// the thread-local RNG is seeded by thread-id and the OpenMP work distribution
-	// varies per run (A/B tested: ~17% 1-drop variance unchanged). True reproducibility
-	// would require seeding the HARQ coin deterministically per work-item (ue/slot).
-	Rand& randnum = get_thread_local_rng();
-#endif
+	// Deterministic per-work-item RNG (reproducibility fix). AddThroughput runs
+	// inside the OpenMP receive region (measure.cpp) where the global `randnum`
+	// would be data-raced by all threads. Seeding a fresh generator from this work
+	// item's identity — (base_seed, drop, slot, UE) — removes the race AND makes the
+	// HARQ coin a pure function of the work item, so results are bit-reproducible
+	// across runs and across thread counts (single-thread == multi-thread). This
+	// supersedes the old thread-id seeding, which fixed the race but left run-to-run
+	// variance because OpenMP work distribution (hence each UE's stream) varied per run.
+	// The coins below are drawn sequentially from this generator; that order is fixed
+	// because one UE's Receive_DL_mTRP executes serially on a single thread.
+	Rand randnum = make_workitem_rng((unsigned long long)_seed,
+	                                 (unsigned long long)drop_idx,
+	                                 (unsigned long long)t,
+	                                 (unsigned long long)self_idx);
 	//for check
 	if (prob < 0 || prob > 1)
 	{

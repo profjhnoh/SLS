@@ -30,7 +30,7 @@ struct Rand {
   }
   inline double u() { return 5.42101086242752217E-20 * int64(); }
   inline unsigned int i() { return (unsigned int) int64(); }
-  inline double n() 
+  inline double n()
   {
     double nu,nv,nx,ny,nz;
     do
@@ -45,6 +45,33 @@ struct Rand {
     return nv/nu;
   }
 } ;
+
+// ====================================================================
+// Deterministic per-work-item RNG seeding (reproducibility fix)
+// ====================================================================
+// A parallel work item (e.g. one UE's HARQ decode in a given drop/slot) must
+// draw the SAME random stream no matter which OpenMP thread runs it or in what
+// order. Seeding by thread-id (get_thread_local_rng below) does NOT achieve this:
+// OpenMP work distribution varies per run, so the same UE gets different coins
+// and the PF feedback loop diverges (run-to-run SE noise). Seeding instead from a
+// hash of the work item's identity coordinates makes the stream a pure function
+// of (base_seed, drop, slot, ue, ...) → bit-reproducible across runs AND across
+// thread counts (single-thread == multi-thread). Rand construction is cheap, so a
+// fresh per-work-item generator per call is fine; draw sequentially within the call.
+inline unsigned long long splitmix64_mix(unsigned long long x) {
+  x += 0x9E3779B97F4A7C15ULL;
+  x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+  return x ^ (x >> 31);
+}
+inline Rand make_workitem_rng(unsigned long long a, unsigned long long b,
+                              unsigned long long c, unsigned long long d) {
+  unsigned long long s = splitmix64_mix(a);
+  s = splitmix64_mix(s ^ (b + 0x9E3779B97F4A7C15ULL));
+  s = splitmix64_mix(s ^ (c + 0x9E3779B97F4A7C15ULL));
+  s = splitmix64_mix(s ^ (d + 0x9E3779B97F4A7C15ULL));
+  return Rand(s);
+}
 
 // ====================================================================
 // Thread-local RNG support for OpenMP parallel regions

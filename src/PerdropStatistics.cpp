@@ -402,6 +402,27 @@ void PerDropStatistics(int drop_idx)
 		avg_initial_pe += ms[ue_idx].Return_initial_packet_error() / num_MS;
 	}
 
+	// Link-adaptation state diagnostics: OLLA offset and esinr_fb correction
+	// distributions across UEs at end of drop (rail counts show clamp binding).
+	double olla_sum = 0, olla_min_v = 1e9, olla_max_v = -1e9;
+	int olla_railed_lo = 0, olla_railed_hi = 0;
+	double fb_sum = 0, fb_min_v = 1e9, fb_max_v = -1e9;
+	int fb_railed_lo = 0;
+	for (int ue_idx = 0; ue_idx < num_MS; ue_idx++)
+	{
+		double o = ms[ue_idx].olla_offset;
+		olla_sum += o;
+		if (o < olla_min_v) olla_min_v = o;
+		if (o > olla_max_v) olla_max_v = o;
+		if (o <= g_olla_min_offset + 1e-9) olla_railed_lo++;
+		if (o >= g_olla_max_offset - 1e-9) olla_railed_hi++;
+		double f = ms[ue_idx].matlab_sinr_corr;
+		fb_sum += f;
+		if (f < fb_min_v) fb_min_v = f;
+		if (f > fb_max_v) fb_max_v = f;
+		if (f <= -15.0 + 1e-9) fb_railed_lo++;
+	}
+
 	/////////////////////// Average Capacity /////////////////
 	double capacity_avr_drop = 0;
 	for (int idx = 0; idx < (run_times - 1); idx++)
@@ -444,7 +465,20 @@ void PerDropStatistics(int drop_idx)
 	OutputFile << "    " << "    " << "Avg  : " << ((ri_valid > 0) ? (ri_sum / (double)ri_valid) : 0.0) << endl;
 	OutputFile << endl;
 
-	//OutputFile << " Initial Packet Erro = " << avg_initial_pe << endl;	
+	OutputFile << "    " << "LinkAdapt:" << endl;
+	OutputFile << "    " << "    " << "initial_bler : " << avg_initial_pe << endl;
+	OutputFile << "    " << "    " << "olla_offset_avg : " << olla_sum / num_MS << endl;
+	OutputFile << "    " << "    " << "olla_offset_min : " << olla_min_v << endl;
+	OutputFile << "    " << "    " << "olla_offset_max : " << olla_max_v << endl;
+	OutputFile << "    " << "    " << "olla_railed_lo : " << olla_railed_lo << endl;
+	OutputFile << "    " << "    " << "olla_railed_hi : " << olla_railed_hi << endl;
+	OutputFile << "    " << "    " << "esinr_fb_avg : " << fb_sum / num_MS << endl;
+	OutputFile << "    " << "    " << "esinr_fb_min : " << fb_min_v << endl;
+	OutputFile << "    " << "    " << "esinr_fb_max : " << fb_max_v << endl;
+	OutputFile << "    " << "    " << "esinr_fb_railed_lo : " << fb_railed_lo << endl;
+	OutputFile << endl;
+
+	//OutputFile << " Initial Packet Erro = " << avg_initial_pe << endl;
 	//OutputFile << " Average Spectral Efficiency (from MIMO capacity) = " << (capacity_avr_drop / (run_times - 1)) / bandwidth << "bits/s/Hz" << endl;
 	//OutputFile << " Shannon Capacity (from MIMO capacity) = " << (capacity_avr_drop / (run_times - 1)) / (pow(10, 6)) << "Mbits/s" << endl;
 

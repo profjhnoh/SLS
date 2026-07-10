@@ -1412,8 +1412,20 @@ void LINK::Get_adj_SECTORS()
 }
 
 
-void LINK::UE_Initial_Setting(void) 
+void LINK::UE_Initial_Setting(void)
 {
+  // Deterministic per-UE RNG (reproducibility fix). UE_Initial_Setting runs inside
+  // the OpenMP "Get RSRP" loop (Initiallization.cpp), where the O2I / in-car loss
+  // draws below would otherwise data-race the global `randnum` across threads AND
+  // consume it by a run-dependent amount (work distribution varies per run) — the
+  // dominant source of non-reproducible coupling loss / SINR. Shadowing `randnum`
+  // with a generator seeded from this UE's identity (base_seed, drop, ue) makes the
+  // O2I realization a pure function of the work item: bit-reproducible across runs
+  // and thread counts. Draws below are sequential, so their order is fixed.
+  Rand randnum = make_workitem_rng((unsigned long long)_seed,
+                                   (unsigned long long)drop_idx,
+                                   (unsigned long long)self_ms_idx,
+                                   0x4F32491ULL /* salt: O2I stream */);
 
   /*------------------------ Car penetration loss ----------------------------*/
   if (TYPE == 12) // Dense Urban 
@@ -4403,6 +4415,20 @@ void LINK::select_serving_cell(const ScenarioConfig& cfg, const std::vector<Cand
 // Step 10: Compute interference from non-serving cells
 void LINK::compute_interference(const ScenarioConfig& cfg, const std::vector<CandidateCell>& candidates)
 {
+	// Deterministic per-UE RNG (reproducibility fix). Called from Get_signal_interference
+	// -> Configuration inside the OpenMP "Get RSRP" loop (Initiallization.cpp). The
+	// "random beam interference" tilt draws below (Config B) would otherwise data-race
+	// the global `randnum` across threads and consume it by a run-dependent amount —
+	// leaving interference (hence Wideband SIR / precoding SINR) non-reproducible even
+	// after the O2I / HARQ fixes. Seeding from this UE's identity (base_seed, drop, ue)
+	// makes the interfering-beam realization a pure function of the work item. A distinct
+	// salt from UE_Initial_Setting keeps the two per-UE streams independent. Draws over
+	// candidate BSs are sequential, so their order is fixed.
+	Rand randnum = make_workitem_rng((unsigned long long)_seed,
+	                                 (unsigned long long)drop_idx,
+	                                 (unsigned long long)self_ms_idx,
+	                                 0x1A7E7F3ULL /* salt: interfering-beam stream */);
+
 	interference = 0.0;
 
 	// --- InH scenarios ---
