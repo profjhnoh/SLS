@@ -68,7 +68,7 @@ const int MAX_MS_Mg = 2;             // Maximum Mg dimension for MS antenna
 const int MAX_MS_Ng = 2;             // Maximum Ng dimension for MS antenna
 
 // RSRP gain array dimensions [sec_idx][sec_zenith][sec_azimuth][ue_zenith_idx][ue_azimuth_idx][panel]
-const int MAX_RSRP_SEC_ZENITH = 4;   // Sector zenith quantization levels
+const int MAX_RSRP_SEC_ZENITH = 8;   // Sector zenith quantization levels
 const int MAX_RSRP_SEC_AZIMUTH = 8;  // Sector azimuth quantization levels
 const int MAX_RSRP_UE_ZENITH = 2;    // UE zenith quantization levels
 const int MAX_RSRP_UE_AZIMUTH = 4;   // UE azimuth quantization levels

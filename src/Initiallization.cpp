@@ -935,6 +935,281 @@ void Initialize_CHANNEL()
 	}
 }
 
+// ====================================================================
+// Row/Column analog beam allocation (population vote), once per drop.
+//
+// Replaces the per-link "every UE gets its own best analog beam" optimism
+// (physically impossible on one subarray-partitioned panel in MU-MIMO) with
+// one shared zenith beam per vertical port row, allocated from the attached
+// UEs' RSRP votes:
+//   1) each UE votes for up to K zenith beams within X dB of its best beam
+//      (measured on its own azimuth / UE-beam slice of the cached RSRP table);
+//   2) votes are apportioned over the BS_Mp rows (largest remainder);
+//   3) beams are placed sorted by zenith angle, steepest downtilt on the top
+//      row (mi = BS_Mp-1) downwards, so equal beams sit on adjacent rows;
+//   4) az_mode==2 repeats 1-3 with azimuth beams over the BS_Np columns.
+// Serving-link bookkeeping (link_RSRP / link_antgain / str_signal /
+// static_gain) is then refreshed with the row-mixed RSRP so downstream
+// consumers (Get_CouplingLoss, geometry, RI) stay consistent. Cell
+// association itself keeps the best-beam result (broadcast-beam approx).
+//
+// Deterministic: no RNG draws; UEs are scanned by index (NOT via
+// sector[].ue_in_control, whose order is nondeterministic — it is built by
+// unsynchronized push_back inside the OMP "Get RSRP" loop).
+// ====================================================================
+
+// One UE's vote: +1 to each of at most row_beam_max_cand beams whose RSRP is
+// within row_beam_x_db of the best, strongest first (RSRP tie → lower index).
+static void RowBeam_Vote(const Real* rsrp_db, int n, Real best_db, Real* count)
+{
+	bool used[8] = {false,};
+	for (int votes = 0; votes < row_beam_max_cand; votes++)
+	{
+		int pick = -1;
+		for (int i = 0; i < n; i++)
+		{
+			if (used[i]) continue;
+			if (rsrp_db[i] < best_db - row_beam_x_db) continue;
+			if (pick < 0 || rsrp_db[i] > rsrp_db[pick]) pick = i;
+		}
+		if (pick < 0) break;
+		used[pick] = true;
+		count[pick] += REAL(1.0);
+	}
+}
+
+// Largest-remainder apportionment of `total` slots proportional to count[].
+// Remainder ties: larger count first, then lower index. Caller guarantees
+// sum(count) > 0.
+static void RowBeam_Apportion(const Real* count, int n, int total, int* alloc)
+{
+	Real sum = 0;
+	for (int i = 0; i < n; i++) sum += count[i];
+
+	Real frac[8];
+	int given = 0;
+	for (int i = 0; i < n; i++)
+	{
+		Real quota = count[i] * (Real)total / sum;
+		alloc[i] = (int)floor(quota + REAL(1e-6));  // epsilon: exact-integer quotas
+		frac[i]  = quota - (Real)alloc[i];
+		given += alloc[i];
+	}
+	for (; given < total; given++)
+	{
+		int pick = 0;
+		for (int i = 1; i < n; i++)
+		{
+			if (frac[i] > frac[pick] + REAL(1e-9)) { pick = i; continue; }
+			if (frac[i] > frac[pick] - REAL(1e-9) && count[i] > count[pick]) pick = i;
+		}
+		alloc[pick] += 1;
+		frac[pick] = -REAL(1.0);
+	}
+}
+
+void Assign_Row_Beams()
+{
+	if (!row_beam_enable) return;
+
+	const int V  = BS_Mp;
+	const int H  = BS_Np;
+	const int nZ = tilt_zenith_angle_LCS_size;
+	const int nA = tilt_azimuth_angle_LCS_size;
+
+	if (V > 16 || H > 16)
+	{
+		cout << "ERROR: Assign_Row_Beams supports at most 16 port rows/columns" << endl;
+		exit(1);
+	}
+
+	// Fallback for sectors with no attached UE: beam nearest boresight
+	// (zenith 90 deg; azimuth handled by row_beam_boresight_a).
+	int fb_z = 0;
+	for (int zi = 1; zi < nZ; zi++)
+		if (fabs(bs_tilt_zenith_angle_LCS[zi] - pi / REAL(2.0)) <
+		    fabs(bs_tilt_zenith_angle_LCS[fb_z] - pi / REAL(2.0)))
+			fb_z = zi;
+
+	for (int flat = 0; flat < num_SECTORS; flat++)
+	{
+		const int bs_idx  = flat / 3;
+		const int sec_idx = flat % 3;
+
+		Real count_z[8] = {0,};
+		Real count_a[8] = {0,};
+		int  num_attached = 0;
+
+		for (int u = 0; u < num_MS; u++)
+		{
+			if (links[u]._sector_in_control != flat) continue;
+			num_attached++;
+
+			const beam_selection& sel = links[u].analog_beam_selection[flat];
+
+			Real rsrp_z[8];
+			Real best_z = -REAL(1e30);
+			for (int zi = 0; zi < nZ; zi++)
+			{
+				rsrp_z[zi] = linear2dB(channel[bs_idx][u].signal_RSRP_gain
+					[sec_idx][zi][sel.sector_a][sel.z][sel.a][sel.p]);
+				if (rsrp_z[zi] > best_z) best_z = rsrp_z[zi];
+			}
+			RowBeam_Vote(rsrp_z, nZ, best_z, count_z);
+
+			if (row_beam_az_mode == 2)
+			{
+				Real rsrp_a[8];
+				Real best_a = -REAL(1e30);
+				for (int ai = 0; ai < nA; ai++)
+				{
+					rsrp_a[ai] = linear2dB(channel[bs_idx][u].signal_RSRP_gain
+						[sec_idx][sel.sector_z][ai][sel.z][sel.a][sel.p]);
+					if (rsrp_a[ai] > best_a) best_a = rsrp_a[ai];
+				}
+				RowBeam_Vote(rsrp_a, nA, best_a, count_a);
+			}
+		}
+
+		// --- apportion V rows over zenith beams ---
+		int alloc_z[8] = {0,};
+		if (num_attached == 0)
+		{
+			alloc_z[fb_z] = V;
+		}
+		else if (row_beam_force_uniform)
+		{
+			int am = 0;
+			for (int zi = 1; zi < nZ; zi++) if (count_z[zi] > count_z[am]) am = zi;
+			alloc_z[am] = V;
+		}
+		else
+		{
+			RowBeam_Apportion(count_z, nZ, V, alloc_z);
+		}
+
+		int check_z = 0;
+		for (int zi = 0; zi < nZ; zi++) check_z += alloc_z[zi];
+		if (check_z != V)
+		{
+			cout << "ERROR: Assign_Row_Beams zenith allocation " << check_z
+			     << " != BS_Mp " << V << " (sector " << flat << ")" << endl;
+			exit(1);
+		}
+
+		// --- place: steepest downtilt (largest zenith) on the top row, downwards.
+		// Element z-coordinate grows with mi (d_tx.z = m*dV), so the top row is
+		// mi = V-1; fill from there. Angle tie → lower beam index first.
+		{
+			bool placed[8] = {false,};
+			int mi = V - 1;
+			for (int rank = 0; rank < nZ; rank++)
+			{
+				int pick = -1;
+				for (int zi = 0; zi < nZ; zi++)
+				{
+					if (placed[zi]) continue;
+					if (pick < 0 || bs_tilt_zenith_angle_LCS[zi] > bs_tilt_zenith_angle_LCS[pick]) pick = zi;
+				}
+				placed[pick] = true;
+				for (int r = 0; r < alloc_z[pick]; r++) sector[flat].row_beam_z[mi--] = pick;
+			}
+		}
+
+		// --- apportion H columns over azimuth beams (az_mode==2 only) ---
+		if (row_beam_az_mode == 2)
+		{
+			int alloc_a[8] = {0,};
+			if (num_attached == 0)
+			{
+				alloc_a[row_beam_boresight_a] = H;
+			}
+			else if (row_beam_force_uniform)
+			{
+				int am = 0;
+				for (int ai = 1; ai < nA; ai++) if (count_a[ai] > count_a[am]) am = ai;
+				alloc_a[am] = H;
+			}
+			else
+			{
+				RowBeam_Apportion(count_a, nA, H, alloc_a);
+			}
+
+			int check_a = 0;
+			for (int ai = 0; ai < nA; ai++) check_a += alloc_a[ai];
+			if (check_a != H)
+			{
+				cout << "ERROR: Assign_Row_Beams azimuth allocation " << check_a
+				     << " != BS_Np " << H << " (sector " << flat << ")" << endl;
+				exit(1);
+			}
+
+			// place: azimuth ascending from column ni = 0 upwards
+			bool placed[8] = {false,};
+			int ni = 0;
+			for (int rank = 0; rank < nA; rank++)
+			{
+				int pick = -1;
+				for (int ai = 0; ai < nA; ai++)
+				{
+					if (placed[ai]) continue;
+					if (pick < 0 || bs_tilt_azimuth_angle_LCS[ai] < bs_tilt_azimuth_angle_LCS[pick]) pick = ai;
+				}
+				placed[pick] = true;
+				for (int r = 0; r < alloc_a[pick]; r++) sector[flat].col_beam_a[ni++] = pick;
+			}
+		}
+
+		cout << "  [RowBeam] sector " << flat << " ue=" << num_attached << " alloc_z=[";
+		for (int zi = 0; zi < nZ; zi++) cout << (zi ? "," : "") << alloc_z[zi];
+		cout << "] rows(top->bottom)=[";
+		for (int mi = V - 1; mi >= 0; mi--) cout << (mi < V - 1 ? "," : "") << sector[flat].row_beam_z[mi];
+		cout << "]";
+		if (row_beam_az_mode == 2)
+		{
+			cout << " cols=[";
+			for (int ni = 0; ni < H; ni++) cout << (ni ? "," : "") << sector[flat].col_beam_a[ni];
+			cout << "]";
+		}
+		cout << endl;
+	}
+
+	// --- refresh serving-link bookkeeping with the row-mixed RSRP ---
+	// Per-port RSRP gain depends only on that port's beam, so the array-wide
+	// value is exactly the arithmetic mean of the assigned beams' cached gains.
+	for (int u = 0; u < num_MS; u++)
+	{
+		const int flat    = links[u]._sector_in_control;
+		const int bs_idx  = flat / 3;
+		const int sec_idx = flat % 3;
+		const beam_selection& sel = links[u].analog_beam_selection[flat];
+
+		Real g = 0;
+		for (int mi = 0; mi < V; mi++)
+		{
+			if (row_beam_az_mode == 2)
+			{
+				for (int ni = 0; ni < H; ni++)
+					g += channel[bs_idx][u].signal_RSRP_gain
+						[sec_idx][sector[flat].row_beam_z[mi]][sector[flat].col_beam_a[ni]][sel.z][sel.a][sel.p];
+			}
+			else
+			{
+				const int a_used = (row_beam_az_mode == 1) ? row_beam_boresight_a : sel.sector_a;
+				g += channel[bs_idx][u].signal_RSRP_gain
+					[sec_idx][sector[flat].row_beam_z[mi]][a_used][sel.z][sel.a][sel.p];
+			}
+		}
+		g /= (Real)((row_beam_az_mode == 2) ? V * H : V);
+
+		const Real rsrp_mix_dB = linear2dB(g);
+		links[u].link_RSRP    = rsrp_mix_dB;
+		links[u].link_antgain = rsrp_mix_dB;
+		links[u].str_signal   = bs_maxpower + rsrp_mix_dB - links[u].link_pathloss;
+		links[u].static_gain[flat].first = links[u].str_signal;
+	}
+}
+
 void Link_configuration()
 {
 	////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1006,7 +1281,10 @@ void Link_configuration()
 	#if ENABLE_MULTITHREADING
 	}
 	#endif
-	cout << "DONE"<<endl;    
+	cout << "DONE"<<endl;
+
+	Assign_Row_Beams();  // no-op unless row_beam_enable
+
 	cout << "delete link memory................"<<std::flush;
 	for (int ms_idx = 0; ms_idx < num_MS; ms_idx++)
 	{
@@ -1481,9 +1759,46 @@ void Get_CouplingLoss()
 							cout << "Something wrong with aziumth" << endl;
 
 						if ( !(-1 < zz && zz < tilt_zenith_angle_LCS_size) )
-							cout << "Something wrong with aziumth" << endl;							
+							cout << "Something wrong with aziumth" << endl;
 
-						if (ue_antenna_element_gain == 0)
+						if (row_beam_enable)
+						{
+							// Row-beam mode: interference from this sector's ACTUAL
+							// assigned beams — average the cached per-beam gains over its
+							// port rows (and columns for az_mode==2) instead of one random
+							// zenith beam. zz/aa keep being drawn in compute_interference
+							// so the RNG stream is identical whether the flag is on or off.
+							const int flat_i = 3 * bs_idx + sec_idx;
+							int uz = 0, ua = 0, up = 0;
+							if (ue_antenna_element_gain != 0)
+							{
+								uz = links[ue_idx].zenith_angle_idx_selected_for_interference;
+								ua = links[ue_idx].azimuth_angle_idx_selected_for_interference;
+								up = links[ue_idx].panel_idx_selected_for_interference;
+							}
+							Real gain = 0;
+							for (int mi = 0; mi < BS_Mp; mi++)
+							{
+								if (row_beam_az_mode == 2)
+								{
+									for (int ni = 0; ni < BS_Np; ni++)
+										gain += channel[bs_idx][ue_idx].signal_RSRP_gain[sec_idx]
+											[sector[flat_i].row_beam_z[mi]][sector[flat_i].col_beam_a[ni]][uz][ua][up];
+								}
+								else
+								{
+									// az_mode 0: the interferer serves its own UEs on their
+									// azimuths — a random azimuth draw models that (keep aa).
+									// az_mode 1: every sector transmits at boresight.
+									const int a_used = (row_beam_az_mode == 1) ? row_beam_boresight_a : aa;
+									gain += channel[bs_idx][ue_idx].signal_RSRP_gain[sec_idx]
+										[sector[flat_i].row_beam_z[mi]][a_used][uz][ua][up];
+								}
+							}
+							gain /= (Real)((row_beam_az_mode == 2) ? BS_Mp * BS_Np : BS_Mp);
+							RSRP = linear2dB(gain);
+						}
+						else if (ue_antenna_element_gain == 0)
 						{
 							RSRP = linear2dB(channel[bs_idx][ue_idx].signal_RSRP_gain[sec_idx][zz][aa][0][0][0]);
 						}
@@ -2190,6 +2505,34 @@ void Generate_bs_2D_DFT_beam_precoder()
 			ue_tilt_azimuth_angle_LCS_size = 4;
 			ue_tilt_zenith_angle_LCS_size  = 2;
 		}
+	}
+
+	// Row-beam zenith grid override: replace the scenario's hardcoded zenith beam
+	// set with B uniformly spaced beams in [min, max] deg. Azimuth grid unchanged.
+	// Only active with row_beam_enable, so the legacy grids above stay bit-exact.
+	// (InH is rejected at cfg parse time, so this only reaches the DU/Rural grids.)
+	if (row_beam_enable && row_beam_num_zenith > 0)
+	{
+		int B = row_beam_num_zenith;
+		for (int zi = 0; zi < B; zi++)
+		{
+			Real deg = (B == 1)
+			         ? (row_beam_zenith_min_deg + row_beam_zenith_max_deg) / REAL(2.0)
+			         : row_beam_zenith_min_deg
+			           + (row_beam_zenith_max_deg - row_beam_zenith_min_deg) * zi / REAL(B - 1);
+			bs_tilt_zenith_angle_LCS[zi] = deg * (pi / REAL(180.0));
+		}
+		tilt_zenith_angle_LCS_size = B;
+	}
+
+	// Azimuth grid index nearest boresight (0 rad in LCS), used by az_mode==1.
+	// Tie (symmetric grids have no exact 0) resolves to the lower index.
+	if (row_beam_enable)
+	{
+		row_beam_boresight_a = 0;
+		for (int ai = 1; ai < tilt_azimuth_angle_LCS_size; ai++)
+			if (fabs(bs_tilt_azimuth_angle_LCS[ai]) < fabs(bs_tilt_azimuth_angle_LCS[row_beam_boresight_a]))
+				row_beam_boresight_a = ai;
 	}
 
 	// Handheld mode: single UE beam direction (no UE beam search needed)

@@ -197,7 +197,7 @@ public:
 	Real            correlated_randnum_ASA            = 0;
 	Real            correlated_randnum_K              = 0;
 	Real            final_ant_gain                    = 0;
-	Real            signal_RSRP_gain[3][4][8][2][4][2] = {0,}; //[sec_idx] [sec_zenith][sec_azimuth][ue_zenith_idx][ue_azimuth_idx][pannel];  
+	Real            signal_RSRP_gain[3][MAX_RSRP_SEC_ZENITH][8][2][4][2] = {0,}; //[sec_idx] [sec_zenith][sec_azimuth][ue_zenith_idx][ue_azimuth_idx][pannel];
 	
 	ComplexReal  F_tx_v                            = ComplexReal (0,0);
 	ComplexReal  F_tx_h                            = ComplexReal (0,0);

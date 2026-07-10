@@ -91,9 +91,9 @@ int USE_RAY_LEVEL_DOPPLER = 0;  // 0: cluster-average Doppler (fast), 1: ray-lev
 int USE_PRECODING_BASED_SINR = 0;  // 0: use feedback CQI, 1: precoding-based SINR
 Real INTERCELL_INTERFERENCE_MARGIN_DB = 0.0;  // Inter-cell interference margin in dB
 
-ComplexReal w[4][8];                              // [num_vertical steering angle][num element in a port] (maximum)
-ComplexReal v[4][8][8];                           // [num_vertical steering angle][num_horizontal sterring angle][num element in a port]  (maximum)
-ComplexReal virtualization_weight_wv[4][8][8][8]; // [vertical steering angle ][horizontal steering angle][vertical_element per port][horizontal_element per port]
+ComplexReal w[8][8];                              // [num_vertical steering angle][num element in a port] (maximum)
+ComplexReal v[8][8][8];                           // [num_vertical steering angle][num_horizontal sterring angle][num element in a port]  (maximum)
+ComplexReal virtualization_weight_wv[8][8][8][8]; // [vertical steering angle ][horizontal steering angle][vertical_element per port][horizontal_element per port]
 
 ComplexReal ue_w[4][8];                              // [num_vertical steering angle][num element in a port] (maximum)
 ComplexReal ue_v[4][8][8];                           // [num_vertical steering angle][num_horizontal sterring angle][num element in a port]  (maximum)
@@ -106,7 +106,7 @@ int ue_tilt_azimuth_angle_LCS_size;
 int ue_tilt_zenith_angle_LCS_size;
 
 Real bs_tilt_azimuth_angle_LCS[8];  //// pi  max8
-Real bs_tilt_zenith_angle_LCS[4];  /// theta  max4
+Real bs_tilt_zenith_angle_LCS[8];  /// theta  max8
 
 Real ue_tilt_azimuth_angle_LCS[4];  //// pi  max4
 Real ue_tilt_zenith_angle_LCS[2];  /// theta  max2
@@ -325,6 +325,20 @@ Real g_sns_vr_B        = 0.48;    // VR size B (Table 7.6.14.1.2-2, UMi)
 Real g_sns_vr_R        = 50.0;    // Power-VR R (Table 7.6.14.1.2-2, UMi)
 Real g_sns_vr_delta    = 0.0316;  // σ_δ = sqrt(0.001) (Table 7.6.14.1.2-2, UMi)
 Real g_sns_rolloff_C   = 13.0;    // Roll-off C (Table 7.6.14.1.2-3)
+
+// Row/Column analog beam allocation (per-drop population vote)
+// Replaces the per-link "every UE gets its best analog beam" optimism with one
+// shared beam per vertical port row (and optionally per horizontal port column),
+// allocated proportionally to the attached UEs' RSRP votes.
+int  row_beam_enable         = 0;    // master switch; 0 = legacy per-link beams (bit-exact)
+int  row_beam_az_mode        = 0;    // 0=keep per-UE azimuth, 1=boresight-fixed, 2=per-column vote
+int  row_beam_force_uniform  = 0;    // 1 = all rows (and cols if az_mode==2) get the argmax beam
+int  row_beam_max_cand       = 3;    // K: max beams one UE votes for
+Real row_beam_x_db           = 3.0;  // vote window below the UE's best beam RSRP (dB)
+Real row_beam_zenith_min_deg = 0.0;  // zenith grid override lower edge (deg)
+Real row_beam_zenith_max_deg = 0.0;  // zenith grid override upper edge (deg)
+int  row_beam_num_zenith     = 0;    // zenith grid override count B; 0 = keep legacy grid
+int  row_beam_boresight_a    = 0;    // azimuth grid index nearest boresight (az_mode==1)
 
 ofstream  Calibration_Debug_info;
 

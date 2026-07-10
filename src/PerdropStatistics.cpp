@@ -552,10 +552,16 @@ void scheduling_statistics()
 		{
 			for (int stream = 0; stream < mx_ue_mumimo; stream++)
 			{
+				// Unfilled stream slots carry ue_selected == NO_UE (-1); indexing
+				// links[-1] with it was an out-of-bounds read that polluted this
+				// diagnostic with memory-layout-dependent garbage. Skip them.
+				if (sector[sector_idx].ppschedulewrite[rb_idx][stream].ue_selected < 0)
+					continue;
+
 				sector_selected_ue_per_time += sector[sector_idx].ppschedulewrite[rb_idx][stream].ue_selected; // 스케줄된 ue의 index, 의미없지만 어차피 검증용이니 뽑아봄
 				scheduled_ue_mcs_per_time += sector[sector_idx].ppschedulewrite[rb_idx][stream].mcs_selected; // 스케줄된 ue의 mcs index
-				scheduled_ue_cqi_per_time += sector[sector_idx].ppschedulewrite[rb_idx][stream].cqi_selected; // 스케줄된 ue의 cqi 
-				
+				scheduled_ue_cqi_per_time += sector[sector_idx].ppschedulewrite[rb_idx][stream].cqi_selected; // 스케줄된 ue의 cqi
+
 				double linear_signal = dBm2linear(links[sector[sector_idx].ppschedulewrite[rb_idx][stream].ue_selected].str_signal);
 				double linear_interference = dBm2linear(links[sector[sector_idx].ppschedulewrite[rb_idx][stream].ue_selected].interference);
 				linear_interference = linear_interference + noise;

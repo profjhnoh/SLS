@@ -4522,6 +4522,10 @@ void LINK::compute_interference(const ScenarioConfig& cfg, const std::vector<Can
 		}
 
 		// Macro BS interference
+		// NOTE: for Dense Urban / Rural this result is recomputed and overwritten by
+		// Get_CouplingLoss (Initiallization.cpp) from the rand_sec_a/z stored below.
+		// Row-beam mode therefore only changes the lookup there; the draws here stay
+		// untouched so the RNG stream is identical with the flag on or off.
 		for (int bs_idx = 0; bs_idx < num_BS; bs_idx++)
 		{
 			Real pl = channel[bs_idx][self_ms_idx].pathloss_final;

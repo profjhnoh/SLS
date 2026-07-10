@@ -5485,8 +5485,16 @@ void CHANNEL::Update_v2(Real t, int _ms_idx, int adj_sector)
 	{
 		for (int m_idx = 0; m_idx < BS_Mp; m_idx++)
 		{
+			// Row-beam override kept consistent with the live W_tx build in
+			// Fourier_Transform_WithBF (Update_v2 currently has no callers).
+			int rb_z = row_beam_enable ? sector[adj_sector].row_beam_z[m_idx]
+			                           : links[_ms_idx].analog_beam_selection[adj_sector].sector_z;
 			for (int n_idx = 0; n_idx < BS_Np; n_idx++)
 			{
+				int rb_a = links[_ms_idx].analog_beam_selection[adj_sector].sector_a;
+				if (row_beam_enable && row_beam_az_mode == 1) rb_a = row_beam_boresight_a;
+				if (row_beam_enable && row_beam_az_mode == 2) rb_a = sector[adj_sector].col_beam_a[n_idx];
+
 				r_tx.x = sin(v_angle_theta) * cos(h_angle_pi);
 				r_tx.y = sin(v_angle_theta) * sin(h_angle_pi);
 				r_tx.z = cos(v_angle_theta);
@@ -5496,8 +5504,7 @@ void CHANNEL::Update_v2(Real t, int _ms_idx, int adj_sector)
 				{
 					for (int l = 0; l < L; l++)
 					{
-						w = virtualization_weight_wv[links[_ms_idx].analog_beam_selection[adj_sector].sector_z]
-													[links[_ms_idx].analog_beam_selection[adj_sector].sector_a][k][l];
+						w = virtualization_weight_wv[rb_z][rb_a][k][l];
 						d_tx = bs[_bs_idx].d_tx[sector_num_idx][m_idx * K + k][n_idx * L + l][p][0][0];
 						weight += w * exp(jay * (Real)2.0 * pi / Wavelength * dot(r_tx, d_tx));
 					}
@@ -5525,8 +5532,16 @@ void CHANNEL::Update_v2(Real t, int _ms_idx, int adj_sector)
 			{
 				for (int m_idx = 0; m_idx < BS_Mp; m_idx++)
 				{
+					// Row-beam override kept consistent with the live W_tx build in
+					// Fourier_Transform_WithBF (Update_v2 currently has no callers).
+					int rb_z = row_beam_enable ? sector[adj_sector].row_beam_z[m_idx]
+					                           : links[_ms_idx].analog_beam_selection[adj_sector].sector_z;
 					for (int n_idx = 0; n_idx < BS_Np; n_idx++)
 					{
+						int rb_a = links[_ms_idx].analog_beam_selection[adj_sector].sector_a;
+						if (row_beam_enable && row_beam_az_mode == 1) rb_a = row_beam_boresight_a;
+						if (row_beam_enable && row_beam_az_mode == 2) rb_a = sector[adj_sector].col_beam_a[n_idx];
+
 						r_tx.x = sin(NLOS_v_angle_theta) * cos(NLOS_h_angle_pi);
 						r_tx.y = sin(NLOS_v_angle_theta) * sin(NLOS_h_angle_pi);
 						r_tx.z = cos(NLOS_v_angle_theta);
@@ -5536,8 +5551,7 @@ void CHANNEL::Update_v2(Real t, int _ms_idx, int adj_sector)
 						{
 							for (int l = 0; l < L; l++)
 							{
-								w = virtualization_weight_wv[links[_ms_idx].analog_beam_selection[adj_sector].sector_z]
-															[links[_ms_idx].analog_beam_selection[adj_sector].sector_a][k][l];
+								w = virtualization_weight_wv[rb_z][rb_a][k][l];
 								d_tx = bs[_bs_idx].d_tx[sector_num_idx][m_idx * K + k][n_idx * L + l][p][0][0];
 								weight += w * exp(jay * (Real)2.0 * pi / Wavelength * dot(r_tx, d_tx));
 							}

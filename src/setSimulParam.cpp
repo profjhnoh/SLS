@@ -164,6 +164,16 @@ void Set_simul_param(int argc, char *argv[])
 			g_type2_phase_alphabet = 16;
 		}
 
+		// Row/Column analog beam allocation (per-drop population vote)
+		row_beam_enable         = int(Get_parameter(infile, "row_beam_enable", 0));
+		row_beam_az_mode        = int(Get_parameter(infile, "row_beam_az_mode", 0));
+		row_beam_force_uniform  = int(Get_parameter(infile, "row_beam_force_uniform", 0));
+		row_beam_max_cand       = int(Get_parameter(infile, "row_beam_max_cand", 3));
+		row_beam_x_db           = Real(Get_parameter(infile, "row_beam_x_db", 3.0));
+		row_beam_zenith_min_deg = Real(Get_parameter(infile, "row_beam_zenith_min_deg", 0.0));
+		row_beam_zenith_max_deg = Real(Get_parameter(infile, "row_beam_zenith_max_deg", 0.0));
+		row_beam_num_zenith     = int(Get_parameter(infile, "row_beam_num_zenith", 0));
+
 		// Singular Value CDF Collection
 		g_collect_singular_values = int(Get_parameter(infile, "collect_singular_values", 0));
 
@@ -285,6 +295,31 @@ void Set_simul_param(int argc, char *argv[])
 
 		Decide_test_environment(test_environment_char);
 		Decide_pathloss_model(pathloss_char);
+
+		if (row_beam_enable) {
+			// The row-beam path relies on the full-simulation flow (Assign_Row_Beams,
+			// W_tx build, Get_CouplingLoss DU branch) and on the 3-sector macro beam
+			// grid; calibration mode and InH are out of scope.
+			if (Calibration_mode == 1) {
+				cout << "ERROR: row-beam allocation is not supported in Calibration_mode" << endl;
+				exit(1);
+			}
+			if (scenario == 11) {
+				cout << "ERROR: row-beam allocation is not supported for InH scenarios" << endl;
+				exit(1);
+			}
+			if (row_beam_max_cand < 1) row_beam_max_cand = 1;
+			if (row_beam_num_zenith > MAX_RSRP_SEC_ZENITH) {
+				cout << "ERROR: row_beam_num_zenith exceeds MAX_RSRP_SEC_ZENITH ("
+				     << MAX_RSRP_SEC_ZENITH << ")" << endl;
+				exit(1);
+			}
+			if (row_beam_num_zenith > 0 &&
+			    !(row_beam_zenith_min_deg < row_beam_zenith_max_deg)) {
+				cout << "ERROR: zenith grid override needs min_deg < max_deg" << endl;
+				exit(1);
+			}
+		}
 		file_name = Get_character_time(infile, "file_name", "output.txt");
 
 		Rand new_randum((unsigned long long int)_seed);
@@ -446,6 +481,17 @@ void Set_simul_param(int argc, char *argv[])
 	}
 	if (channel_param_legacy)
 		cout << "channel_param_legacy    : " << channel_param_legacy << " (old TR 38.901 pre-V19)" << endl;
+	if (row_beam_enable) {
+		cout << "row_beam_enable         : " << row_beam_enable << " (per-drop population-vote analog beams)" << endl;
+		cout << "  ├─ az_mode            : " << row_beam_az_mode << " (0=per-UE az, 1=boresight, 2=per-column vote)" << endl;
+		cout << "  ├─ force_uniform      : " << row_beam_force_uniform << " (1=argmax beam on all rows/cols)" << endl;
+		cout << "  ├─ x_db / max_cand    : " << row_beam_x_db << " dB / " << row_beam_max_cand << endl;
+		if (row_beam_num_zenith > 0)
+			cout << "  └─ zenith grid        : " << row_beam_num_zenith << " beams in ["
+			     << row_beam_zenith_min_deg << ", " << row_beam_zenith_max_deg << "] deg" << endl;
+		else
+			cout << "  └─ zenith grid        : legacy (unchanged)" << endl;
+	}
 	if (g_sns_bs_enabled) {
 		cout << "sns_bs_enabled          : " << g_sns_bs_enabled << " (j20 Stochastic VR)" << endl;
 		cout << "  ├─ Pr_sns (mu/sigma)  : " << g_sns_mu_P_vis << " / " << g_sns_sigma_P_vis << endl;

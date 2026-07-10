@@ -102,9 +102,9 @@ extern Real BS_dH, BS_dV, BS_dgH, BS_dgV;
 extern int MS_M, MS_N, MS_Mg, MS_Ng, MS_Mp, MS_Np, MS_P;  /// rx antenna element
 extern Real MS_dH, MS_dV, MS_dgH, MS_dgV;
 
-extern ComplexReal w[4][8];                              // [num_vertical steering angle][num element in a port] (maximum)
-extern ComplexReal v[4][8][8];                           // [num_vertical steering angle][num_horizontal sterring angle][num element in a port]  (maximum)
-extern ComplexReal virtualization_weight_wv[4][8][8][8]; // [vertical steering angle ][horizontal steering angle][vertical_element per port][horizontal_element per port]
+extern ComplexReal w[8][8];                              // [num_vertical steering angle][num element in a port] (maximum)
+extern ComplexReal v[8][8][8];                           // [num_vertical steering angle][num_horizontal sterring angle][num element in a port]  (maximum)
+extern ComplexReal virtualization_weight_wv[8][8][8][8]; // [vertical steering angle ][horizontal steering angle][vertical_element per port][horizontal_element per port]
 
 extern ComplexReal ue_w[4][8];                              // [num_vertical steering angle][num element in a port] (maximum)
 extern ComplexReal ue_v[4][8][8];                           // [num_vertical steering angle][num_horizontal sterring angle][num element in a port]  (maximum)
@@ -115,8 +115,8 @@ extern int tilt_zenith_angle_LCS_size;
 extern int ue_tilt_azimuth_angle_LCS_size;
 extern int ue_tilt_zenith_angle_LCS_size;
 
-extern Real bs_tilt_azimuth_angle_LCS[6];  //// pi
-extern Real bs_tilt_zenith_angle_LCS[2];  /// theta
+extern Real bs_tilt_azimuth_angle_LCS[8];  //// pi  max8
+extern Real bs_tilt_zenith_angle_LCS[8];  /// theta  max8
 extern Real ue_tilt_azimuth_angle_LCS[4];  //// pi
 extern Real ue_tilt_zenith_angle_LCS[2];  /// theta
 
@@ -350,6 +350,17 @@ extern Real g_sns_vr_B;
 extern Real g_sns_vr_R;
 extern Real g_sns_vr_delta;
 extern Real g_sns_rolloff_C;
+
+// Row/Column analog beam allocation (per-drop population vote)
+extern int  row_beam_enable;
+extern int  row_beam_az_mode;
+extern int  row_beam_force_uniform;
+extern int  row_beam_max_cand;
+extern Real row_beam_x_db;
+extern Real row_beam_zenith_min_deg;
+extern Real row_beam_zenith_max_deg;
+extern int  row_beam_num_zenith;
+extern int  row_beam_boresight_a;
 
 extern ofstream  Calibration_Debug_info;
 

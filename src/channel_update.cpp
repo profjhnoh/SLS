@@ -1854,7 +1854,17 @@ void MS::Fourier_Transform_WithBF(int ms_idx)
 
 			for (int p = 0; p < BS_P; p++) {
 				for (int mi = 0; mi < BS_Mp; mi++) {
+					// Row-beam mode: use the sector-wide per-row zenith beam instead of
+					// the per-link best. adj_sector covers interfering sectors too, so
+					// interference channels automatically carry the interferer's actual
+					// assigned beams. Per-port normalization (1/sqrt(K*L)) is baked into
+					// the weights and beam-independent — no renormalization needed.
+					int bz = row_beam_enable ? sector[adj_sector].row_beam_z[mi] : beam_z;
 					for (int ni = 0; ni < BS_Np; ni++) {
+						int ba = beam_a;  // az_mode 0: keep per-UE azimuth
+						if (row_beam_enable && row_beam_az_mode == 1) ba = row_beam_boresight_a;
+						if (row_beam_enable && row_beam_az_mode == 2) ba = sector[adj_sector].col_beam_a[ni];
+
 						// Port flat index (Mg=1, Ng=1 for current configs)
 						int port_idx = p * BS_Mp * BS_Np + mi * BS_Np + ni;
 
@@ -1865,7 +1875,7 @@ void MS::Fourier_Transform_WithBF(int ms_idx)
 								// Element flat index
 								int elem_idx = s_m * (BS_N * BS_P) + s_n * BS_P + p;
 
-								W_tx(elem_idx, port_idx) = virtualization_weight_wv[beam_z][beam_a][k][l];
+								W_tx(elem_idx, port_idx) = virtualization_weight_wv[bz][ba][k][l];
 							}
 						}
 					}

@@ -87,7 +87,13 @@ public:
 	vector <int> scheduled_ue;
 
 	vector <int> mTRP_in_control;
-	
+
+	// Row/Column analog beam allocation (written by Assign_Row_Beams every drop)
+	// row_beam_z[mi]: zenith beam index of vertical port row mi (0..BS_Mp-1)
+	// col_beam_a[ni]: azimuth beam index of horizontal port column ni (0..BS_Np-1, az_mode==2)
+	int row_beam_z[16] = {0,};
+	int col_beam_a[16] = {0,};
+
 private:
 	vector <int> user_set;
 	Real prev_max_sinr   = 0;
