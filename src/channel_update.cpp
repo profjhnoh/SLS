@@ -1348,7 +1348,14 @@ void MS::CQI_Update(void)
 					                    * H_m[coeff_idx][rep_rb_idx]; // R x T
 
 					// Use dominant layer (col 0) for CQI estimation. Multi-layer CQI is deferred.
-					VectorXcReal w = PMI_vector[coeff_idx][rep_rb_idx][t % cqi_history_length].col(0).conjugate(); // Tx1
+					// NO conjugation: the quantizer selects w to maximize |H w| and the
+					// transmitter applies w directly (Transmit_Precoding stacks v^H rows,
+					// RZF returns columns aligned with v). Evaluating |H conj(w)| scored a
+					// spatially mirrored beam — for 128-port complex precoders conj(w) is
+					// nearly orthogonal to the channel row space, so the fed-back CQI was
+					// far below the realized beamformed SINR (sibling NCJT/CJT branches
+					// already use col(0) unconjugated).
+					VectorXcReal w = PMI_vector[coeff_idx][rep_rb_idx][t % cqi_history_length].col(0); // Tx1
 
 					// Effective signal vector: the signal covariance is rank-1, A = a a^H.
 					VectorXcReal a = H_eq * w;  // Rx1

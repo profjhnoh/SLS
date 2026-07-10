@@ -2384,7 +2384,13 @@ void Sector::Transmit_Precoding(int rb_idx, const vector<int>& local_scheduled_u
 		int R_use   = (R_avail < R_ue) ? R_avail : R_ue;
 		for (int r = 0; r < R_use && stream_row < num_valid_streams; r++)
 		{
-			Lambda.row(stream_row) = PMIm.col(r).transpose();
+			// v^H (adjoint), NOT v^T: with rows v^H the RZF W = Lambda^H (Lambda
+			// Lambda^H + aI)^-1 has columns aligned with the fed-back precoder v.
+			// .transpose() made every transmitted column conj(v) — a spatially
+			// mirrored beam nearly orthogonal to the intended one on the 128-port
+			// array (jointly consistent with the CQI-side conjugate; both fixed
+			// together — flip experiment quantifies the recovered beamforming gain).
+			Lambda.row(stream_row) = PMIm.col(r).adjoint();
 			stream_row++;
 		}
 	}
