@@ -215,19 +215,19 @@ void PerDropStatistics(int drop_idx)
 
 	OutputFile << "    " << endl;
 	OutputFile << "  - " << "Sector_Thruput:" << endl;
-    OutputFile << "    " << "    " << "Avg : " << avg_thru / num_active_sectors / ((run_times-SCHEDULE_DELAY)*slot_duration) * 1e-6 << endl;
-    OutputFile << "    " << "    " << "Max : " << max_thru                      / ((run_times-SCHEDULE_DELAY)*slot_duration) * 1e-6 << endl;
-    OutputFile << "    " << "    " << "Min : " << min_thru                      / ((run_times-SCHEDULE_DELAY)*slot_duration) * 1e-6 << endl;
+    OutputFile << "    " << "    " << "Avg : " << avg_thru / num_active_sectors / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) * 1e-6 << endl;
+    OutputFile << "    " << "    " << "Max : " << max_thru                      / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) * 1e-6 << endl;
+    OutputFile << "    " << "    " << "Min : " << min_thru                      / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) * 1e-6 << endl;
 	OutputFile << "    " << endl;
 
 	// Sector spectral efficiency (bits/s/Hz)
 	OutputFile << "  - " << "Sector_SE:" << endl;
-    OutputFile << "    " << "    " << "Avg : " << avg_thru / num_active_sectors / ((run_times-SCHEDULE_DELAY)*slot_duration) / (double)bandwidth << endl;
-    OutputFile << "    " << "    " << "Max : " << max_thru                      / ((run_times-SCHEDULE_DELAY)*slot_duration) / (double)bandwidth << endl;
-    OutputFile << "    " << "    " << "Min : " << min_thru                      / ((run_times-SCHEDULE_DELAY)*slot_duration) / (double)bandwidth << endl;
+    OutputFile << "    " << "    " << "Avg : " << avg_thru / num_active_sectors / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) / (double)bandwidth << endl;
+    OutputFile << "    " << "    " << "Max : " << max_thru                      / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) / (double)bandwidth << endl;
+    OutputFile << "    " << "    " << "Min : " << min_thru                      / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) / (double)bandwidth << endl;
 	OutputFile << "    " << endl;
 
-	Total_Avr += avg_thru / num_active_sectors / ((run_times-SCHEDULE_DELAY)*slot_duration) * 1e-6;
+	Total_Avr += avg_thru / num_active_sectors / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) * 1e-6;
 
 	//compute ue thru 
 	unsigned long int  *per_ue_thru = new unsigned long int [num_MS];
@@ -433,16 +433,16 @@ void PerDropStatistics(int drop_idx)
 
 	//////////////////////////////////////////////////////////
 	OutputFile << "    " << "UE_Thruput:" << endl;
-	OutputFile << "    " << "    " << "Avg : " << avg_ue_thru / num_MS / ((run_times-SCHEDULE_DELAY)*slot_duration) * 1e-6 << endl;
-	OutputFile << "    " << "    " << "Max : " << max_ue_thru          / ((run_times-SCHEDULE_DELAY)*slot_duration) * 1e-6 << endl;
-	OutputFile << "    " << "    " << "Min : " << min_ue_thru          / ((run_times-SCHEDULE_DELAY)*slot_duration) * 1e-6 << endl;
+	OutputFile << "    " << "    " << "Avg : " << avg_ue_thru / num_MS / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) * 1e-6 << endl;
+	OutputFile << "    " << "    " << "Max : " << max_ue_thru          / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) * 1e-6 << endl;
+	OutputFile << "    " << "    " << "Min : " << min_ue_thru          / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) * 1e-6 << endl;
 	OutputFile << endl;
 
 	// UE spectral efficiency (bits/s/Hz); Min = 5%-tile cell-edge UE
 	OutputFile << "    " << "UE_SE:" << endl;
-	OutputFile << "    " << "    " << "Avg : " << avg_ue_thru / num_MS / ((run_times-SCHEDULE_DELAY)*slot_duration) / (double)bandwidth << endl;
-	OutputFile << "    " << "    " << "Max : " << max_ue_thru          / ((run_times-SCHEDULE_DELAY)*slot_duration) / (double)bandwidth << endl;
-	OutputFile << "    " << "    " << "Min : " << min_ue_thru          / ((run_times-SCHEDULE_DELAY)*slot_duration) / (double)bandwidth << endl;
+	OutputFile << "    " << "    " << "Avg : " << avg_ue_thru / num_MS / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) / (double)bandwidth << endl;
+	OutputFile << "    " << "    " << "Max : " << max_ue_thru          / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) / (double)bandwidth << endl;
+	OutputFile << "    " << "    " << "Min : " << min_ue_thru          / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) / (double)bandwidth << endl;
 	OutputFile << endl;
 
 	// self_RI distribution (per-UE Rank Indicator from Compute_RI)
@@ -467,6 +467,17 @@ void PerDropStatistics(int drop_idx)
 
 	OutputFile << "    " << "LinkAdapt:" << endl;
 	OutputFile << "    " << "    " << "initial_bler : " << avg_initial_pe << endl;
+	{
+		// Layer-granularity 1st-tx BLER — the quantity per-layer OLLA regulates.
+		long ftx_l = 0, ffl_l = 0;
+		for (int ue_idx = 0; ue_idx < num_MS; ue_idx++)
+		{
+			ftx_l += links[ue_idx].total_first_tx_layers;
+			ffl_l += links[ue_idx].failed_first_tx_layers;
+		}
+		if (ftx_l > 0)
+			OutputFile << "    " << "    " << "initial_bler_layer : " << (double)ffl_l / (double)ftx_l << endl;
+	}
 	OutputFile << "    " << "    " << "olla_offset_avg : " << olla_sum / num_MS << endl;
 	OutputFile << "    " << "    " << "olla_offset_min : " << olla_min_v << endl;
 	OutputFile << "    " << "    " << "olla_offset_max : " << olla_max_v << endl;
@@ -484,22 +495,22 @@ void PerDropStatistics(int drop_idx)
 
 	// 검증용 인석 추가
 	OutputFile << "    " << "Schedule_map:" << endl;
-	OutputFile << "    " << "    " << "sector_selected_ue : "        << sector_selected_ue                  / (run_times - SCHEDULE_DELAY) << endl;
-	OutputFile << "    " << "    " << "scheduled_ue_mcs : "          << scheduled_ue_mcs                    / (run_times - SCHEDULE_DELAY) << endl;
-	OutputFile << "    " << "    " << "scheduled_ue_cqi : "          << scheduled_ue_cqi                    / (run_times - SCHEDULE_DELAY) << endl;
-	OutputFile << "    " << "    " << "scheduled_ue_widebandSINR : " << linear2dB(scheduled_ue_widebandSINR / (run_times - SCHEDULE_DELAY)) << endl;
+	OutputFile << "    " << "    " << "sector_selected_ue : "        << sector_selected_ue                  / (double)run_times << endl;
+	OutputFile << "    " << "    " << "scheduled_ue_mcs : "          << scheduled_ue_mcs                    / (double)run_times << endl;
+	OutputFile << "    " << "    " << "scheduled_ue_cqi : "          << scheduled_ue_cqi                    / (double)run_times << endl;
+	OutputFile << "    " << "    " << "scheduled_ue_widebandSINR : " << linear2dB(scheduled_ue_widebandSINR / (double)run_times) << endl;
 	OutputFile  << endl;
 
 	OutputFile << "    " << "Scheduling:" << endl;
-	OutputFile << "    " << "    " << "METRIC : " << sector_metric     / (run_times - SCHEDULE_DELAY) << endl;
-	OutputFile << "    " << "    " << "CQI_read : " << sector_cqi_read / (run_times - SCHEDULE_DELAY) << endl;
-	OutputFile << "    " << "    " << "CQI_AVR : " << sector_cqi_avr   / (run_times - SCHEDULE_DELAY) << endl;
+	OutputFile << "    " << "    " << "METRIC : " << sector_metric     / (double)run_times << endl;
+	OutputFile << "    " << "    " << "CQI_read : " << sector_cqi_read / (double)run_times << endl;
+	OutputFile << "    " << "    " << "CQI_AVR : " << sector_cqi_avr   / (double)run_times << endl;
 	OutputFile  << endl;
 
 	OutputFile << "    " << "Receive:" << endl;
-	OutputFile << "    " << "    " << "ue_effective_sinr : " << linear2dB(ue_effective_sinr / (run_times - SCHEDULE_DELAY)) << endl;
-	OutputFile << "    " << "    " << "ue_info_bits : "      << ue_info_bits                / (run_times - SCHEDULE_DELAY) << endl;
-	OutputFile << "    " << "    " << "ue_bler : "           << ue_bler                     / (run_times - SCHEDULE_DELAY) << endl;
+	OutputFile << "    " << "    " << "ue_effective_sinr : " << linear2dB(ue_effective_sinr / (double)(run_times + 1)) << endl;
+	OutputFile << "    " << "    " << "ue_info_bits : "      << ue_info_bits                / (double)(run_times + 1) << endl;
+	OutputFile << "    " << "    " << "ue_bler : "           << ue_bler                     / (double)(run_times + 1) << endl;
 	OutputFile  << endl;
 
 	// 3GPP standard: use proper slot_duration instead of "1000 * numerology"
@@ -584,18 +595,22 @@ void scheduling_statistics()
 
 	}
 
-	sector_selected_ue += sector_selected_ue_per_time / (num_SECTORS * num_rb * mx_ue_mumimo);
-	scheduled_ue_mcs   += scheduled_ue_mcs_per_time / (num_SECTORS * num_rb * mx_ue_mumimo);
-	scheduled_ue_cqi   += scheduled_ue_cqi_per_time / (num_SECTORS * num_rb * mx_ue_mumimo);
-	scheduled_ue_widebandSINR += scheduled_ue_widebandSINR_per_time / (num_SECTORS * num_rb * mx_ue_mumimo);
+	// Normalize by the sectors actually summed (single_cell_mode sums only the
+	// center 3) — dividing by num_SECTORS deflated these diagnostics 7x (7 BS).
+	int num_stat_sectors = end_sector;
+	sector_selected_ue += sector_selected_ue_per_time / ((double)num_stat_sectors * num_rb * mx_ue_mumimo);
+	scheduled_ue_mcs   += scheduled_ue_mcs_per_time / ((double)num_stat_sectors * num_rb * mx_ue_mumimo);
+	scheduled_ue_cqi   += scheduled_ue_cqi_per_time / ((double)num_stat_sectors * num_rb * mx_ue_mumimo);
+	scheduled_ue_widebandSINR += scheduled_ue_widebandSINR_per_time / ((double)num_stat_sectors * num_rb * mx_ue_mumimo);
 
 	//cout << "scheduled_ue_mcs : " << scheduled_ue_mcs / (t - SCHEDULE_DELAY) << endl;
 	//cout << "scheduled_ue_cqi : " << scheduled_ue_cqi / (t - SCHEDULE_DELAY) << endl;
     //cout << "scheduled_ue_widebandSINR : " << linear2dB(scheduled_ue_widebandSINR / (t - SCHEDULE_DELAY)) << endl;
 
-	sector_metric   += sector_metric_per_time   / (num_SECTORS * num_MS * num_rb);
-	sector_cqi_read += sector_cqi_read_per_time / (num_SECTORS * num_MS * num_rb);
-	sector_cqi_avr  += sector_cqi_avr_per_time  / (num_SECTORS * num_MS * num_rb);
+	// METRIC/CQI sums iterate (stat sectors x their ue_in_control): use those counts.
+	sector_metric   += sector_metric_per_time   / ((double)num_stat_sectors * num_MS_persector * num_rb);
+	sector_cqi_read += sector_cqi_read_per_time / ((double)num_stat_sectors * num_MS_persector * num_rb);
+	sector_cqi_avr  += sector_cqi_avr_per_time  / ((double)num_stat_sectors * num_MS_persector * num_rb);
 }
 
 void measure_statistics()

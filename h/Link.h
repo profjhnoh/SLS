@@ -143,6 +143,11 @@ class LINK
         // service; at 8 the layer is declared starved and force-dropped so a rank
         // that never recovers cannot hold the HARQ process open forever.
         int                 per_layer_starve[4]    = {0,0,0,0};
+        // Layer-granularity first-transmission counters. `failed` (TB-level, any-layer
+        // NACK) is NOT the quantity OLLA regulates in per-layer mode — these are, so
+        // the reported initial BLER can match the OLLA target's units.
+        long                total_first_tx_layers  = 0;
+        long                failed_first_tx_layers = 0;
 
 	    bool                ACK                   = true;
         Real              geometry              = 0;

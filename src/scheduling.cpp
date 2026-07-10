@@ -703,41 +703,52 @@ void Sector::Read_Ch_Feedback(void)
 			if (CQI_AVR[ue_idx][rb_idx] > 0 )
 			{
 				if( ue_idx < (int)ue_in_control.size() ) {
-					if( ppschedulewrite[rb_idx][0].ue_selected == ue_in_control[ue_idx] ) 
+					// MU-MIMO: a UE is "scheduled on this RB" if it holds ANY of the
+					// mx_ue_mumimo streams, not just stream 0. The old stream-0 check
+					// credited only the first-selected (anchor) UE of each RB, so every
+					// co-scheduled UE's PF average decayed as if starved while being
+					// served — inverting proportional fairness for the whole MU group.
+					bool served_here = false;
+					for (int s = 0; s < mx_ue_mumimo; s++)
+						if (ppschedulewrite[rb_idx][s].ue_selected == ue_in_control[ue_idx]) { served_here = true; break; }
+					if (served_here)
 					{
 						Real current_capacity_on_rb = log2(1 + CQI_read[ue_idx][rb_idx]);
 						int comp_sec_idx = links[ue_in_control[ue_idx]].comp_sector_idx;
 						if ( Scheduling_Type == 2 && sector[comp_sec_idx].ppschedulewrite[rb_idx][0].ue_selected == ue_in_control[ue_idx] )
-						{	
-							int adjsector_comp_ue_idx = sector[comp_sec_idx].ue_in_control.size() + 
+						{
+							int adjsector_comp_ue_idx = sector[comp_sec_idx].ue_in_control.size() +
 														getIndex( sector[comp_sec_idx].ue_in_comp , ue_in_control[ue_idx] );
-						
+
 							current_capacity_on_rb  = log2(1 + CQI_comp_read[ue_idx][rb_idx]);
 							current_capacity_on_rb += log2(1 + sector[comp_sec_idx].CQI_read[adjsector_comp_ue_idx][rb_idx]);
 						}
 
-						CQI_AVR[ue_idx][rb_idx] = (1. / _N_pf) * current_capacity_on_rb 
+						CQI_AVR[ue_idx][rb_idx] = (1. / _N_pf) * current_capacity_on_rb
 											+ (1 - 1. / _N_pf) * CQI_AVR[ue_idx][rb_idx];
 					}
 					else
 					{
 						CQI_AVR[ue_idx][rb_idx] =  (1 - 1. / _N_pf) * CQI_AVR[ue_idx][rb_idx];
-					}						
+					}
 				}
 				else
 				{
-					if( ppschedulewrite[rb_idx][0].ue_selected == ue_in_comp[ue_idx-ue_in_control.size()] )  
+					bool served_here = false;
+					for (int s = 0; s < mx_ue_mumimo; s++)
+						if (ppschedulewrite[rb_idx][s].ue_selected == ue_in_comp[ue_idx-ue_in_control.size()]) { served_here = true; break; }
+					if (served_here)
 					{
-						CQI_AVR[ue_idx][rb_idx] = (1. / _N_pf) * log2(1 + CQI_read[ue_idx][rb_idx]) 
+						CQI_AVR[ue_idx][rb_idx] = (1. / _N_pf) * log2(1 + CQI_read[ue_idx][rb_idx])
 											+ (1 - 1. / _N_pf) * CQI_AVR[ue_idx][rb_idx];
 					}
 					else
 					{
 						CQI_AVR[ue_idx][rb_idx] =  (1 - 1. / _N_pf) * CQI_AVR[ue_idx][rb_idx];
-					}	
-				}					
+					}
+				}
 			}
-			else  ///// first loop 
+			else  ///// first loop
 			{
 				CQI_AVR[ue_idx][rb_idx] = log2(1 + CQI_read[ue_idx][rb_idx]);
 			}
@@ -1100,7 +1111,12 @@ void Sector::Read_CSI_Feedback(void)
 			{
 				if (ue_idx < (int)ue_in_control.size())
 				{
-					if (ppschedulewrite[rb_idx][0].ue_selected == ue_in_control[ue_idx])
+					// MU-MIMO: scheduled = holds ANY stream on this RB (see the
+					// identical fix in Read_Ch_Feedback — stream-0-only inverted PF).
+					bool served_here = false;
+					for (int s = 0; s < mx_ue_mumimo; s++)
+						if (ppschedulewrite[rb_idx][s].ue_selected == ue_in_control[ue_idx]) { served_here = true; break; }
+					if (served_here)
 					{
 						Real current_capacity_on_rb = log2(1 + CQI_read[ue_idx][rb_idx]);
 						CQI_AVR[ue_idx][rb_idx] = (1. / _N_pf) * current_capacity_on_rb
@@ -1365,9 +1381,15 @@ void Sector::Set_AVR_Cqi_Precoding_Based(void)
 				if (!present) continue;
 
 				// H_bar and Ryy^-1 are shared across this UE's layers (depend only on all streams).
+				// Total-power constraint: bs_maxpower is split equally across the K
+				// streams active on this RB (matches the receiver's convention).
+				int n_streams_rb = 0;
+				for (int s = 0; s < mx_ue_mumimo; s++)
+					if (ppschedulewrite[rb_idx][s].ue_selected != -1) n_streams_rb++;
+				if (n_streams_rb < 1) n_streams_rb = 1;
 				const MatrixXcReal& H     = ms[ms_idx].H_m[0][rb_idx];
 				const MatrixXcReal& W_rb  = W[rb_idx];
-				const MatrixXcReal  H_bar = sqrt(linear_signal) * H * W_rb;
+				const MatrixXcReal  H_bar = sqrt(linear_signal / (Real)n_streams_rb) * H * W_rb;
 				const MatrixXcReal  Ryy_inv = (H_bar * H_bar.adjoint() + linear_interference * Identity).inverse();
 
 				for (int stream = 0; stream < mx_ue_mumimo; stream++)
@@ -1459,8 +1481,15 @@ void Sector::Set_AVR_Cqi_Precoding_Based(void)
 			const MatrixXcReal& H = ms[ms_idx].H_m[0][rb_idx];  // [NUM_RX_Port x NUM_TX_Port]
 			const MatrixXcReal& W_rb = W[rb_idx];  // [NUM_TX_Port x mx_ue_mumimo]
 
-			// Compute effective channel H_bar = sqrt(P) * H * W
-			const MatrixXcReal H_bar = sqrt(linear_signal) * H * W_rb;  // [NUM_RX_Port x mx_ue_mumimo]
+			// Total-power constraint: bs_maxpower split across the K active streams
+			// on this RB (matches the receiver's convention).
+			int n_streams_rb = 0;
+			for (int s = 0; s < mx_ue_mumimo; s++)
+				if (ppschedulewrite[rb_idx][s].ue_selected != -1) n_streams_rb++;
+			if (n_streams_rb < 1) n_streams_rb = 1;
+
+			// Compute effective channel H_bar = sqrt(P/K) * H * W
+			const MatrixXcReal H_bar = sqrt(linear_signal / (Real)n_streams_rb) * H * W_rb;  // [NUM_RX_Port x mx_ue_mumimo]
 
 			// Extract desired user's channel vector
 			const MatrixXcReal h_u = H_bar.col(stream_num);  // [NUM_RX_Port x 1]
@@ -2751,36 +2780,41 @@ void Sector::Scheduling_algorithm_module_MU_MIMO(void)
 
 void Sector::AVR_Cqi_update(void)   ////
 {
+	// Starvation boost on top of the standard PF EWMA (which runs in
+	// Read_Ch_Feedback / Read_CSI_Feedback): lower an unscheduled UE's average
+	// rate faster so its PF priority grows faster. Two pathologies fixed here:
+	// (1) the subtraction was unbounded, driving CQI_AVR negative, whereupon the
+	//     read-path's `> 0` guard RESET the average to the full instantaneous rate
+	//     — a decrement-and-reset limit cycle that erased exactly the starved UEs'
+	//     accumulated priority;
+	// (2) the non-TYPE12 else-branch subtracted from EVERY UE unconditionally,
+	//     cancelling the credit a scheduled UE had just earned in the read path
+	//     (served UEs decayed exactly like starved ones — PF broken).
+	// Both branches now decrement only UNSCHEDULED (UE,RB) pairs and clamp at a
+	// small positive floor so the boost saturates instead of wrapping.
+	const Real avr_floor = (Real)1e-6;
 	for (int ue_idx = 0; ue_idx < ue_in_control.size(); ue_idx++)
 	{
 		for (int rb_idx = 0; rb_idx < num_rb; rb_idx++)
 		{
-			if ((TYPE == 12) && (Configuration_Type == 1 || Configuration_Type == 3)) // 
+			bool unscheduled = 1;
+			for (int stream = 0; stream < mx_ue_mumimo; stream++)
 			{
-				bool unscheduled = 1;
-				ms[ue_in_control[ue_idx]].unscheduled_stack += 1;
-
-				for (int stream = 0; stream < mx_ue_mumimo; stream++)
+				if (ppschedulewrite[rb_idx][stream].ue_selected == ue_in_control[ue_idx])
 				{
-					if (ppschedulewrite[rb_idx][stream].ue_selected == ue_in_control[ue_idx])
-					{
-						unscheduled = 0;
-						ms[ue_in_control[ue_idx]].unscheduled_stack -= 1;
-					}
-				}
-
-				if (CQI_AVR[ue_idx][rb_idx] && unscheduled)
-				{
-					CQI_AVR[ue_idx][rb_idx] -= (1. / N_pf) * log2(1 + CQI_read[ue_idx][rb_idx]);
+					unscheduled = 0;
+					break;
 				}
 			}
-			else
+			if ((TYPE == 12) && (Configuration_Type == 1 || Configuration_Type == 3))
 			{
-
-				if (CQI_AVR[ue_idx][rb_idx])
-				{
-					CQI_AVR[ue_idx][rb_idx] -= (1. / _N_pf) * log2(1 + CQI_read[ue_idx][rb_idx]);
-				}
+				ms[ue_in_control[ue_idx]].unscheduled_stack += (unscheduled ? 1 : 0);
+			}
+			if (CQI_AVR[ue_idx][rb_idx] > 0 && unscheduled)
+			{
+				CQI_AVR[ue_idx][rb_idx] -= (1. / _N_pf) * log2(1 + CQI_read[ue_idx][rb_idx]);
+				if (CQI_AVR[ue_idx][rb_idx] < avr_floor)
+					CQI_AVR[ue_idx][rb_idx] = avr_floor;
 			}
 		}
 	}

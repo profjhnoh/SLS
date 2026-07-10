@@ -37,43 +37,75 @@ void nr_mcs_to_qm_r(int mcs_idx, int& qm_bits, Real& r_x1024)
 }
 
 // ============================================================================
-// TS 38.214 §5.1.3.2 TBS quantization — shared by the per-layer TBS path in
-// receive_downlink.cpp and by Regenerate_SINR_thresholds_from_matlab().
-// The math replicates the legacy tbs_info_bits_from_mcs verbatim.
+// TS 38.214 §5.1.3.2 TBS determination — shared by the (per-layer) TBS path in
+// receive_downlink.cpp, Regenerate_SINR_thresholds_from_matlab() and the
+// tput-max MCS grid. Spec-exact; deviations of the legacy replica fixed here:
+//  (a) an extra (1 - overhead)=0.67 factor was applied ON TOP of the callers'
+//      156-RE/PRB cap — the spec puts overhead only inside N'_RE = 12*14 -
+//      N_DMRS - N_oh (which the 156 cap embodies), so all TBS/throughput/SE
+//      were deflated ~33%;
+//  (b) small-TBS branch triggered at 3834 instead of 3824 and returned the
+//      quantized N'_info directly instead of the Table 5.1.3.2-1 lookup;
+//  (c) ceil() was fed already-truncated INTEGER divisions;
+//  (d) the C>1 branch boundary is N'_info > 8424, not >= .
 // ============================================================================
+
+// TS 38.214 Table 5.1.3.2-1 (93 entries, N_info <= 3824)
+static const int NR_TBS_TABLE_5_1_3_2_1[93] = {
+	  24,   32,   40,   48,   56,   64,   72,   80,   88,   96,
+	 104,  112,  120,  128,  136,  144,  152,  160,  168,  176,
+	 184,  192,  208,  224,  240,  256,  272,  288,  304,  320,
+	 336,  352,  368,  384,  408,  432,  456,  480,  504,  528,
+	 552,  576,  608,  640,  672,  704,  736,  768,  808,  848,
+	 888,  928,  984, 1032, 1064, 1128, 1160, 1192, 1224, 1256,
+	1288, 1320, 1352, 1416, 1480, 1544, 1608, 1672, 1736, 1800,
+	1864, 1928, 2024, 2088, 2152, 2216, 2280, 2408, 2472, 2536,
+	2600, 2664, 2728, 2792, 2856, 2976, 3104, 3240, 3368, 3496,
+	3624, 3752, 3824
+};
 
 int nr_tbs_info_bits_from_mcs(int mcs_idx, int N_RE, int layer_factor)
 {
 	int  qm_bits;
 	Real r_x1024;
 	nr_mcs_to_qm_r(mcs_idx, qm_bits, r_x1024);
-	Real coding_rate = r_x1024 / 1024.0;
+	double coding_rate = (double)r_x1024 / 1024.0;
 
-	int N_info = (int)(N_RE * coding_rate * qm_bits * layer_factor * (1.0 - overhead));
-	int info_bits = 0;
-	if (N_info <= 3834)
+	double N_info = (double)N_RE * coding_rate * qm_bits * layer_factor;
+	if (N_info < 1.0) N_info = 1.0;
+
+	int info_bits;
+	if (N_info <= 3824.0)
 	{
-		int n = MAX(3, floor(log2(N_info)) - 6.);
-		int N_info_a = MAX(24, pow(2, n) * floor(N_info / pow(2, n)));
-		info_bits = N_info_a;
+		int    n  = (std::floor(std::log2(N_info)) - 6.0 > 3.0)
+		          ? (int)(std::floor(std::log2(N_info)) - 6.0) : 3;
+		double p2 = std::pow(2.0, n);
+		int    N_info_q = (int)(p2 * std::floor(N_info / p2));
+		if (N_info_q < 24) N_info_q = 24;
+		// Smallest table TBS not less than N'_info
+		info_bits = NR_TBS_TABLE_5_1_3_2_1[92];
+		for (int i = 0; i < 93; i++)
+			if (NR_TBS_TABLE_5_1_3_2_1[i] >= N_info_q) { info_bits = NR_TBS_TABLE_5_1_3_2_1[i]; break; }
 	}
 	else
 	{
-		int n = floor(log2(N_info - 24)) - 5;
-		int N_info_a = MAX(3840, pow(2, n) * round(((N_info - 24) / pow(2, n))));
-		if (coding_rate <= (1. / 4.))
+		int    n  = (int)(std::floor(std::log2(N_info - 24.0)) - 5.0);
+		double p2 = std::pow(2.0, n);
+		double N_info_q = p2 * std::round((N_info - 24.0) / p2);
+		if (N_info_q < 3840.0) N_info_q = 3840.0;
+		if (coding_rate <= 0.25)
 		{
-			int C = ceil((N_info_a + 24) / 3816);
-			info_bits = 8 * C * ceil((N_info_a + 24) / (8 * C)) - 24;
+			int C = (int)std::ceil((N_info_q + 24.0) / 3816.0);
+			info_bits = (int)(8.0 * C * std::ceil((N_info_q + 24.0) / (8.0 * C)) - 24.0);
 		}
-		else if (N_info_a >= 8424)
+		else if (N_info_q > 8424.0)
 		{
-			int C = ceil((N_info_a + 24) / 8424);
-			info_bits = 8 * C * ceil((N_info_a + 24) / (8 * C)) - 24;
+			int C = (int)std::ceil((N_info_q + 24.0) / 8424.0);
+			info_bits = (int)(8.0 * C * std::ceil((N_info_q + 24.0) / (8.0 * C)) - 24.0);
 		}
 		else
 		{
-			info_bits = 8 * ceil((N_info_a + 24) / 8) - 24;
+			info_bits = (int)(8.0 * std::ceil((N_info_q + 24.0) / 8.0) - 24.0);
 		}
 	}
 	return info_bits;

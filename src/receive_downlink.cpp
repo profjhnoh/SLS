@@ -466,6 +466,10 @@ void MS::AddThroughput(Real prob)
 			{
 				update_olla_window(layer_ok_first[l]);
 				if (!layer_ok_first[l]) all_ok_first = false;
+				// Layer-granularity counters: this is the BLER OLLA actually regulates
+				// (the TB-level `failed` overstates it by ~Rx for R-layer TBs).
+				links[self_idx].total_first_tx_layers++;
+				if (!layer_ok_first[l]) links[self_idx].failed_first_tx_layers++;
 			}
 			if (!all_ok_first) links[self_idx].failed++;   // TB first-tx failure (any layer NACK)
 		}
@@ -721,44 +725,9 @@ void MS::Rate_matching(void)
 		// allocated (defensive — shouldn't happen if UE is scheduled).
 		const int _R_used_ = (num_layers_actual > 0) ? num_layers_actual : NUM_UE_Layer;
 
-		N_info = (int)(N_RE * coding_rate * _mod_type * _R_used_ * (1. - overhead));
-
-		if (N_info <= 3834)
-		{
-			int n = MAX(3, floor(log2(N_info)) - 6.);
-
-			int N_info_a = MAX(24, pow(2, n) * floor(N_info / pow(2, n)));
-
-			_info_bits_ = N_info_a;
-		}
-		else
-		{
-			int n = floor(log2(N_info - 24)) - 5;
-
-			int N_info_a = MAX(3840, pow(2, n) * round(((N_info - 24) / pow(2, n))));
-
-			if (coding_rate <= (1. / 4.))
-			{
-				int C = ceil((N_info_a + 24) / 3816);
-
-				_info_bits_ = 8 * C * ceil((N_info_a + 24) / (8 * C)) - 24;
-			}
-			else
-			{
-				if (N_info_a >= 8424)
-				{
-					int C = ceil((N_info_a + 24) / 8424);
-
-					_info_bits_ = 8 * C * ceil((N_info_a + 24) / (8 * C)) - 24;
-				}
-				else
-				{
-					_info_bits_ = 8 * ceil((N_info_a + 24) / 8) - 24;
-				}
-			}
-
-		}
-
+		// TS 38.214 5.1.3.2 via the shared spec-exact function (the inline replica
+		// applied a double overhead factor and deviated from the spec).
+		_info_bits_ = tbs_info_bits_from_mcs(_mcs_idx, N_RE, _R_used_);
 
 		if (((Real)_info_bits_ / (Real)_num_traffic_) > 0.93)
 		{
@@ -829,7 +798,11 @@ void MS::Compute_RBs_SINR( void )
 	{
 		sinr += rbs_rx[rb_idx];
 	}
-	received_sinr_avg = sinr / (Real)num_rb;
+	// Average over the samples actually summed. Dividing by num_rb scaled the
+	// stat by the UE's allocation fraction, and on retransmission slots (rbs_rx
+	// keeps the chase history and appends this attempt) it inflated the average
+	// by roughly the attempt count.
+	received_sinr_avg = rbs_rx.empty() ? (Real)0.0 : sinr / (Real)rbs_rx.size();
 }
 
 void MS::Compute_Transport_Block_Size( void )
@@ -842,7 +815,7 @@ void MS::Compute_Transport_Block_Size( void )
 		{
 			int N_DMRS = 0, N_overhead = 0;
 			int N_RE_a = num_freq_per_rbs * num_ofdm_symbols_per_subband_per_1ms - N_DMRS - N_overhead;
-			int N_RE   = MIN(156, N_RE_a) * num_rx_rbs;
+			int N_RE_per_rb = MIN(156, N_RE_a);
 
 			int R = (num_layers_actual > 0) ? num_layers_actual : 1;
 			if (R > 4) R = 4;
@@ -850,7 +823,14 @@ void MS::Compute_Transport_Block_Size( void )
 			for (int l = 0; l < 4; l++) _info_bits_per_layer[l] = 0;
 			for (int l = 0; l < R; l++)
 			{
-				_info_bits_per_layer[l] = tbs_info_bits_from_mcs(_mcs_per_layer[l], N_RE, 1);
+				// Per-LAYER RB count: under the mx_ue_mumimo stream budget a layer can
+				// be allocated on fewer RBs than the UE's full allocation (num_rx_rbs);
+				// sizing every layer by the full allocation over-credited truncated
+				// layers' TBS/throughput. rbs_rx_per_layer[l] holds exactly this
+				// layer's per-RB samples for the fresh TB.
+				int rbs_l = (l < (int)rbs_rx_per_layer.size()) ? (int)rbs_rx_per_layer[l].size() : 0;
+				if (rbs_l <= 0) { _info_bits_per_layer[l] = 0; continue; }
+				_info_bits_per_layer[l] = tbs_info_bits_from_mcs(_mcs_per_layer[l], N_RE_per_rb * rbs_l, 1);
 				total += _info_bits_per_layer[l];
 			}
 			_info_bits = total;
@@ -873,54 +853,14 @@ void MS::Compute_Transport_Block_Size( void )
 		N_RE_a = num_freq_per_rbs * num_ofdm_symbols_per_subband_per_1ms - N_DMRS - N_overhead;
 		N_RE = MIN(156, N_RE_a) * num_rx_rbs; //rb_indices.size();
 
-		Real coding_rate_x1024 = 0;
-		Real coding_rate;
-		int TB_Size_bits = 0;
-
-		// MCS -> (Qm, CR) via the shared table (was a duplicated if/else chain)
-		nr_mcs_to_qm_r(_mcs_idx, _mod_type, coding_rate_x1024);
-
-		coding_rate = coding_rate_x1024 / 1024.;
-		//N_info = (int)(N_RE * coding_rate * _mod_type * NUM_UE_Layer* (1. - overhead));
-		// BUG FIX 2026-05-25: use actual per-UE layer count.
+		// MCS -> (Qm, CR) and TS 38.214 5.1.3.2 quantization via the shared
+		// spec-exact function (the inline replica applied a double overhead
+		// factor and deviated from the spec — see nr_l2sm.cpp).
+		int dummy_qm; Real dummy_r;
+		nr_mcs_to_qm_r(_mcs_idx, _mod_type, dummy_r);  // keep _mod_type for stat readers
+		(void)dummy_qm;
 		const int _R_used_tbs = (num_layers_actual > 0) ? num_layers_actual : 1;
-		N_info = (int)(N_RE * coding_rate * _mod_type * _R_used_tbs * (1. - overhead));
-		int N_info_a = 0;
-		//N_info = (int)(N_RE * coding_rate * _mod_type * 1 * (1. - overhead));
-		//N_info = (int)(N_RE * coding_rate * _mod_type * mx_ue_mumimo);
-
-		if (N_info <= 3834)
-		{
-			int n = MAX(3, floor(log2(N_info)) - 6.);
-			int N_info_a = MAX(24, pow(2, n) * floor(N_info / pow(2, n)));
-			_info_bits = N_info_a;
-		}
-		else
-		{
-			int n = floor(log2(N_info - 24)) - 5;
-			N_info_a = MAX(3840, pow(2, n) * round(((N_info - 24) / pow(2, n))));
-			//int N_info_a = pow(2, n) * round(((N_info - 24) / pow(2, n)));
-
-			if (coding_rate <= (1. / 4.))
-			{
-				int C = ceil((N_info_a + 24) / 3816);
-				_info_bits = 8 * C * ceil((N_info_a + 24) / (8 * C)) - 24;
-			}
-			else
-			{
-				if (N_info_a >= 8424)
-				{
-					int C = ceil((N_info_a + 24) / 8424);
-					_info_bits = 8 * C * ceil((N_info_a + 24) / (8 * C)) - 24;
-					
-				}
-				else
-				{
-					_info_bits = 8 * ceil((N_info_a + 24) / 8) - 24;
-				}
-			}
-
-		}		
+		_info_bits = tbs_info_bits_from_mcs(_mcs_idx, N_RE, _R_used_tbs);
 	}
 }
 
@@ -1549,10 +1489,21 @@ Real MS::compute_tone_SINR(int rb_idx)
 
 	// Calculate power levels
 	const Real noise = dBm2linear(thermal_noise + (10. * log10(bandwidth)) + MS_noisefig);
-	const Real linear_signal = dBm2linear(bs_maxpower - channel[(int)(links[self_idx]._sector_in_control/3)][self_idx].pathloss_final);
+	// Total-power constraint: the BS transmits bs_maxpower TOTAL, split equally
+	// across the K streams active on this RB (each W column is unit-norm). The old
+	// code gave EVERY stream the full bs_maxpower, so a K-stream MU cell radiated
+	// K x P while interfering cells were modeled at 1 x P — inflating MU-MIMO SINR
+	// and absolute SE. Inter-cell interference stays at total power P (correct:
+	// an interferer's streams sum back to P).
+	int n_streams_on_rb = 0;
+	for (int s = 0; s < mx_ue_mumimo; s++)
+		if (ppSchedulerRead[rb_idx][s].ue_selected != -1) n_streams_on_rb++;
+	if (n_streams_on_rb < 1) n_streams_on_rb = 1;
+	const Real linear_signal = dBm2linear(bs_maxpower - channel[(int)(links[self_idx]._sector_in_control/3)][self_idx].pathloss_final)
+	                           / (Real)n_streams_on_rb;
 	const Real linear_interference = dBm2linear(links[self_idx].interference);
 
-	// Effective channel matrix H_bar = sqrt(P) * H * W  (N_rx × mx_ue_mumimo)
+	// Effective channel matrix H_bar = sqrt(P/K) * H * W  (N_rx x mx_ue_mumimo)
 	const MatrixXcReal& H = H_m[0][rb_idx];
 	const MatrixXcReal& W = sector[links[self_idx]._sector_in_control].W[rb_idx];
 	const MatrixXcReal H_bar = sqrt(linear_signal) * H * W;
@@ -1591,9 +1542,14 @@ Real MS::compute_tone_SINR(int rb_idx)
 	//                            sequentially subtract own UE's layers as
 	//                            they are "decoded" (BLER-trial based).
 	//   SIC=0/1 (legacy):        all streams in Ryy
+	// Filter covariance must include thermal noise: the SINR denominator already
+	// adds (linear_interference + noise)*||u||^2, but the filter u = h^H Ryy^{-1}
+	// was derived from a covariance WITHOUT noise — a mismatched (suboptimal) MMSE
+	// filter, and inconsistent with the scheduler estimate whose covariance
+	// includes noise (Set_AVR_Cqi_Precoding_Based).
 	MatrixXcReal Ryy_base;
 	if (g_use_sic == 2) {
-		Ryy_base = linear_interference * Identity;
+		Ryy_base = (linear_interference + noise) * Identity;
 		for (int s = 0; s < mx_ue_mumimo; s++) {
 			int sched_ue = ppSchedulerRead[rb_idx][s].ue_selected;
 			if (sched_ue == -1 || sched_ue == self_idx) continue;
@@ -1601,7 +1557,7 @@ Real MS::compute_tone_SINR(int rb_idx)
 		}
 	} else {
 		// SIC=0, 1, 3: include all streams initially
-		Ryy_base = H_bar * H_bar.adjoint() + linear_interference * Identity;
+		Ryy_base = H_bar * H_bar.adjoint() + (linear_interference + noise) * Identity;
 	}
 
 	// SIC=3: sort layers by initial SINR (descending) for sequential decoding
@@ -1690,7 +1646,10 @@ Real MS::compute_tone_SINR(int rb_idx)
 	// Save per-layer SINR per-RB into accumulator and global counters
 	for (int sidx = 0; sidx < R_act && sidx < 4; sidx++) {
 		Real s = per_layer_sinr_thisRB[sidx];
-		if (rbs_rx_per_layer[sidx].size() < (size_t)num_rb)
+		// Chase history spans up to 4 attempts (1 tx + 3 retx); the old num_rb cap
+			// silently dropped retransmission SINRs once the first attempt filled the
+			// buffer, making IR combine stale first-attempt values.
+			if (rbs_rx_per_layer[sidx].size() < (size_t)num_rb * 4)
 			rbs_rx_per_layer[sidx].push_back(s);
 		if (s > 0) {
 			recv_perlayer_sinr_sum[sidx+1] += s;

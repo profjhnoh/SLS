@@ -516,6 +516,22 @@ void Set_simul_param(int argc, char *argv[])
 		     << " cqi_thresholds=" << g_matlab_cqi_thresholds
 		     << " selftest=" << g_matlab_bler_selftest << "]" << endl;
 	}
+	if (USE_RAY_LEVEL_DOPPLER == 1) {
+		// The live H_usn time-update applies ONE Doppler phasor per cluster
+		// (cluster-center AOA/ZOA); the per-ray machinery is wired only to the
+		// dead legacy CHIR path. Negligible at 3 km/h / 7 GHz, but channel-aging
+		// studies at high speed/carrier would understate temporal decorrelation.
+		cout << "WARNING: USE_RAY_LEVEL_DOPPLER=1 requested, but the live channel" << endl;
+		cout << "         update applies CLUSTER-level Doppler only (known limitation)." << endl;
+	}
+	if (g_per_layer_mcs == 1 && USE_PRECODING_BASED_SINR == 0) {
+		// Per-layer MCS values come only from Set_AVR_Cqi_Precoding_Based; the
+		// feedback-CQI path writes ONE wideband MCS to every stream, so per-layer
+		// MCS differentiation is silently inert (per-layer BLER/HARQ still works).
+		cout << "WARNING: per_layer_mcs=1 with USE_PRECODING_BASED_SINR=0 — per-layer MCS" << endl;
+		cout << "         DIFFERENTIATION is inert (all layers share one wideband MCS)." << endl;
+		cout << "         Set USE_PRECODING_BASED_SINR=1 for true per-layer link adaptation." << endl;
+	}
 	if (channel_param_legacy)
 		cout << "channel_param_legacy    : " << channel_param_legacy << " (old TR 38.901 pre-V19)" << endl;
 	if (row_beam_enable) {

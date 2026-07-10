@@ -1338,14 +1338,20 @@ void MS::CQI_Update(void)
 					// Use middle RB as representative for this subband
 					int rep_rb_idx = rb_start + (rb_end - rb_start) / 2;
 
-					// Compute CQI using representative RB
-					MatrixXcReal H_eq = linear_signal_sqrt * H_m[coeff_idx][rep_rb_idx]; // R x T
+					// Compute CQI using representative RB.
+					// Total-power constraint: assume full MU load (mx streams) so the
+					// serving stream carries P/mx — consistent with the transmitter's
+					// per-stream power split and with the B term's statistical MU
+					// interference model (both signal and intra-cell interference scale
+					// by 1/mx; thermal noise C stays absolute).
+					MatrixXcReal H_eq = (linear_signal_sqrt / std::sqrt((Real)mx_ue_mumimo))
+					                    * H_m[coeff_idx][rep_rb_idx]; // R x T
 
 					// Use dominant layer (col 0) for CQI estimation. Multi-layer CQI is deferred.
 					VectorXcReal w = PMI_vector[coeff_idx][rep_rb_idx][t % cqi_history_length].col(0).conjugate(); // Tx1
 
-					// Signal covariance matrix
-					MatrixXcReal A = H_eq * w * w.adjoint() * H_eq.adjoint();  // RxR
+					// Effective signal vector: the signal covariance is rank-1, A = a a^H.
+					VectorXcReal a = H_eq * w;  // Rx1
 
 					// Inter-stream interference covariance matrix
 					MatrixXcReal B = (mx_ue_mumimo-1)/((Real)NUM_TX_Port)
@@ -1353,26 +1359,17 @@ void MS::CQI_Update(void)
 
 					MatrixXcReal BC = B + C;  // Total interference + noise
 
-					// Optimization 4: Use LU decomposition instead of explicit inverse
-					MatrixXcReal M = BC.lu().solve(A);
-
-					// Compute dominant eigenvector using selected method
-					VectorXcReal dominant_eigvec;
-					if (USE_POWER_ITERATION == 1) {
-						// Power Iteration method (faster but approximate)
-						dominant_eigvec = PowerIteration_DominantEigenvector(M, POWER_ITERATION_MAX_ITER);
-					} else {
-						// SelfAdjointEigenSolver (more accurate, default)
-						SelfAdjointEigenSolver<MatrixXcReal> es(M);
-						dominant_eigvec = es.eigenvectors().col(es.eigenvectors().cols() - 1);
-					}
-					RowVectorXcReal u = dominant_eigvec.adjoint();
-
-					// Compute SINR with numerical stability check
-					Real numerator = (u * A * u.adjoint()).norm();
-					Real denominator = (u * BC * u.adjoint()).norm();
-
-					Real sinr_estimate = (denominator > 1e-12) ? (numerator / denominator) : 0.0;
+					// Max-SINR receive combiner for a rank-1 signal is closed-form:
+					// u = (B+C)^{-1} a, and the maximized generalized Rayleigh quotient is
+					// SINR = a^H (B+C)^{-1} a (real, >= 0). The previous code fed the
+					// NON-Hermitian product (B+C)^{-1}(a a^H) to SelfAdjointEigenSolver —
+					// which silently reads only the lower triangle of its argument — so the
+					// "dominant eigenvector" was that of an unrelated matrix and the CQI was
+					// systematically below (and noisily offset from) the max-SINR value.
+					// The closed form is also cheaper than any eigensolver / power iteration.
+					VectorXcReal u_mmse = BC.lu().solve(a);
+					Real sinr_estimate = (a.adjoint() * u_mmse)(0, 0).real();
+					if (!(sinr_estimate > 0.0)) sinr_estimate = 0.0;  // numerical guard (also catches NaN)
 
 					// Store same CQI for all RBs in this subband
 					for (int rb_idx = rb_start; rb_idx < rb_end; rb_idx++)

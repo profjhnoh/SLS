@@ -776,7 +776,9 @@ void Initialdrop()
 						ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].loc.y = (bs[bs_idx].loc.y - 15) + 25. * randnum.u();
 					}
 
-					ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].moving_direction = 2 * 180 * randnum.u() - 180;
+					// Horizontal motion (see hexagonal branch): elevation 90 deg, random azimuth.
+					ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].moving_direction = 90.0;
+					ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].moving_direction_azimuth = 2 * 180 * randnum.u() - 180;
 					ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].speed = user_speed * 1000 / 3600;
 					ms[ms_idx + bs_idx * num_Indoor_TRxP * num_MS_persector].Indoor = true;
 
@@ -818,7 +820,13 @@ void Initialdrop()
 					ms[ms_idx].nearest_bs_idx = bs_idx;
 					ms[ms_idx].loc.x = bs[bs_idx].loc.x + ms[ms_idx].loc.x;
 					ms[ms_idx].loc.y = bs[bs_idx].loc.y + ms[ms_idx].loc.y;
-					ms[ms_idx].moving_direction = 2 * 180 * randnum.u() - 180; //travel angle (elevation)
+					// UT motion is HORIZONTAL per TR 38.901 / M.2412 evaluation assumptions:
+					// travel elevation fixed at 90 deg (v.z = 0), azimuth uniform. The old
+					// code drew the elevation uniformly in [-180,180], giving every UE a
+					// random vertical velocity and scaling horizontal speed by |sin(theta)|.
+					// The RNG draw is kept so the topology stream stays aligned.
+					(void)randnum.u();
+					ms[ms_idx].moving_direction = 90.0;                                // travel elevation (deg, horizontal)
 					ms[ms_idx].moving_direction_azimuth = 2 * 180 * randnum.u() - 180; // travel azimuth angle
 					ms[ms_idx].speed = user_speed * 1000 / 3600;
 
