@@ -142,7 +142,12 @@ void MS::Compute_RI(void)
 	// Here we model this as snr_per_stream = snr_total / mx_ue_mumimo (the total
 	// stream budget), so a higher R UE is penalised by needing more layers in MU.
 	const Real noise_lin = dBm2linear(thermal_noise + (10. * log10(bandwidth)) + MS_noisefig);
-	const Real signal_lin = dBm2linear(links[self_idx].str_signal);
+	// Gain-free large-scale power: H_m already carries the element patterns and
+	// the analog virtualization gain, and str_signal = bs_maxpower + RSRP_antgain
+	// - PL carries the SAME gain — multiplying them double-counted the beamformed
+	// antenna gain (a per-UE, geometry-dependent inflation of 10-20 dB). Use the
+	// receiver's convention (compute_tone_SINR): P_tx - pathloss only.
+	const Real signal_lin = dBm2linear(bs_maxpower - channel[(int)(links[self_idx]._sector_in_control/3)][self_idx].pathloss_final);
 	const Real intf_lin   = dBm2linear(links[self_idx].interference);
 	const Real snr_total  = signal_lin / (intf_lin + noise_lin);
 
@@ -1279,7 +1284,8 @@ void MS::CQI_Update(void)
 		if (Scheduling_Type == 0) // round robin scheduling
 		{
 			// Optimization 1: Cache dBm2linear conversions (moved outside RB loop)
-			Real linear_signal_cached = dBm2linear(links[self_idx].str_signal);
+			// Gain-free scale: H_m carries the antenna/BF gains (see Compute_RI note).
+			Real linear_signal_cached = dBm2linear(bs_maxpower - channel[(int)(links[self_idx]._sector_in_control/3)][self_idx].pathloss_final);
 			Real linear_interference_cached = dBm2linear(links[self_idx].interference);
 
 			// Optimization 5: Use cached noise value (computed once in MS::Configuration)
@@ -1310,7 +1316,8 @@ void MS::CQI_Update(void)
 			}
 
 			// Optimization 1: Cache dBm2linear conversions
-			Real linear_signal_cached = dBm2linear(links[self_idx].str_signal);
+			// Gain-free scale: H_m carries the antenna/BF gains (see Compute_RI note).
+			Real linear_signal_cached = dBm2linear(bs_maxpower - channel[(int)(links[self_idx]._sector_in_control/3)][self_idx].pathloss_final);
 			Real linear_interference_cached = dBm2linear(links[self_idx].interference);
 
 			// Optimization 5: Use cached noise value

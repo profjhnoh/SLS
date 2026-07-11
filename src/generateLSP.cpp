@@ -561,44 +561,36 @@ NOTES:
 
 void Get_TLSPs_by_interpolation()
 {
+	// Sample the spatially-correlated, cross-correlated LSP field built by
+	// Generate_TLSPs_RN_map at each UE's location (nearest grid point).
+	//
+	// BUG FIX (2026-07-11): this function previously IGNORED the map entirely and
+	// drew fresh iid N(0,1) per (BS,UE), so LSPs had ZERO spatial autocorrelation
+	// between UEs — the whole correlated-grid machinery was dead code. Marginal
+	// (per-UE) distributions were correct, which is why calibration CDFs passed.
+	// Spatial resolution = grid_interval (cfg); keep it at or below the smallest
+	// TR 38.901 correlation distance (~5-10 m) for a meaningful field.
 	for (int bs_idx = 0; bs_idx < num_BS + num_mTRP; bs_idx++)
 	{
 		for (int ue_idx = 0; ue_idx < num_MS; ue_idx++)
 		{
 			int propagation_condition = channel[bs_idx][ue_idx].Propagation;
 
-			ArrayXReal random_V;
-			if (propagation_condition == LOS_propagation)
+			// Nearest grid point (origin at top-left: x grows right, y grows down)
+			int gx = (int)((ms[ue_idx].loc.x - grid_origin_point.x) / grid_interval + 0.5);
+			int gy = (int)((grid_origin_point.y - ms[ue_idx].loc.y) / grid_interval + 0.5);
+			if (gx < 0) gx = 0; else if (gx > size_x_grid - 1) gx = size_x_grid - 1;
+			if (gy < 0) gy = 0; else if (gy > size_y_grid - 1) gy = size_y_grid - 1;
+
+			// Indoor multi-floor scenarios keep one field per floor (h = 3(n-1)+1.5)
+			int fl = 0;
+			if (num_floor > 1)
 			{
-				random_V = ArrayXReal(7);
-				for (int i = 0; i < 7; i++)
-				{
-					random_V(i) = randnum.n();
-				}
-			}
-			else
-			{
-				random_V = ArrayXReal(6);
-				for (int i = 0; i < 6; i++)
-				{
-					random_V(i) = randnum.n();
-				}
+				fl = (int)((ms[ue_idx].MS_HEIGHT_FINAL - 1.5) / 3.0 + 0.5);
+				if (fl < 0) fl = 0; else if (fl > num_floor - 1) fl = num_floor - 1;
 			}
 
-			switch (propagation_condition)
-			{
-			case LOS_propagation:
-				ms[ue_idx].TLSPs[bs_idx] = sqrt_corr_matrx_LOS * random_V.matrix();
-				break;
-			case NLOS_propagation:
-				ms[ue_idx].TLSPs[bs_idx] = sqrt_corr_matrx_NLOS * random_V.matrix();
-				break;
-			case OUT2IN_propagation:
-				ms[ue_idx].TLSPs[bs_idx] = sqrt_corr_matrx_OUT2IN * random_V.matrix();
-				break;
-			default:
-				cout << "check propagation_condition in Get_TLSPs_by_interpolation" << endl;
-			}
+			ms[ue_idx].TLSPs[bs_idx] = TLSPs_map[bs_idx][fl][propagation_condition][gx][gy];
 		}
 	}
 }

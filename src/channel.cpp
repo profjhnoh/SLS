@@ -167,6 +167,8 @@ void CHANNEL::Reset2Default(void)
 			random_phase_hh[cluster_idx][ray_idx] = 0;
 			offset_angle[cluster_idx][ray_idx] = 0;
 			offset_angle_rand_coupling[cluster_idx][ray_idx] = 0;
+			offset_angle_perm_zoa[cluster_idx][ray_idx] = 0;
+			offset_angle_perm_zod[cluster_idx][ray_idx] = 0;
 		}
 	}
 
@@ -357,6 +359,8 @@ void CHANNEL::Allocate_memory()
 	random_phase_hh = new Real *[MAX_NUM_CLUSTERS];
 	offset_angle = new Real *[MAX_NUM_CLUSTERS];
 	offset_angle_rand_coupling = new Real *[MAX_NUM_CLUSTERS];
+	offset_angle_perm_zoa = new Real *[MAX_NUM_CLUSTERS];
+	offset_angle_perm_zod = new Real *[MAX_NUM_CLUSTERS];
 
 	for (int i = 0; i < MAX_NUM_CLUSTERS; i++)
 	{
@@ -366,6 +370,8 @@ void CHANNEL::Allocate_memory()
 		random_phase_hh[i] = new Real[MAX_NUM_RAYS];
 		offset_angle[i] = new Real[MAX_NUM_RAYS];
 		offset_angle_rand_coupling[i] = new Real[MAX_NUM_RAYS];
+		offset_angle_perm_zoa[i] = new Real[MAX_NUM_RAYS];
+		offset_angle_perm_zod[i] = new Real[MAX_NUM_RAYS];
 	}
 
 	// ray_AOA/ray_AOD: per-ray angles [cluster][ray][2]
@@ -510,6 +516,9 @@ void CHANNEL::Delete_memory()
 		delete[] random_phase_hh[i];
 
 		delete[] offset_angle[i];
+		delete[] offset_angle_rand_coupling[i];   // was leaked before
+		delete[] offset_angle_perm_zoa[i];
+		delete[] offset_angle_perm_zod[i];
 	}
 
 	delete[] random_phase_vv;
@@ -518,6 +527,9 @@ void CHANNEL::Delete_memory()
 	delete[] random_phase_hh;
 
 	delete[] offset_angle;
+	delete[] offset_angle_rand_coupling;
+	delete[] offset_angle_perm_zoa;
+	delete[] offset_angle_perm_zod;
 
 	// ray_AOA/ray_AOD deallocation
 	if (ray_AOA != NULL)
@@ -3768,20 +3780,11 @@ void CHANNEL::Set_AOAAOD(int _bs_idx, int _ue_idx)
 
 	for (int i = 0; i < num_path; i++)
 	{
-
-		Real R = randnum.u();
-		Real X;
-		if (R > 0.5)
-		{
-			X = 1;
-		}
-		else
-		{
-			X = -1;
-		}
-
-		// Real Y_AOA = sigma_AOA / 7. * randnum.n();
-		// Real Y_AOD = sigma_AOD / 7. * randnum.n();
+		// TR 38.901 Step 7 (Eq. 7.5-11/-16): X_n is an INDEPENDENT uniform{+1,-1}
+		// per angle type. A single shared X rigidly mirror-couples departure and
+		// arrival geometry (unphysical AOD/AOA correlation).
+		Real X_AOD = (randnum.u() > 0.5) ? (Real)1 : (Real)-1;
+		Real X_AOA = (randnum.u() > 0.5) ? (Real)1 : (Real)-1;
 
 		Real Y_AOA = normal(0, ASA / 7.);
 		Real Y_AOD = normal(0, ASD / 7.);
@@ -3791,10 +3794,10 @@ void CHANNEL::Set_AOAAOD(int _bs_idx, int _ue_idx)
 
 		if (i == 0)
 		{
-			X1_AOD = X;
+			X1_AOD = X_AOD;
 			Y1_AOD = Y_AOD;
 
-			X1_AOA = X;
+			X1_AOA = X_AOA;
 			Y1_AOA = Y_AOA;
 		}
 
@@ -3905,13 +3908,13 @@ void CHANNEL::Set_AOAAOD(int _bs_idx, int _ue_idx)
 			Real angle = links[self_ms_idx].Get_angle(bs_location, ms_location, vector);
 			*/
 
-			AOD[i] = X * AOD[i] + Y_AOD - (X1_AOD * first_AOD + Y1_AOD - LOS_AOD_GCS);
-			AOA[i] = X * AOA[i] + Y_AOA - (X1_AOA * first_AOA + Y1_AOA - LOS_AOA_GCS);
+			AOD[i] = X_AOD * AOD[i] + Y_AOD - (X1_AOD * first_AOD + Y1_AOD - LOS_AOD_GCS);
+			AOA[i] = X_AOA * AOA[i] + Y_AOA - (X1_AOA * first_AOA + Y1_AOA - LOS_AOA_GCS);
 		}
 		else // NLOS, O2I
 		{
-			AOD[i] = X * AOD[i] + Y_AOD + LOS_AOD_GCS;
-			AOA[i] = X * AOA[i] + Y_AOA + LOS_AOA_GCS;
+			AOD[i] = X_AOD * AOD[i] + Y_AOD + LOS_AOD_GCS;
+			AOA[i] = X_AOA * AOA[i] + Y_AOA + LOS_AOA_GCS;
 		}
 	}
 }
@@ -4155,30 +4158,20 @@ void CHANNEL::Set_ZOAZOD(int _bs_idx, int _ue_idx)
 
 	for (int i = 0; i < num_path; i++)
 	{
-
-		Real R = randnum.u();
-		Real X;
-		if (R > 0.5)
-		{
-			X = 1;
-		}
-		else
-		{
-			X = -1;
-		}
-
-		// Real Y_ZOA = normal(0, (ZSA / 7., 2.)); //
-		// Real Y_ZOD = normal(0, (ZSD / 7., 2.));
+		// TR 38.901 Step 7 (Eq. 7.5-16 analog for zenith): independent uniform{+1,-1}
+		// per angle type — a shared X mirror-coupled ZOD and ZOA (see Set_AOAAOD).
+		Real X_ZOD = (randnum.u() > 0.5) ? (Real)1 : (Real)-1;
+		Real X_ZOA = (randnum.u() > 0.5) ? (Real)1 : (Real)-1;
 
 		Real Y_ZOA = normal(0, ZSA / 7.); //
 		Real Y_ZOD = normal(0, ZSD / 7.);
 
 		if (i == 0)
 		{
-			X1_ZOD = X;
+			X1_ZOD = X_ZOD;
 			Y1_ZOD = Y_ZOD;
 
-			X1_ZOA = X;
+			X1_ZOA = X_ZOA;
 			Y1_ZOA = Y_ZOA;
 		}
 
@@ -4247,21 +4240,21 @@ void CHANNEL::Set_ZOAZOD(int _bs_idx, int _ue_idx)
 			Real angle = links[self_ms_idx].Get_angle(bs_location, ms_location, vector);
 			*/
 
-			ZOA[i] = (X * ZOA[i] + Y_ZOA) - (X1_ZOA * first_ZOA + Y1_ZOA - LOS_ZOA_GCS);
-			ZOD[i] = (X * ZOD[i] + Y_ZOD) - (X1_ZOD * first_ZOD + Y1_ZOD - LOS_ZOD_GCS);
+			ZOA[i] = (X_ZOA * ZOA[i] + Y_ZOA) - (X1_ZOA * first_ZOA + Y1_ZOA - LOS_ZOA_GCS);
+			ZOD[i] = (X_ZOD * ZOD[i] + Y_ZOD) - (X1_ZOD * first_ZOD + Y1_ZOD - LOS_ZOD_GCS);
 		}
 		else // NLOS, O2I
 		{
 			if (Propagation == 2)
 			{
-				ZOA[i] = X * ZOA[i] + Y_ZOA + 90.;
-				ZOD[i] = X * ZOD[i] + Y_ZOD + LOS_ZOD_GCS + mu_offset_ZOD;
+				ZOA[i] = X_ZOA * ZOA[i] + Y_ZOA + 90.;
+				ZOD[i] = X_ZOD * ZOD[i] + Y_ZOD + LOS_ZOD_GCS + mu_offset_ZOD;
 			}
 
 			else if (Propagation == 0)
 			{
-				ZOA[i] = X * ZOA[i] + Y_ZOA + LOS_ZOA_GCS;
-				ZOD[i] = X * ZOD[i] + Y_ZOD + LOS_ZOD_GCS + mu_offset_ZOD;
+				ZOA[i] = X_ZOA * ZOA[i] + Y_ZOA + LOS_ZOA_GCS;
+				ZOD[i] = X_ZOD * ZOD[i] + Y_ZOD + LOS_ZOD_GCS + mu_offset_ZOD;
 			}
 		}
 		/*
@@ -4362,6 +4355,8 @@ void CHANNEL::Set_SUBCLUSTER()
 		{
 			offset_angle[path_idx][ray_idx] = 0.;
 			offset_angle_rand_coupling[path_idx][ray_idx] = 0.;
+			offset_angle_perm_zoa[path_idx][ray_idx] = 0.;
+			offset_angle_perm_zod[path_idx][ray_idx] = 0.;
 		}
 	}
 
@@ -4558,6 +4553,41 @@ void CHANNEL::Set_SUBCLUSTER()
 	NUM_PATH_for_channelcoeff = num_path + 4; 
 	// +4: strongest 2 clusters each split into 3 sub-clusters (Step 11), 
 	// adding 2 extra entries per strong cluster
+
+	// TR 38.901 Step 8 random ray coupling: relative to the AOA (identity) ray
+	// ordering, AOD, ZOA and ZOD each need an INDEPENDENT random permutation of
+	// the ray offsets. The fills above produced only one shuffled set (used for
+	// both tx-azimuth and tx-zenith) and left the rx pair identically ordered —
+	// regenerate all three here with independent Fisher-Yates draws (serial SSP
+	// phase: the global randnum stream keeps this deterministic).
+	for (int path_idx = 0; path_idx < NUM_PATH_for_channelcoeff; path_idx++)
+	{
+		int nr = (int)NUM_RAY_per_ClusterNUM[path_idx];
+		if (nr <= 0) continue;
+		int idx_aod[MAX_NUM_RAYS], idx_zoa[MAX_NUM_RAYS], idx_zod[MAX_NUM_RAYS];
+		for (int k = 0; k < nr; k++) { idx_aod[k] = k; idx_zoa[k] = k; idx_zod[k] = k; }
+		for (int k = nr - 1; k > 0; k--)
+		{
+			int j = (int)(randnum.u() * (k + 1)); if (j > k) j = k;
+			int tmp = idx_aod[k]; idx_aod[k] = idx_aod[j]; idx_aod[j] = tmp;
+		}
+		for (int k = nr - 1; k > 0; k--)
+		{
+			int j = (int)(randnum.u() * (k + 1)); if (j > k) j = k;
+			int tmp = idx_zoa[k]; idx_zoa[k] = idx_zoa[j]; idx_zoa[j] = tmp;
+		}
+		for (int k = nr - 1; k > 0; k--)
+		{
+			int j = (int)(randnum.u() * (k + 1)); if (j > k) j = k;
+			int tmp = idx_zod[k]; idx_zod[k] = idx_zod[j]; idx_zod[j] = tmp;
+		}
+		for (int k = 0; k < nr; k++)
+		{
+			offset_angle_rand_coupling[path_idx][k] = offset_angle[path_idx][idx_aod[k]];
+			offset_angle_perm_zoa[path_idx][k]      = offset_angle[path_idx][idx_zoa[k]];
+			offset_angle_perm_zod[path_idx][k]      = offset_angle[path_idx][idx_zod[k]];
+		}
+	}
 }
 
 void CHANNEL::Precompute_ray_angles()
@@ -4567,13 +4597,14 @@ void CHANNEL::Precompute_ray_angles()
 		int num_rays = (int)NUM_RAY_per_ClusterNUM[i];
 		for (int j = 0; j < num_rays; j++)
 		{
-			// RX (Arrival) angles
+			// RX (Arrival) angles — AOA keeps the identity ray ordering; ZOA uses
+			// its own independent permutation (TR 38.901 Step 8 random coupling).
 			Real rx_azimuth = AOA[i] + cluster_ASA * offset_angle[i][j];
-			Real rx_zenith  = ZOA[i] + cluster_ZSA * offset_angle[i][j];
+			Real rx_zenith  = ZOA[i] + cluster_ZSA * offset_angle_perm_zoa[i][j];
 
-			// TX (Departure) angles
+			// TX (Departure) angles — independent permutations for AOD and ZOD.
 			Real tx_azimuth = AOD[i] + cluster_ASD * offset_angle_rand_coupling[i][j];
-			Real tx_zenith  = ZOD[i] + (3.0 / 8.0) * pow(10, mu_ZSD) * offset_angle_rand_coupling[i][j];
+			Real tx_zenith  = ZOD[i] + (3.0 / 8.0) * pow(10, mu_ZSD) * offset_angle_perm_zod[i][j];
 
 			// Transform to proper ranges
 			rx_azimuth = Transform_angle_minus_180_to_plus_180(rx_azimuth);

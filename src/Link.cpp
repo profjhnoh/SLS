@@ -160,6 +160,15 @@ void LINK::Reset2Default( void )
         re_tx_failed          = 0;
         failed                = 0;
         total_num_scheduled   = 0;
+        total_first_tx_layers  = 0;
+        failed_first_tx_layers = 0;
+        for (int l = 0; l < 4; l++)
+        {
+            per_layer_num_re_tx[l]   = 0;
+            per_layer_done[l]        = false;
+            per_layer_accum_esinr[l] = 0.0;
+            per_layer_starve[l]      = 0;
+        }
 
 	    ACK                   = true;
         geometry              = 0;

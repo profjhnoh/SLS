@@ -516,6 +516,13 @@ void Set_simul_param(int argc, char *argv[])
 		     << " cqi_thresholds=" << g_matlab_cqi_thresholds
 		     << " selftest=" << g_matlab_bler_selftest << "]" << endl;
 	}
+	if (grid_interval > 50) {
+		// TR 38.901 LSP correlation distances are ~5-50 m; a grid coarser than
+		// that makes the spatially-correlated LSP field piecewise constant over
+		// huge cells (co-located UEs share identical LSPs).
+		cout << "WARNING: grid_interval=" << grid_interval << " m is coarser than the" << endl;
+		cout << "         LSP correlation distances - use ~10 m for a meaningful field." << endl;
+	}
 	if (USE_RAY_LEVEL_DOPPLER == 1) {
 		// The live H_usn time-update applies ONE Doppler phasor per cluster
 		// (cluster-center AOA/ZOA); the per-ray machinery is wired only to the

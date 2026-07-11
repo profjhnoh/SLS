@@ -318,7 +318,7 @@ void PerDropStatistics(int drop_idx)
 
 		Througput
 		<< ue_idx <<","                                                               //  1
-		<< per_ue_thru[ue_idx]/(run_times*slot_duration) * 1e-6 <<","                 //  2
+		<< per_ue_thru[ue_idx]/(((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf))*slot_duration) * 1e-6 <<","  //  2 (same window as x_ SE)
 		<< avr_cqi <<","                                                              //  3
 		<< links[ue_idx].total_num_scheduled <<","                                    //  4
 		<< links[ue_idx].total_num_tx <<","                                           //  5
@@ -515,7 +515,7 @@ void PerDropStatistics(int drop_idx)
 
 	// 3GPP standard: use proper slot_duration instead of "1000 * numerology"
 	// Original formula was incorrect approximation
-	Total_Min += min_ue_thru / (run_times * slot_duration) * 1e-6;
+	Total_Min += min_ue_thru / (((double)(run_times + SCHEDULE_DELAY - 1 - (int)N_pf)) * slot_duration) * 1e-6;
 
 	SF_avr += (capacity_avr_drop / (run_times - 1)) / bandwidth;
 

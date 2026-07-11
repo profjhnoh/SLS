@@ -1390,7 +1390,9 @@ void Sector::Set_AVR_Cqi_Precoding_Based(void)
 				const MatrixXcReal& H     = ms[ms_idx].H_m[0][rb_idx];
 				const MatrixXcReal& W_rb  = W[rb_idx];
 				const MatrixXcReal  H_bar = sqrt(linear_signal / (Real)n_streams_rb) * H * W_rb;
-				const MatrixXcReal  Ryy_inv = (H_bar * H_bar.adjoint() + linear_interference * Identity).inverse();
+				// Filter covariance includes thermal noise — true MMSE, matching the
+				// receiver's convention (receive_downlink compute_tone_SINR).
+				const MatrixXcReal  Ryy_inv = (H_bar * H_bar.adjoint() + (linear_interference + noise) * Identity).inverse();
 
 				for (int stream = 0; stream < mx_ue_mumimo; stream++)
 				{
@@ -1496,7 +1498,8 @@ void Sector::Set_AVR_Cqi_Precoding_Based(void)
 
 			// Compute MMSE receiver filter
 			// w = h_u^H * (H_bar * H_bar^H + σ²I)^(-1)
-			const MatrixXcReal Ryy = H_bar * H_bar.adjoint() + linear_interference * Identity;
+			// Filter covariance includes thermal noise — true MMSE (receiver-consistent).
+			const MatrixXcReal Ryy = H_bar * H_bar.adjoint() + (linear_interference + noise) * Identity;
 			const MatrixXcReal u = h_u.adjoint() * Ryy.inverse();  // [1 x NUM_RX_Port]
 
 			// Desired signal power after receiver combining
@@ -2786,19 +2789,19 @@ void Sector::Scheduling_algorithm_module_MU_MIMO(void)
 
 void Sector::AVR_Cqi_update(void)   ////
 {
-	// Starvation boost on top of the standard PF EWMA (which runs in
-	// Read_Ch_Feedback / Read_CSI_Feedback): lower an unscheduled UE's average
-	// rate faster so its PF priority grows faster. Two pathologies fixed here:
-	// (1) the subtraction was unbounded, driving CQI_AVR negative, whereupon the
-	//     read-path's `> 0` guard RESET the average to the full instantaneous rate
-	//     — a decrement-and-reset limit cycle that erased exactly the starved UEs'
-	//     accumulated priority;
-	// (2) the non-TYPE12 else-branch subtracted from EVERY UE unconditionally,
-	//     cancelling the credit a scheduled UE had just earned in the read path
-	//     (served UEs decayed exactly like starved ones — PF broken).
-	// Both branches now decrement only UNSCHEDULED (UE,RB) pairs and clamp at a
-	// small positive floor so the boost saturates instead of wrapping.
-	const Real avr_floor = (Real)1e-6;
+	// PF average-rate bookkeeping note: the standard PF EWMA lives in
+	// Read_Ch_Feedback / Read_CSI_Feedback (credit when served, (1-1/N_pf)
+	// multiplicative decay when not). That decay ALONE already implements
+	// starvation escalation — a starved UE's average shrinks geometrically, so
+	// its METRIC = rate/avg grows without bound until it wins. The extra
+	// additive decrement this function used to apply made the average's
+	// equilibrium NEGATIVE for any UE served on a subband less than half the
+	// slots (i.e. virtually every UE under MU load): with the old truthiness
+	// guard it caused a decrement-and-reset limit cycle, and with a positive
+	// floor the floor became the absorbing steady state — collapsing PF into
+	// recency-gated max-C/I with capped priority escalation (persistent
+	// cell-edge starvation). The decrement is therefore REMOVED; only the
+	// unscheduled_stack diagnostic remains.
 	for (int ue_idx = 0; ue_idx < ue_in_control.size(); ue_idx++)
 	{
 		for (int rb_idx = 0; rb_idx < num_rb; rb_idx++)
@@ -2812,16 +2815,7 @@ void Sector::AVR_Cqi_update(void)   ////
 					break;
 				}
 			}
-			if ((TYPE == 12) && (Configuration_Type == 1 || Configuration_Type == 3))
-			{
-				ms[ue_in_control[ue_idx]].unscheduled_stack += (unscheduled ? 1 : 0);
-			}
-			if (CQI_AVR[ue_idx][rb_idx] > 0 && unscheduled)
-			{
-				CQI_AVR[ue_idx][rb_idx] -= (1. / _N_pf) * log2(1 + CQI_read[ue_idx][rb_idx]);
-				if (CQI_AVR[ue_idx][rb_idx] < avr_floor)
-					CQI_AVR[ue_idx][rb_idx] = avr_floor;
-			}
+			ms[ue_in_control[ue_idx]].unscheduled_stack += (unscheduled ? 1 : 0);
 		}
 	}
 }

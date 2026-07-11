@@ -163,6 +163,19 @@ void MS::Delete_memory()
 
 void MS::Reset2Default()
 {
+		// PMI-quality / per-layer diagnostic accumulators (ae02375): without a
+		// per-drop reset their CSV columns became cumulative across drops.
+		for (int i = 0; i < 5; i++)
+		{
+			pmi_sigma2_sum[i]      = 0.0;
+			pmi_overlap_sum[i]     = 0.0;
+			pmi_cos2_sum[i]        = 0.0;
+			pred_perlayer_se_sum[i]  = 0.0;
+			recv_perlayer_sinr_sum[i]= 0.0;
+			recv_perlayer_count[i]   = 0;
+		}
+		pmi_chordal_sum   = 0.0;
+		pmi_quality_count = 0;
 		unscheduled_stack = 0;
 		self_idx          = 0;
 		self_sector_idx   = 0;

@@ -252,6 +252,12 @@ public:
 	Real**          random_phase_hh                   = NULL;
 	Real **         offset_angle                      = NULL;
 	Real **         offset_angle_rand_coupling        = NULL;
+	// Independent ray-coupling permutations per TR 38.901 Step 8: AOD, ZOA and
+	// ZOD each get their OWN random permutation of the ray offsets relative to
+	// the AOA (identity) ordering. Sharing one permutation between tx-azimuth
+	// and tx-zenith (and none on the rx side) rigidly paired the offsets.
+	Real **         offset_angle_perm_zoa             = NULL;
+	Real **         offset_angle_perm_zod             = NULL;
 	Real *          NUM_RAY_per_ClusterNUM            = NULL;
 
 	ComplexReal **** CHIR                          = NULL;
